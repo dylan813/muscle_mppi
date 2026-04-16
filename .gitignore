@@ -1,0 +1,28 @@
+# Build output
+mppi/build/
+
+# Third-party repos (cloned separately, not part of this project)
+unitree_mujoco/
+unitree_sdk2/
+
+# MuJoCo logs
+MUJOCO_LOG.TXT
+**/MUJOCO_LOG.TXT
+
+# CMake artifacts if built outside mppi/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled binaries
+*.o
+*.a
+*.so
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
