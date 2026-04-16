@@ -55,8 +55,9 @@ void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     d->qpos[5] = state.quat[2];  // y
     d->qpos[6] = state.quat[3];  // z
 
+    // Use LS_TO_QPOS mapping: LowState/actuator order → MuJoCo DOF tree order
     for (int j = 0; j < NUM_JOINTS; ++j)
-        d->qpos[7 + j] = state.q[j];
+        d->qpos[7 + LS_TO_QPOS[j]] = state.q[j];
 
     d->qvel[0] = state.vel[0];
     d->qvel[1] = state.vel[1];
@@ -66,7 +67,7 @@ void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     d->qvel[5] = state.gyro[2];
 
     for (int j = 0; j < NUM_JOINTS; ++j)
-        d->qvel[6 + j] = state.dq[j];
+        d->qvel[6 + LS_TO_QPOS[j]] = state.dq[j];
 
     mj_forward(model_, d);
 }

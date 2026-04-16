@@ -131,8 +131,9 @@ private:
             double activations[NUM_JOINTS] = {};
             mppi_.update(state_, activations);
 
-            // Transition: capture height, print diagnostic
+            // Transition: set motion command, capture height, print diagnostic
             if (running_time_ - dt_ < STANDUP_DURATION) {
+                mppi_.set_command({.vx = 0.3});   // walk forward at 0.3 m/s
                 mppi_.set_height_target(state_.pos[2]);
 
                 auto t0 = std::chrono::steady_clock::now();
@@ -140,23 +141,44 @@ private:
                 auto t1 = std::chrono::steady_clock::now();
                 double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-                std::cout << "Switching to muscle MPPI. Update: " << ms << " ms\n";
-                std::cout << "  base z        = " << state_.pos[2]  << " m\n";
-                std::cout << "  quat w        = " << state_.quat[0] << "\n";
-                std::cout << "  base vel      = " << state_.vel[0]  << " "
+                std::cout << "Switching to muscle MPPI (gait reference tracking). Update: " << ms << " ms\n";
+                std::cout << "  base z            = " << state_.pos[2]  << " m\n";
+                std::cout << "  quat w            = " << state_.quat[0] << "\n";
+                std::cout << "  base vel          = " << state_.vel[0]  << " "
                           << state_.vel[1] << " " << state_.vel[2]  << "\n";
-                std::cout << "  activation[0] = " << mppi_.muscle_state().activation[0] << "\n";
+                std::cout << "  activation[0]     = " << mppi_.muscle_state().activation[0] << "\n";
+                std::cout << "  cost min/mean/max = "
+                          << mppi_.cost_min()  << " / "
+                          << mppi_.cost_mean() << " / "
+                          << mppi_.cost_max()  << "\n";
+                std::cout << "  command (vx,vy,wz) = ("
+                          << mppi_.command().vx << ", "
+                          << mppi_.command().vy << ", "
+                          << mppi_.command().wz << ")\n";
+
+                auto bd = mppi_.diagnose_cost(state_);
+                std::cout << "  -- cost breakdown (zero-noise nominal rollout) --\n"
+                          << "     height      = " << bd.height      << "\n"
+                          << "     orientation = " << bd.orientation  << "\n"
+                          << "     lin_vel     = " << bd.lin_vel      << "\n"
+                          << "     ang_vel     = " << bd.ang_vel      << "\n"
+                          << "     joint_track = " << bd.joint_track  << "\n"
+                          << "     wheel_vel   = " << bd.wheel_vel    << "\n"
+                          << "     act_smooth  = " << bd.act_smooth   << "\n"
+                          << "     terminal    = " << bd.terminal     << "\n"
+                          << "     TOTAL       = " << bd.total()      << "\n";
             }
 
-            // Apply Hill model → raw torques → send via tau mode (no PD in bridge)
+            // Hill model feedforward + hardware velocity damping.
+            // tau_effective[i] = tau_hill[i] - kd_[i] * actual_dq[i]
             double tau_cmd[NUM_JOINTS] = {};
             mppi_.compute_real_torques(state_, activations, tau_cmd);
 
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = PosStopF;  // ignore position
+                low_cmd_.motor_cmd()[i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[i].dq()  = VelStopF;  // ignore velocity
-                low_cmd_.motor_cmd()[i].kd()  = 0.0;
+                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].kd()  = kd_[i];
                 low_cmd_.motor_cmd()[i].tau() = tau_cmd[i];
             }
         }
@@ -169,6 +191,17 @@ private:
 
     static constexpr double dt_              = 0.02;
     static constexpr double STANDUP_DURATION = 3.0;
+
+    // Hardware velocity damping during Hill torque mode.
+    // tau_eff[i] = tau_hill[i] - kd_[i] * actual_dq[i]
+    // Start at standup kd for legs — tune down once standing is confirmed stable.
+    const double kd_[NUM_JOINTS] = {
+        2.0, 3.5, 3.5,   // FR  hip / thigh / calf
+        2.0, 3.5, 3.5,   // FL
+        2.0, 3.5, 3.5,   // RR
+        2.0, 3.5, 3.5,   // RL
+        2.0, 2.0, 2.0, 2.0  // wheels
+    };
 
     const double stand_pos_[NUM_LEG_JOINTS] = {
          0.00572,  0.6088, -1.2176,

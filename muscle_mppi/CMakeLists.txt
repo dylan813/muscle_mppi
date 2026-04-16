@@ -17,6 +17,7 @@ add_executable(muscle_mppi_controller
     mppi_controller.cpp
     control/base_mppi.cpp
     control/mppi_locomotion.cpp
+    control/gait_scheduler.cpp
     utils/tasks.cpp
 )
 

@@ -4,6 +4,7 @@
 #include <vector>
 #include <random>
 #include <string>
+#include <algorithm>
 #include "../utils/tasks.h"
 
 // Sensor data assembled from rt/lowstate + rt/sportmodestate
@@ -28,6 +29,15 @@ public:
 
     // Overwrite height target at runtime (measured from real robot at handoff)
     void set_height_target(double z) { height_target_ = z; }
+
+    // Cost diagnostics — valid after update() returns
+    double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
+    double cost_max()  const { return *std::max_element(costs_.begin(), costs_.end()); }
+    double cost_mean() const {
+        double s = 0.0;
+        for (auto c : costs_) s += c;
+        return s / static_cast<double>(costs_.size());
+    }
 
 protected:
     // Derived class provides one rollout; returns total cost for sample s.
