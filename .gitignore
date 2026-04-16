@@ -1,5 +1,6 @@
 # Build output
 mppi/build/
+muscle_mppi/build/
 
 # Third-party repos (cloned separately, not part of this project)
 unitree_mujoco/
