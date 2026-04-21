@@ -160,10 +160,7 @@ private:
                 std::cout << "  -- cost breakdown (zero-noise nominal rollout) --\n"
                           << "     height      = " << bd.height      << "\n"
                           << "     orientation = " << bd.orientation  << "\n"
-                          << "     lin_vel     = " << bd.lin_vel      << "\n"
-                          << "     ang_vel     = " << bd.ang_vel      << "\n"
-                          << "     joint_track = " << bd.joint_track  << "\n"
-                          << "     wheel_vel   = " << bd.wheel_vel    << "\n"
+                          << "     posture     = " << bd.posture      << "\n"
                           << "     act_smooth  = " << bd.act_smooth   << "\n"
                           << "     terminal    = " << bd.terminal     << "\n"
                           << "     TOTAL       = " << bd.total()      << "\n";

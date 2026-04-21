@@ -8,34 +8,20 @@
 
 MPPILocomotion::MPPILocomotion(const std::string& task_name)
     : BaseMPPI(get_task(task_name))
-    , gait_sched_(task_.nominal_pose)
 {
     muscle_ = task_.muscle;
-
-    // ------------------------------------------------------------------
-    // Gravity-compensation warm-start.
-    //
-    // Correct grounded torque: tau = qfrc_bias - qfrc_constraint
-    //
-    // qfrc_bias   = gravitational load (free-floating)
-    // qfrc_constraint = ground-contact contribution in generalised coords
-    //
-    // Using qfrc_bias alone over-torques the legs because ground contact
-    // already carries part of the load.  The excess torque creates net
-    // forces that accelerate the body horizontally.
-    //
-    // Hill steady-state: tau = tanh(act_cmd) * tau_max
-    //   → act_cmd = atanh(tau / tau_max)
-    // ------------------------------------------------------------------
     // Trajectory and activation state initialised to zero.
     // MPPI optimises from this cold start on the first update.
 }
 
 // -----------------------------------------------------------------------
-// step_cost — deviation from GaitReference + activation regularisation
+// step_cost — reference-free running cost
+//
+// Penalises: height deviation, orientation tilt, leg posture vs nominal,
+//            and activation rate-of-change (smoothness).
+// No gait reference is used — locomotion emerges from the dynamics.
 // -----------------------------------------------------------------------
 double MPPILocomotion::step_cost(const mjData* d,
-                                  const StepReference& ref,
                                   const double act_cmd[NUM_JOINTS],
                                   const double act_prev[NUM_JOINTS])
 {
@@ -43,40 +29,21 @@ double MPPILocomotion::step_cost(const mjData* d,
     double cost = 0.0;
 
     // -- Body height --
-    double hz = d->qpos[2] - ref.body_pos[2];
+    double hz = d->qpos[2] - height_target_;
     cost += w.height * hz * hz;
 
-    // -- Body orientation (quaternion tilt from upright)
-    // Use pitch+roll components of quaternion vector: qx²+qy² ≈ θ²/4 for small tilt.
-    // (1-qw)² ≈ θ⁴/64 — quartic, nearly zero for small tilts; qx²+qy² is quadratic.
-    double qx = d->qpos[4], qy = d->qpos[5];
-    cost += w.orientation * (qx*qx + qy*qy);
+    // -- Orientation: penalise tilt from upright on all three rotation axes.
+    // qx²+qy²+qz² ≈ θ²/4 for small tilt (includes yaw drift).
+    double qx = d->qpos[4], qy = d->qpos[5], qz = d->qpos[6];
+    cost += w.orientation * (qx*qx + qy*qy + qz*qz);
 
-    // -- Body linear velocity vs reference --
-    for (int k = 0; k < 3; ++k) {
-        double dv = d->qvel[k] - ref.body_vel[k];
-        cost += w.lin_vel * dv * dv;
-    }
-
-    // -- Body angular velocity vs reference --
-    for (int k = 0; k < 3; ++k) {
-        double dw = d->qvel[3 + k] - ref.body_omega[k];
-        cost += w.ang_vel * dw * dw;
-    }
-
-    // -- Leg joint positions vs gait-scheduled targets --
+    // -- Leg posture vs nominal standing pose --
     for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-        double dq = d->qpos[7 + LS_TO_QPOS[j]] - ref.joint_pos[j];
-        cost += w.joint_track * dq * dq;
+        double dq = d->qpos[7 + LS_TO_QPOS[j]] - task_.nominal_pose[j];
+        cost += w.posture * dq * dq;
     }
 
-    // -- Wheel angular velocity vs rolling target --
-    for (int w_idx = 0; w_idx < NUM_WHEELS; ++w_idx) {
-        double dv = d->qvel[6 + LS_TO_QPOS[NUM_LEG_JOINTS + w_idx]] - ref.wheel_vel[w_idx];
-        cost += w.wheel_vel * dv * dv;
-    }
-
-    // -- Activation smoothness (rate of change of commanded activation) --
+    // -- Activation smoothness (rate of change) --
     for (int j = 0; j < NUM_JOINTS; ++j) {
         double da = act_cmd[j] - act_prev[j];
         cost += w.act_smooth * da * da;
@@ -85,44 +52,47 @@ double MPPILocomotion::step_cost(const mjData* d,
     return cost;
 }
 
-double MPPILocomotion::terminal_cost(const mjData* d, const StepReference& ref)
+// -----------------------------------------------------------------------
+// terminal_cost — L1 displacement error + height/orientation at horizon end.
+//
+// Drives the robot toward (start_pos + v_cmd * H * dt) without prescribing
+// how to get there — gait and contact emerge from Hill model + physics.
+// -----------------------------------------------------------------------
+double MPPILocomotion::terminal_cost(const mjData* d)
 {
     const CostWeights& w = task_.cost;
 
-    double hz   = d->qpos[2] - ref.body_pos[2];
-    double qx   = d->qpos[4], qy = d->qpos[5];
-    double cost = w.height * hz * hz + w.orientation * (qx*qx + qy*qy);
+    const double dt_step   = task_.dt * task_.substeps;
+    const double px_target = start_pos_[0] + cmd_.vx * task_.horizon * dt_step;
+    const double py_target = start_pos_[1] + cmd_.vy * task_.horizon * dt_step;
 
-    for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-        double dq = d->qpos[7 + LS_TO_QPOS[j]] - ref.joint_pos[j];
-        cost += w.terminal_joint * dq * dq;
-    }
+    double cost = w.terminal * (std::abs(d->qpos[0] - px_target)
+                               + std::abs(d->qpos[1] - py_target));
+
+    double hz = d->qpos[2] - height_target_;
+    double qx = d->qpos[4], qy = d->qpos[5], qz = d->qpos[6];
+    cost += w.height * hz * hz + w.orientation * (qx*qx + qy*qy + qz*qz);
+
     return cost;
 }
 
 // -----------------------------------------------------------------------
-// Rollout — generate gait reference first, then track it step-by-step
+// Rollout — forward simulate horizon steps, accumulate running + terminal cost
 // -----------------------------------------------------------------------
 double MPPILocomotion::rollout(int s, const RobotState& state)
 {
     mjData* d = data_[s];
     set_mj_state(d, state);
 
-    // Local copy of activation state for this rollout sample
     double activation[NUM_JOINTS];
     std::memcpy(activation, muscle_state_.activation, sizeof(activation));
 
-    // Use the reference pre-computed in update() — same for all samples
-    const GaitReference& ref = gait_ref_;
-
     double total_cost = 0.0;
 
-    // Track previous activation command for smoothness cost
     double act_prev[NUM_JOINTS];
     std::memcpy(act_prev, muscle_state_.activation, sizeof(act_prev));
 
     for (int t = 0; t < task_.horizon; ++t) {
-        // Perturbed activation command, clamped to [-1, 1]
         double act_cmd[NUM_JOINTS];
         for (int j = 0; j < NUM_JOINTS; ++j) {
             double nom   = trajectory_[t * NUM_JOINTS + j];
@@ -131,7 +101,6 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
             act_cmd[j] = std::clamp(noisy, ACT_MIN, ACT_MAX);
         }
 
-        // Hold act_cmd over all substeps; Hill model updates activation[] each substep
         double tau_out[NUM_JOINTS];
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
@@ -141,9 +110,6 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
 
-            // Mirror real-robot control: Hill feedforward + hardware kd toward zero velocity.
-            // Without this the rollout is underdamped vs the real robot, causing MPPI to
-            // optimise activations for a dynamics model that doesn't match deployment.
             for (int j = 0; j < NUM_JOINTS; ++j)
                 d->ctrl[j] = tau_out[j] - muscle_.kd_sim[j] * dq_cur[j];
 
@@ -153,14 +119,11 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        // Cost: deviation from gait reference + activation smoothness
-        total_cost += step_cost(d, ref.steps[t], act_cmd, act_prev);
-
-        // Advance act_prev for smoothness cost at next step
+        total_cost += step_cost(d, act_cmd, act_prev);
         std::memcpy(act_prev, act_cmd, sizeof(act_cmd));
     }
 
-    total_cost += terminal_cost(d, ref.steps[task_.horizon - 1]);
+    total_cost += terminal_cost(d);
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
@@ -175,9 +138,10 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         return;
     }
 
-    // Generate gait reference once — all rollout threads read the same reference.
-    // This ensures fair comparison across samples and avoids 32x redundant work.
-    gait_sched_.generate(state, task_.horizon, task_.dt * task_.substeps, gait_ref_);
+    // Capture start position for terminal displacement cost — shared by all rollouts.
+    start_pos_[0] = state.pos[0];
+    start_pos_[1] = state.pos[1];
+    start_pos_[2] = state.pos[2];
 
     sample_noise();
 
@@ -190,11 +154,16 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
     for (int s = 0; s < task_.n_samples; ++s)
         costs_[s] = futures[s].get();
 
+    // Range-normalise costs before exponentiation so λ is scale-invariant.
     double cost_min = *std::min_element(costs_.begin(), costs_.end());
+    double cost_max = *std::max_element(costs_.begin(), costs_.end());
+    double cost_range = cost_max - cost_min;
+
     std::vector<double> weights(task_.n_samples);
     double weight_sum = 0.0;
     for (int s = 0; s < task_.n_samples; ++s) {
-        weights[s]  = std::exp(-1.0 / task_.lambda * (costs_[s] - cost_min));
+        double s_hat = (cost_range > 1e-12) ? (costs_[s] - cost_min) / cost_range : 0.0;
+        weights[s]  = std::exp(-s_hat / task_.lambda);
         weight_sum += weights[s];
     }
 
@@ -239,7 +208,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
     const CostWeights& w = task_.cost;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        // Nominal trajectory — no noise
         double act_cmd[NUM_JOINTS];
         for (int j = 0; j < NUM_JOINTS; ++j)
             act_cmd[j] = trajectory_[t * NUM_JOINTS + j];
@@ -257,30 +225,17 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             mj_step(model_, d);
         }
 
-        const StepReference& ref = gait_ref_.steps[t];
-
-        double hz = d->qpos[2] - ref.body_pos[2];
+        double hz = d->qpos[2] - height_target_;
         bd.height += w.height * hz * hz;
 
-        double qx = d->qpos[4], qy = d->qpos[5];
-        bd.orientation += w.orientation * (qx*qx + qy*qy);
+        double qx = d->qpos[4], qy = d->qpos[5], qz = d->qpos[6];
+        bd.orientation += w.orientation * (qx*qx + qy*qy + qz*qz);
 
-        for (int k = 0; k < 3; ++k) {
-            double dv = d->qvel[k] - ref.body_vel[k];
-            bd.lin_vel += w.lin_vel * dv * dv;
-        }
-        for (int k = 0; k < 3; ++k) {
-            double dw = d->qvel[3 + k] - ref.body_omega[k];
-            bd.ang_vel += w.ang_vel * dw * dw;
-        }
         for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-            double dq = d->qpos[7 + LS_TO_QPOS[j]] - ref.joint_pos[j];
-            bd.joint_track += w.joint_track * dq * dq;
+            double dq = d->qpos[7 + LS_TO_QPOS[j]] - task_.nominal_pose[j];
+            bd.posture += w.posture * dq * dq;
         }
-        for (int w_idx = 0; w_idx < NUM_WHEELS; ++w_idx) {
-            double dv = d->qvel[6 + LS_TO_QPOS[NUM_LEG_JOINTS + w_idx]] - ref.wheel_vel[w_idx];
-            bd.wheel_vel += w.wheel_vel * dv * dv;
-        }
+
         for (int j = 0; j < NUM_JOINTS; ++j) {
             double da = act_cmd[j] - act_prev[j];
             bd.act_smooth += w.act_smooth * da * da;
@@ -289,14 +244,14 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
     }
 
     // Terminal
-    const StepReference& last = gait_ref_.steps[task_.horizon - 1];
-    double hz  = d->qpos[2] - last.body_pos[2];
-    double qx  = d->qpos[4], qy = d->qpos[5];
-    bd.terminal = w.height * hz * hz + w.orientation * (qx*qx + qy*qy);
-    for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-        double dq = d->qpos[7 + LS_TO_QPOS[j]] - last.joint_pos[j];
-        bd.terminal += w.terminal_joint * dq * dq;
-    }
+    const double dt_step   = task_.dt * task_.substeps;
+    const double px_target = start_pos_[0] + cmd_.vx * task_.horizon * dt_step;
+    const double py_target = start_pos_[1] + cmd_.vy * task_.horizon * dt_step;
+    bd.terminal = w.terminal * (std::abs(d->qpos[0] - px_target)
+                                + std::abs(d->qpos[1] - py_target));
+    double hz = d->qpos[2] - height_target_;
+    double qx = d->qpos[4], qy = d->qpos[5], qz = d->qpos[6];
+    bd.terminal += w.height * hz * hz + w.orientation * (qx*qx + qy*qy + qz*qz);
 
     return bd;
 }

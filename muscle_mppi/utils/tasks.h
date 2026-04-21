@@ -150,19 +150,16 @@ struct MuscleParams {
 };
 
 struct CostWeights {
-    // Body-state tracking vs GaitReference
-    double height      = 3000.0;   // body z vs reference z
-    double orientation = 5000.0;   // quaternion tilt from upright
-    double lin_vel     = 500.0;    // body linear velocity vs reference vel
-    double ang_vel     = 300.0;    // body angular velocity vs reference omega
+    // Body stability
+    double height      = 3000.0;   // body z vs height_target
+    double orientation = 5000.0;   // quaternion tilt from upright (all axes)
+    double posture     =  200.0;   // leg joints near nominal standing pose
 
-    // Joint / wheel tracking vs GaitReference
-    double joint_track = 300.0;    // leg joint positions vs gait-scheduled targets
-    double wheel_vel   =  50.0;    // wheel angular velocity vs rolling target
-    double terminal_joint = 200.0; // terminal leg joint position error
+    // Terminal displacement toward commanded velocity goal
+    double terminal    = 2500.0;   // L1 distance from p_init + v_cmd * H * dt
 
-    // Activation regularisation (optional; keep small relative to tracking)
-    double act_smooth  =   1.0;    // penalise activation rate-of-change per step
+    // Activation regularisation
+    double act_smooth  =    1.0;   // penalise activation rate-of-change per step
 };
 
 // Full task specification
@@ -180,7 +177,7 @@ struct TaskConfig {
     int    n_samples = 32;
     int    horizon   = 10;
     int    substeps  = 10;
-    double lambda    = 500.0;  // set ≈ cost_spread/3; recalibrate after first run diagnostic
+    double lambda    = 0.5;    // range-normalised: 0→winner-takes-all, 1→uniform weights
     double dt        = 0.002;
     // Note: no kp/kd — muscle model replaces PD entirely
 
@@ -203,6 +200,16 @@ struct TaskConfig {
         0.01, 0.02, 0.02,   // RL leg
         0.05, 0.05, 0.05, 0.05  // wheels
     };
+};
+
+// -----------------------------------------------------------------------
+// Motion command — set externally (joystick, nav stack, etc.)
+// -----------------------------------------------------------------------
+struct MotionCommand {
+    double vx     = 0.0;    // desired forward  body velocity (m/s)
+    double vy     = 0.0;    // desired lateral  body velocity (m/s)
+    double wz     = 0.0;    // desired yaw rate (rad/s)
+    double height = 0.464;  // desired body height (m)
 };
 
 TaskConfig get_task(const std::string& name);

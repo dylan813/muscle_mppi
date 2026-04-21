@@ -2,25 +2,21 @@
 
 #include "base_mppi.h"
 #include "muscle.h"
-#include "gait_scheduler.h"
 
 // -----------------------------------------------------------------------
-// Hill-model locomotion controller with gait-reference tracking.
+// Reference-free Hill-model locomotion controller.
 //
 // Control inputs : muscle activation commands ∈ [-1, 1] (MPPI trajectory)
-// Cost space     : body pose/velocity, joint positions, wheel velocities
-//                  tracked against a GaitScheduler reference over the horizon
+// Cost space     : body height, orientation (upright), leg posture near
+//                  nominal standing pose, activation smoothness, and a
+//                  terminal displacement cost that drives the robot toward
+//                  the commanded velocity goal.
 //
-// The GaitScheduler generates a reference trajectory each update from the
-// current robot state + motion command.  MPPI finds the activation sequence
-// that keeps the simulated rollout close to this reference.
-//
-// This separates *what to do* (gait reference) from *how to actuate* (muscle
-// activations), giving MPPI meaningful gradient on every step even when the
-// robot drifts from the nominal pose.
+// No gait references or predefined contact sequences are used.
+// Locomotion emerges from the Hill model dynamics + cost minimization.
 //
 // Usage:
-//   mppi.set_command({.vx=0.3});       // e.g. walk forward at 0.3 m/s
+//   mppi.set_command({.vx=0.3});       // walk forward at 0.3 m/s
 //   mppi.update(state, activations);   // plan one MPPI step
 //   mppi.compute_real_torques(state, activations, tau);
 //   send tau via LowCmd tau mode
@@ -38,20 +34,18 @@ public:
                               double tau_out[NUM_JOINTS]);
 
     // Set motion command (call from control loop or nav stack)
-    void set_command(const MotionCommand& cmd) { gait_sched_.set_command(cmd); }
-    const MotionCommand& command() const { return gait_sched_.command(); }
+    void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
+    const MotionCommand& command() const { return cmd_; }
 
     const MuscleState&  muscle_state()  const { return muscle_state_; }
     const MuscleParams& muscle_params() const { return muscle_; }
 
     // Per-term cost breakdown from a single zero-noise rollout.
-    // Call after update() so gait_ref_ is populated.  Borrows data_[0].
+    // Call after update() so start_pos_ is populated.  Borrows data_[0].
     struct CostBreakdown {
-        double height = 0, orientation = 0, lin_vel = 0, ang_vel = 0;
-        double joint_track = 0, wheel_vel = 0, act_smooth = 0, terminal = 0;
+        double height = 0, orientation = 0, posture = 0, act_smooth = 0, terminal = 0;
         double total() const {
-            return height + orientation + lin_vel + ang_vel
-                 + joint_track + wheel_vel + act_smooth + terminal;
+            return height + orientation + posture + act_smooth + terminal;
         }
     };
     CostBreakdown diagnose_cost(const RobotState& state);
@@ -59,19 +53,16 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    // step_cost: deviation of simulated state from gait reference,
-    //            plus activation smoothness regularisation.
     double step_cost(const mjData* d,
-                     const StepReference& ref,
                      const double act_cmd[NUM_JOINTS],
                      const double act_prev[NUM_JOINTS]);
 
-    double terminal_cost(const mjData* d, const StepReference& ref);
+    double terminal_cost(const mjData* d);
 
     MuscleParams  muscle_;
     MuscleState   muscle_state_;   // persistent activation state (real robot)
-    GaitScheduler gait_sched_;
-    GaitReference gait_ref_;       // pre-computed once per update(), shared across rollout threads
+    MotionCommand cmd_;
+    double        start_pos_[3];   // captured at update() start for terminal cost
 
     static constexpr double ACT_MIN = -1.0;
     static constexpr double ACT_MAX =  1.0;
