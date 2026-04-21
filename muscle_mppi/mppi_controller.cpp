@@ -133,7 +133,7 @@ private:
 
             // Transition: set motion command, capture height, print diagnostic
             if (running_time_ - dt_ < STANDUP_DURATION) {
-                mppi_.set_command({.vx = 0.3});   // walk forward at 0.3 m/s
+                mppi_.set_command({.vx = 0.1});   // Phase 2: slow forward walk
                 mppi_.set_height_target(state_.pos[2]);
 
                 auto t0 = std::chrono::steady_clock::now();
@@ -141,7 +141,7 @@ private:
                 auto t1 = std::chrono::steady_clock::now();
                 double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-                std::cout << "Switching to muscle MPPI (gait reference tracking). Update: " << ms << " ms\n";
+                std::cout << "Switching to muscle MPPI. Update: " << ms << " ms\n";
                 std::cout << "  base z            = " << state_.pos[2]  << " m\n";
                 std::cout << "  quat w            = " << state_.quat[0] << "\n";
                 std::cout << "  base vel          = " << state_.vel[0]  << " "
@@ -158,12 +158,14 @@ private:
 
                 auto bd = mppi_.diagnose_cost(state_);
                 std::cout << "  -- cost breakdown (zero-noise nominal rollout) --\n"
-                          << "     height      = " << bd.height      << "\n"
-                          << "     orientation = " << bd.orientation  << "\n"
-                          << "     posture     = " << bd.posture      << "\n"
-                          << "     act_smooth  = " << bd.act_smooth   << "\n"
-                          << "     terminal    = " << bd.terminal     << "\n"
-                          << "     TOTAL       = " << bd.total()      << "\n";
+                          << "     height        = " << bd.height        << "\n"
+                          << "     orientation   = " << bd.orientation   << "\n"
+                          << "     posture       = " << bd.posture       << "\n"
+                          << "     contact_vel   = " << bd.contact_vel   << "\n"
+                          << "     contact_force = " << bd.contact_force << "\n"
+                          << "     act_smooth    = " << bd.act_smooth    << "\n"
+                          << "     terminal      = " << bd.terminal      << "\n"
+                          << "     TOTAL         = " << bd.total()       << "\n";
             }
 
             // Hill model feedforward + hardware velocity damping.

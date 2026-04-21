@@ -30,13 +30,21 @@ BaseMPPI::~BaseMPPI() {
     mj_deleteModel(model_);
 }
 
-void BaseMPPI::sample_noise() {
+// Annealed noise per Eq. (8): σ(iter,t) = σ_base * exp(-0.5*(iter/(β₁*N) + (H-t)/(β₂*H)))
+// More noise early in the iteration loop and for far-horizon steps.
+void BaseMPPI::sample_noise(int iter, int n_iters) {
     for (int s = 0; s < task_.n_samples; ++s)
-        for (int t = 0; t < task_.horizon; ++t)
+        for (int t = 0; t < task_.horizon; ++t) {
+            double anneal = std::exp(
+                -0.5 * (static_cast<double>(iter) / (task_.beta1 * n_iters)
+                      + static_cast<double>(task_.horizon - t)
+                        / (task_.beta2 * task_.horizon))
+            );
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 int idx = s * task_.horizon * NUM_JOINTS + t * NUM_JOINTS + j;
-                noise_[idx] = task_.noise_sigma[j] * normal_(rng_);
+                noise_[idx] = task_.noise_sigma[j] * anneal * normal_(rng_);
             }
+        }
 }
 
 // -----------------------------------------------------------------------

@@ -44,7 +44,7 @@ protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
     // Helpers available to derived class
-    void   sample_noise();
+    void   sample_noise(int iter, int n_iters);
     void   set_mj_state(mjData* d, const RobotState& state);
 
     TaskConfig task_;

@@ -149,17 +149,17 @@ struct MuscleParams {
     };
 };
 
+// Cost weights matching paper Eq. (17-18), Table II (walking).
+// Running: c_t = w_h|Δz| + w_orient*θ² + w_q*||q-q0||² + w_cv*||v_c||₁ + w_cf*||f_c-f0||₁
+// Terminal: c_T = w_H * ||p_H - p_target||₁
 struct CostWeights {
-    // Body stability
-    double height      = 3000.0;   // body z vs height_target
-    double orientation = 5000.0;   // quaternion tilt from upright (all axes)
-    double posture     =  200.0;   // leg joints near nominal standing pose
-
-    // Terminal displacement toward commanded velocity goal
-    double terminal    = 2500.0;   // L1 distance from p_init + v_cmd * H * dt
-
-    // Activation regularisation
-    double act_smooth  =    1.0;   // penalise activation rate-of-change per step
+    double height        = 350.0;  // w_h:       L1 body height deviation
+    double orientation   =  10.0;  // w_orient:  geodesic angle² from upright
+    double posture       =   5.0;  // w_q:       joint deviation from nominal standing pose
+    double contact_vel   =   0.0;  // w_c,vel:   L1 wheel body velocity (0 = off for wheeled)
+    double contact_force =   0.0;  // w_c,force: disabled — height term handles vertical stability
+    double terminal      = 500.0;  // w_H:       L1 terminal displacement
+    double act_smooth    =   0.1;  // activation rate-of-change penalty
 };
 
 // Full task specification
@@ -174,11 +174,14 @@ struct TaskConfig {
     CostWeights  cost;
     MuscleParams muscle;
 
-    int    n_samples = 32;
-    int    horizon   = 10;
-    int    substeps  = 10;
-    double lambda    = 0.5;    // range-normalised: 0→winner-takes-all, 1→uniform weights
-    double dt        = 0.002;
+    int    n_samples    = 16;
+    int    horizon      = 45;
+    int    substeps     = 5;
+    int    n_iterations = 3;    // inner planning loops per control step (Sec. III-D)
+    double lambda       = 0.1;  // range-normalised: 0→winner-takes-all, 1→uniform weights
+    double beta1        = 3.0;  // noise annealing: iteration decay (Eq. 8)
+    double beta2        = 3.0;  // noise annealing: horizon decay (Eq. 8)
+    double dt           = 0.002;
     // Note: no kp/kd — muscle model replaces PD entirely
 
     // Noise in activation space (dimensionless, ∈ [-1,1]).
@@ -194,11 +197,11 @@ struct TaskConfig {
     //   calf  (tau_max=45.4): sigma=0.02 → ±0.91 Nm noise
     //   wheel (tau_max=15.0): sigma=0.05 → ±0.75 Nm (wheels don't support weight)
     double noise_sigma[NUM_JOINTS] = {
-        0.01, 0.02, 0.02,   // FR leg
-        0.01, 0.02, 0.02,   // FL leg
-        0.01, 0.02, 0.02,   // RR leg
-        0.01, 0.02, 0.02,   // RL leg
-        0.05, 0.05, 0.05, 0.05  // wheels
+        0.05, 0.08, 0.08,   // FR leg
+        0.05, 0.08, 0.08,   // FL leg
+        0.05, 0.08, 0.08,   // RR leg
+        0.05, 0.08, 0.08,   // RL leg
+        0.15, 0.15, 0.15, 0.15  // wheels
     };
 };
 
