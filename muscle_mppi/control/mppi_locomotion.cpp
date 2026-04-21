@@ -27,36 +27,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name)
     // Hill steady-state: tau = tanh(act_cmd) * tau_max
     //   → act_cmd = atanh(tau / tau_max)
     // ------------------------------------------------------------------
-    mjData* d0 = mj_makeData(model_);
-    mj_resetData(model_, d0);
-    d0->qpos[2] = task_.height_target;
-    d0->qpos[3] = 1.0;
-    for (int j = 0; j < NUM_JOINTS; ++j)
-        d0->qpos[7 + LS_TO_QPOS[j]] = task_.nominal_pose[j];
-    mj_forward(model_, d0);   // computes contacts → populates qfrc_constraint
-
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        double act_cmd;
-
-        if (j < NUM_LEG_JOINTS) {
-            // Grounded equilibrium torque: bias minus contact contribution.
-            int    dof      = 6 + LS_TO_QPOS[j];
-            double tau_grav = d0->qfrc_bias[dof] - d0->qfrc_constraint[dof];
-            double ratio    = std::clamp(tau_grav / muscle_.tau_max[j], -0.99, 0.99);
-            act_cmd         = std::clamp(std::atanh(ratio), ACT_MIN, ACT_MAX);
-        } else {
-            // Wheel joints: zero warm-start.
-            // Free-floating qfrc_bias for wheel DOFs reflects load absorbed by ground
-            // contact; applying it spins the wheels and translates the body.
-            act_cmd = 0.0;
-        }
-
-        for (int t = 0; t < task_.horizon; ++t)
-            trajectory_[t * NUM_JOINTS + j] = act_cmd;
-
-        muscle_state_.activation[j] = std::tanh(act_cmd);
-    }
-    mj_deleteData(d0);
+    // Trajectory and activation state initialised to zero.
+    // MPPI optimises from this cold start on the first update.
 }
 
 // -----------------------------------------------------------------------

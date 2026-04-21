@@ -33,22 +33,22 @@ static constexpr int LS_TO_QPOS[NUM_JOINTS] = {
 
 // Hill model parameters — one set per task (could be tuned per robot variant)
 struct MuscleParams {
-    // Per-joint torque limits (Nm) — from go2w.xml
+    // Per-joint torque limits (Nm) — from UNITREE_GO2W_SATA_CFG (go2w_torque.urdf)
     double tau_max[NUM_JOINTS] = {
-        23.7,  23.7,  45.43,       // FR hip, thigh, calf
-        23.7,  23.7,  45.43,       // FL
-        23.7,  23.7,  45.43,       // RR
-        23.7,  23.7,  45.43,       // RL
-        15.0,  15.0,  15.0,  15.0  // wheels
+        23.7,  23.7,  35.55,       // FR hip, thigh, calf
+        23.7,  23.7,  35.55,       // FL
+        23.7,  23.7,  35.55,       // RR
+        23.7,  23.7,  35.55,       // RL
+        23.7,  23.7,  23.7,  23.7  // wheels
     };
 
-    // Per-joint velocity limits (rad/s) — denominator of Hill force-velocity curve
+    // Per-joint velocity limits (rad/s) — from UNITREE_GO2W_SATA_CFG
     double dq_max[NUM_JOINTS] = {
-        21.0, 21.0, 21.0,          // FR
-        21.0, 21.0, 21.0,          // FL
-        21.0, 21.0, 21.0,          // RR
-        21.0, 21.0, 21.0,          // RL
-        50.0, 50.0, 50.0, 50.0    // wheels
+        30.1, 30.1, 20.07,         // FR hip, thigh, calf
+        30.1, 30.1, 20.07,         // FL
+        30.1, 30.1, 20.07,         // RR
+        30.1, 30.1, 20.07,         // RL
+        30.1, 30.1, 30.1,  30.1   // wheels
     };
 
     // Activation dynamics blend factor per physics substep (dt = 0.002 s).
