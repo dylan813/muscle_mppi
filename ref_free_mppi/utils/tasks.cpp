@@ -5,11 +5,11 @@
 // Standing pose for Go2W [rad].
 // Actuator order: FR, FL, RR, RL (hip, thigh, calf) then FR/FL/RR/RL wheels.
 static const double STAND_POSE[NUM_JOINTS] = {
-     0.00572,  0.6088, -1.2176,   // FR leg
-    -0.00572,  0.6088, -1.2176,   // FL leg
-     0.00572,  0.6088, -1.2176,   // RR leg
-    -0.00572,  0.6088, -1.2176,   // RL leg
-    0.0, 0.0, 0.0, 0.0            // wheels: start at current position
+    0.0,  0.67, -1.3,   // FR leg
+    0.0,  0.67, -1.3,   // FL leg
+    0.0,  0.67, -1.3,   // RR leg
+    0.0,  0.67, -1.3,   // RL leg
+    0.0, 0.0, 0.0, 0.0  // wheels
 };
 
 TaskConfig get_task(const std::string& name) {

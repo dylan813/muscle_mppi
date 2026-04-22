@@ -96,10 +96,18 @@ def run_sim(task_name: str):
             elapsed = time.time() - t0
             time.sleep(max(0.0, task.dt_ctrl - elapsed))
 
-    # ---- Standup sequence (runs inside viewer so it's visible) ----
-    standup_steps = int(3.0 / task.dt)   # 3 sim-seconds = 1500 steps at dt=0.002
-    q_init  = np.array([mj_data.qpos[act_qpos_adr[j]] for j in range(NUM_JOINTS)])
+    # ---- Standup poses (matching Unitree go2w_stand_example.cpp) ----
+    # Phase 1: fold to low crouch first (more stable than going directly to stand)
+    q_crouch = np.array(task.nominal_pose)
+    q_crouch[:12] = [0.0, 1.36, -2.65,   # FR
+                     0.0, 1.36, -2.65,   # FL
+                     0.0, 1.36, -2.65,   # RR
+                     0.0, 1.36, -2.65]   # RL
     q_stand = np.array(task.nominal_pose)
+
+    phase1_steps = int(1.0 / task.dt)   # 1 s: current → crouch
+    phase2_steps = int(1.0 / task.dt)   # 1 s: crouch → stand
+    settle_steps = int(0.5 / task.dt)   # 0.5 s: hold stand, let dynamics settle
 
     # ---- Main loop with viewer ----
     with mujoco.viewer.launch_passive(
@@ -109,16 +117,32 @@ def run_sim(task_name: str):
         viewer.cam.type        = mujoco.mjtCamera.mjCAMERA_TRACKING
         viewer.cam.trackbodyid = mppi.base_bid
 
-        print("Standup sequence...")
-        for step_i in range(standup_steps):
-            alpha = step_i / standup_steps
-            q_ref = interpolate_pose(q_init, q_stand, alpha)
+        def pd_step(q_ref):
             for j in range(NUM_JOINTS):
                 mj_data.ctrl[j] = (
                     task.kp * (q_ref[j] - mj_data.qpos[act_qpos_adr[j]])
                     - task.kd * mj_data.qvel[act_qvel_adr[j]]
                 )
             mujoco.mj_step(mj_model, mj_data)
+
+        print("Standup: phase 1 — fold to crouch...")
+        q_init = np.array([mj_data.qpos[act_qpos_adr[j]] for j in range(NUM_JOINTS)])
+        for step_i in range(phase1_steps):
+            alpha = step_i / phase1_steps
+            pd_step(interpolate_pose(q_init, q_crouch, alpha))
+            if step_i % 50 == 0:
+                viewer.sync()
+
+        print("Standup: phase 2 — rise to stand...")
+        for step_i in range(phase2_steps):
+            alpha = step_i / phase2_steps
+            pd_step(interpolate_pose(q_crouch, q_stand, alpha))
+            if step_i % 50 == 0:
+                viewer.sync()
+
+        print("Standup: settling...")
+        for step_i in range(settle_steps):
+            pd_step(q_stand)
             if step_i % 50 == 0:
                 viewer.sync()
         print("Standup done.")

@@ -45,7 +45,7 @@ struct TaskConfig {
     const char* model_path =
         "../../unitree_mujoco/unitree_robots/go2w/scene_terrain.xml";
 
-    double height_target = 0.464;          // overwritten at runtime
+    double height_target = 0.45;           // overwritten at runtime
     double nominal_pose[NUM_JOINTS] = {};  // standing configuration
 
     CostWeights  cost;

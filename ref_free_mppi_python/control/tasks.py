@@ -13,11 +13,11 @@ NUM_WHEELS     = 4
 #  12-15: FR/FL/RR/RL wheel
 
 STAND_POSE: List[float] = [
-     0.00572,  0.6088, -1.2176,   # FR leg
-    -0.00572,  0.6088, -1.2176,   # FL leg
-     0.00572,  0.6088, -1.2176,   # RR leg
-    -0.00572,  0.6088, -1.2176,   # RL leg
-    0.0, 0.0, 0.0, 0.0,           # wheels
+     0.0,  0.67, -1.3,   # FR leg
+     0.0,  0.67, -1.3,   # FL leg
+     0.0,  0.67, -1.3,   # RR leg
+     0.0,  0.67, -1.3,   # RL leg
+    0.0, 0.0, 0.0, 0.0,  # wheels
 ]
 
 
@@ -50,7 +50,7 @@ class RefFreeParams:
 class TaskConfig:
     model_path: str = "../../unitree_mujoco/unitree_robots/go2w/scene_mjx.xml"
 
-    height_target: float = 0.464
+    height_target: float = 0.45
     nominal_pose:  List[float] = field(default_factory=lambda: list(STAND_POSE))
 
     cost: CostWeights  = field(default_factory=CostWeights)
