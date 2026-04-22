@@ -26,15 +26,21 @@ export CYCLONEDDS_URI='<CycloneDDS><Domain><SharedMemory><Enable>false</Enable><
 ./unitree_mujoco -r go2w -s scene_terrain.xml
 ```
 
-record headless
+record
 ```bash
-sudo apt install xvfb
-Xvfb :99 -screen 0 1280x720x24 &
-DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
+./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
 ```
 
 ```bash
 cd ~/Documents/dylan/muscle_mppi/muscle_mppi/build
 cmake ..
 make -j$(nproc)
+./muscle_mppi_controller
+```
+
+record headless (this kinda sucks)
+```bash
+sudo apt install xvfb
+Xvfb :99 -screen 0 1280x720x24 &
+DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
 ```
