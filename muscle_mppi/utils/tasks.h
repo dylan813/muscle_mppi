@@ -153,12 +153,12 @@ struct MuscleParams {
 // Running: c_t = w_h|Δz| + w_orient*θ² + w_q*||q-q0||² + w_cv*||v_c||₁ + w_cf*||f_c-f0||₁
 // Terminal: c_T = w_H * ||p_H - p_target||₁
 struct CostWeights {
-    double height        = 350.0;  // w_h:       L1 body height deviation
+    double height        = 100.0;  // w_h:       L1 body height deviation (paper Table II)
     double orientation   =  10.0;  // w_orient:  geodesic angle² from upright
     double posture       =   5.0;  // w_q:       joint deviation from nominal standing pose
-    double contact_vel   =   0.0;  // w_c,vel:   L1 wheel body velocity (0 = off for wheeled)
+    double contact_vel   =   0.5;  // w_c,vel:   L1 lateral wheel slip (paper Table II)
     double contact_force =   0.0;  // w_c,force: disabled — height term handles vertical stability
-    double terminal      = 500.0;  // w_H:       L1 terminal displacement
+    double terminal      = 2.5e3;  // w_H:       L1 terminal displacement (paper Table II)
     double act_smooth    =   0.1;  // activation rate-of-change penalty
 };
 
@@ -167,7 +167,7 @@ struct TaskConfig {
     const char* model_path = "../../unitree_mujoco/unitree_robots/go2w/scene_terrain.xml";
 
     double goal_pos[3]   = {0.0, 0.0, 0.0};
-    double height_target = 0.464;
+    double height_target = 0.0;  // always overwritten by measured trunk height after standup
 
     double nominal_pose[NUM_JOINTS] = {};
 
@@ -176,7 +176,7 @@ struct TaskConfig {
 
     int    n_samples    = 16;
     int    horizon      = 45;
-    int    substeps     = 5;
+    int    substeps     = 10;  // 10 * 0.002 s = 0.02 s per MPC step = 50 Hz servo period
     int    n_iterations = 3;    // inner planning loops per control step (Sec. III-D)
     double lambda       = 0.1;  // range-normalised: 0→winner-takes-all, 1→uniform weights
     double beta1        = 3.0;  // noise annealing: iteration decay (Eq. 8)
@@ -209,10 +209,10 @@ struct TaskConfig {
 // Motion command — set externally (joystick, nav stack, etc.)
 // -----------------------------------------------------------------------
 struct MotionCommand {
-    double vx     = 0.0;    // desired forward  body velocity (m/s)
-    double vy     = 0.0;    // desired lateral  body velocity (m/s)
-    double wz     = 0.0;    // desired yaw rate (rad/s)
-    double height = 0.464;  // desired body height (m)
+    double vx     = 0.0;  // desired forward  body velocity (m/s)
+    double vy     = 0.0;  // desired lateral  body velocity (m/s)
+    double wz     = 0.0;  // desired yaw rate (rad/s)
+    double height = 0.0;  // desired body height (m) — overwritten by auto-detected trunk height
 };
 
 TaskConfig get_task(const std::string& name);

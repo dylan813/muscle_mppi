@@ -6,6 +6,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
 
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
+find_package(OpenMP REQUIRED)
 
 set(MUJOCO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../unitree_mujoco/simulate/mujoco")
 include_directories(${MUJOCO_DIR}/include)
@@ -24,4 +25,5 @@ target_link_libraries(muscle_mppi_controller
     unitree_sdk2
     mujoco
     pthread
+    OpenMP::OpenMP_CXX
 )

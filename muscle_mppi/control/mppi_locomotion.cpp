@@ -5,7 +5,8 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
-#include <future>
+#include <omp.h>
+#include <stdexcept>
 
 MPPILocomotion::MPPILocomotion(const std::string& task_name)
     : BaseMPPI(get_task(task_name))
@@ -30,7 +31,13 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name)
     // Seed real-robot activation state so predict_state() starts with correct torques.
     std::memcpy(muscle_state_.activation, STAND_ACT, sizeof(STAND_ACT));
 
-    // Look up wheel body IDs — FR, FL, RR, RL (matches LowState actuator order)
+    // Base body ID
+    for (const char* name : {"trunk", "base", "base_link"}) {
+        int bid = mj_name2id(model_, mjOBJ_BODY, name);
+        if (bid >= 0) { base_bid_ = bid; break; }
+    }
+
+    // Wheel body IDs and spin-axle directions — FR, FL, RR, RL
     static const char* WHEEL_BODY_NAMES[4] = {
         "FR_wheel_link", "FL_wheel_link", "RR_wheel_link", "RL_wheel_link"
     };
@@ -38,6 +45,11 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name)
         wheel_body_ids_[k] = mj_name2id(model_, mjOBJ_BODY, WHEEL_BODY_NAMES[k]);
         if (wheel_body_ids_[k] < 0)
             throw std::runtime_error(std::string("Body not found: ") + WHEEL_BODY_NAMES[k]);
+        // Actuator NUM_LEG_JOINTS+k is the wheel joint; read its axis from the model
+        const int jid = model_->actuator_trnid[2 * (NUM_LEG_JOINTS + k)];
+        wheel_axle_[k][0] = model_->jnt_axis[3 * jid + 0];
+        wheel_axle_[k][1] = model_->jnt_axis[3 * jid + 1];
+        wheel_axle_[k][2] = model_->jnt_axis[3 * jid + 2];
     }
 
     // Nominal contact force per wheel: total_mass * |g| / 4
@@ -59,8 +71,12 @@ double MPPILocomotion::step_cost(const mjData* d,
     const CostWeights& w = task_.cost;
     double cost = 0.0;
 
-    // -- Height (L1) --
-    cost += w.height * std::abs(d->qpos[2] - height_target_);
+    // -- Height (L1) at a point 0.1 m ahead of trunk in body frame --
+    // xmat column 0 = body x-axis in world; z-component = xmat[6] (R[2][0])
+    static constexpr double kHeightFwdOffset = 0.1;
+    const mjtNum* xmat  = d->xmat + 9 * base_bid_;
+    const double  z_fwd = d->xpos[base_bid_ * 3 + 2] + kHeightFwdOffset * xmat[6];
+    cost += w.height * std::abs(z_fwd - height_target_);
 
     // -- Orientation: geodesic angle² from upright.
     // ||log(R)||² = θ² where θ = 2*acos(|qw|).  Exact for all tilt magnitudes.
@@ -71,19 +87,25 @@ double MPPILocomotion::step_cost(const mjData* d,
     // -- Posture: leg joints near nominal (w_q=0 disables for walking) --
     if (w.posture > 0.0) {
         for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-            double dq = d->qpos[7 + LS_TO_QPOS[j]] - task_.nominal_pose[j];
+            double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
             cost += w.posture * dq * dq;
         }
     }
 
-    // -- Contact velocity: L1 norm of each wheel body velocity (world frame).
-    // Penalises wheel body motion — see wheel adaptation notes in header.
+    // -- Contact velocity: lateral slip only (velocity along wheel axle).
+    // Rolling (perpendicular to axle) is free; only sideways slip is penalised.
     if (w.contact_vel > 0.0) {
         for (int k = 0; k < 4; ++k) {
-            double vel6[6];
+            mjtNum vel6[6];
             mj_objectVelocity(model_, d, mjOBJ_BODY, wheel_body_ids_[k], vel6, 0);
-            // vel6[3..5] = linear velocity (world frame)
-            cost += w.contact_vel * (std::abs(vel6[3]) + std::abs(vel6[4]) + std::abs(vel6[5]));
+            // vel6[3..5] = linear velocity in world frame
+            const mjtNum* wmat = d->xmat + 9 * wheel_body_ids_[k];
+            // Rotate axle from body frame to world frame (column 0 of rotation matrix)
+            const double ax = wmat[0]*wheel_axle_[k][0] + wmat[1]*wheel_axle_[k][1] + wmat[2]*wheel_axle_[k][2];
+            const double ay = wmat[3]*wheel_axle_[k][0] + wmat[4]*wheel_axle_[k][1] + wmat[5]*wheel_axle_[k][2];
+            const double az = wmat[6]*wheel_axle_[k][0] + wmat[7]*wheel_axle_[k][1] + wmat[8]*wheel_axle_[k][2];
+            const double slip = ax*vel6[3] + ay*vel6[4] + az*vel6[5];
+            cost += w.contact_vel * std::abs(slip);
         }
     }
 
@@ -155,8 +177,8 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                q_cur[j]  = d->qpos[7 + LS_TO_QPOS[j]];
-                dq_cur[j] = d->qvel[6 + LS_TO_QPOS[j]];
+                q_cur[j]  = d->qpos[act_qpos_adr_[j]];
+                dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
 
@@ -180,12 +202,11 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 // -----------------------------------------------------------------------
 // State prediction (Sec. III-E, Eq. 14-15): simulate n_steps ahead using
 // the prefix of best_trajectory_ to compensate for compute latency.
-// Uses data_[0] — safe because rollouts haven't launched yet and each
-// rollout calls set_mj_state() which fully resets its mjData.
+// Uses the dedicated slot data_[task_.n_samples] — isolated from rollout slots.
 // -----------------------------------------------------------------------
 RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
 {
-    mjData* d = data_[0];
+    mjData* d = data_[task_.n_samples];
     set_mj_state(d, state);
 
     double activation[NUM_JOINTS];
@@ -200,8 +221,8 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                q_cur[j]  = d->qpos[7 + LS_TO_QPOS[j]];
-                dq_cur[j] = d->qvel[6 + LS_TO_QPOS[j]];
+                q_cur[j]  = d->qpos[act_qpos_adr_[j]];
+                dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
             for (int j = 0; j < NUM_JOINTS; ++j)
@@ -217,8 +238,8 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
     predicted.vel[0]  = d->qvel[0];  predicted.vel[1]  = d->qvel[1];  predicted.vel[2]  = d->qvel[2];
     predicted.gyro[0] = d->qvel[3];  predicted.gyro[1] = d->qvel[4];  predicted.gyro[2] = d->qvel[5];
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        predicted.q[j]  = d->qpos[7 + LS_TO_QPOS[j]];
-        predicted.dq[j] = d->qvel[6 + LS_TO_QPOS[j]];
+        predicted.q[j]  = d->qpos[act_qpos_adr_[j]];
+        predicted.dq[j] = d->qvel[act_qvel_adr_[j]];
     }
     predicted.valid = true;
     std::memcpy(predicted_activation_, activation, sizeof(activation));
@@ -268,14 +289,9 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
     for (int iter = 0; iter < N; ++iter) {
         sample_noise(iter, N);
 
-        std::vector<std::future<double>> futures;
-        futures.reserve(task_.n_samples);
+        #pragma omp parallel for schedule(dynamic)
         for (int s = 0; s < task_.n_samples; ++s)
-            futures.push_back(std::async(std::launch::async,
-                [this, s, &predicted]() { return rollout(s, predicted); }));
-
-        for (int s = 0; s < task_.n_samples; ++s)
-            costs_[s] = futures[s].get();
+            costs_[s] = rollout(s, predicted);
 
         // Track best rollout seen across all iterations
         for (int s = 0; s < task_.n_samples; ++s) {
@@ -334,7 +350,7 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
 MPPILocomotion::CostBreakdown
 MPPILocomotion::diagnose_cost(const RobotState& state)
 {
-    mjData* d = data_[0];
+    mjData* d = data_[task_.n_samples];
     set_mj_state(d, state);
 
     double activation[NUM_JOINTS];
@@ -355,8 +371,8 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                q_cur[j]  = d->qpos[7 + LS_TO_QPOS[j]];
-                dq_cur[j] = d->qvel[6 + LS_TO_QPOS[j]];
+                q_cur[j]  = d->qpos[act_qpos_adr_[j]];
+                dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
             for (int j = 0; j < NUM_JOINTS; ++j)
@@ -364,7 +380,9 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             mj_step(model_, d);
         }
 
-        bd.height += w.height * std::abs(d->qpos[2] - height_target_);
+        const mjtNum* dxmat  = d->xmat + 9 * base_bid_;
+        const double  dz_fwd = d->xpos[base_bid_ * 3 + 2] + 0.1 * dxmat[6];
+        bd.height += w.height * std::abs(dz_fwd - height_target_);
 
         double qw    = d->qpos[3];
         double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
@@ -372,17 +390,20 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
 
         if (w.posture > 0.0) {
             for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-                double dq = d->qpos[7 + LS_TO_QPOS[j]] - task_.nominal_pose[j];
+                double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
                 bd.posture += w.posture * dq * dq;
             }
         }
 
         if (w.contact_vel > 0.0) {
             for (int k = 0; k < 4; ++k) {
-                double vel6[6];
+                mjtNum vel6[6];
                 mj_objectVelocity(model_, d, mjOBJ_BODY, wheel_body_ids_[k], vel6, 0);
-                bd.contact_vel += w.contact_vel
-                    * (std::abs(vel6[3]) + std::abs(vel6[4]) + std::abs(vel6[5]));
+                const mjtNum* wmat = d->xmat + 9 * wheel_body_ids_[k];
+                const double ax = wmat[0]*wheel_axle_[k][0] + wmat[1]*wheel_axle_[k][1] + wmat[2]*wheel_axle_[k][2];
+                const double ay = wmat[3]*wheel_axle_[k][0] + wmat[4]*wheel_axle_[k][1] + wmat[5]*wheel_axle_[k][2];
+                const double az = wmat[6]*wheel_axle_[k][0] + wmat[7]*wheel_axle_[k][1] + wmat[8]*wheel_axle_[k][2];
+                bd.contact_vel += w.contact_vel * std::abs(ax*vel6[3] + ay*vel6[4] + az*vel6[5]);
             }
         }
 

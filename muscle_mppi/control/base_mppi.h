@@ -50,11 +50,16 @@ protected:
     TaskConfig task_;
 
     mjModel*             model_ = nullptr;
-    std::vector<mjData*> data_;        // one mjData per sample
+    std::vector<mjData*> data_;        // [n_samples + 1]: samples + dedicated prediction slot
 
     std::vector<double> trajectory_;   // [horizon × NUM_JOINTS] position targets
     std::vector<double> noise_;        // [n_samples × horizon × NUM_JOINTS]
     std::vector<double> costs_;        // [n_samples]
+    std::vector<double> noise_sched_;  // [n_iterations × horizon] precomputed annealing factors
+
+    // Actuator → MuJoCo DOF addresses (from model actuator_trnid — no hardcoded mapping)
+    int act_qpos_adr_[NUM_JOINTS] = {};
+    int act_qvel_adr_[NUM_JOINTS] = {};
 
     double height_target_;
 

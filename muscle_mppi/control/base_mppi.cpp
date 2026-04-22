@@ -16,13 +16,32 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
 
     model_->opt.timestep = task_.dt;
 
-    data_.resize(task_.n_samples);
-    for (int i = 0; i < task_.n_samples; ++i)
+    // n_samples rollout slots + 1 dedicated slot for state prediction/diagnosis
+    data_.resize(task_.n_samples + 1);
+    for (int i = 0; i <= task_.n_samples; ++i)
         data_[i] = mj_makeData(model_);
+
+    // Populate actuator → DOF address mapping dynamically from the model
+    // so no hardcoded LS_TO_QPOS table is needed.
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        int jid = model_->actuator_trnid[2 * j];
+        act_qpos_adr_[j] = model_->jnt_qposadr[jid];
+        act_qvel_adr_[j] = model_->jnt_dofadr[jid];
+    }
 
     trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
     noise_.assign(task_.n_samples * task_.horizon * NUM_JOINTS, 0.0);
     costs_.resize(task_.n_samples);
+
+    // Precompute noise annealing schedule (Eq. 8): factor[iter][t]
+    const int N = task_.n_iterations;
+    const int H = task_.horizon;
+    noise_sched_.resize(N * H);
+    for (int i = 0; i < N; ++i)
+        for (int t = 0; t < H; ++t)
+            noise_sched_[i * H + t] = std::exp(
+                -0.5 * (static_cast<double>(i) / (task_.beta1 * N)
+                      + static_cast<double>(H - t) / (task_.beta2 * H)));
 }
 
 BaseMPPI::~BaseMPPI() {
@@ -30,16 +49,12 @@ BaseMPPI::~BaseMPPI() {
     mj_deleteModel(model_);
 }
 
-// Annealed noise per Eq. (8): σ(iter,t) = σ_base * exp(-0.5*(iter/(β₁*N) + (H-t)/(β₂*H)))
-// More noise early in the iteration loop and for far-horizon steps.
-void BaseMPPI::sample_noise(int iter, int n_iters) {
+// Annealed noise per Eq. (8): σ(iter,t) = σ_base * anneal[iter][t]
+// Schedule is precomputed in constructor; reused across all samples.
+void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
     for (int s = 0; s < task_.n_samples; ++s)
         for (int t = 0; t < task_.horizon; ++t) {
-            double anneal = std::exp(
-                -0.5 * (static_cast<double>(iter) / (task_.beta1 * n_iters)
-                      + static_cast<double>(task_.horizon - t)
-                        / (task_.beta2 * task_.horizon))
-            );
+            const double anneal = noise_sched_[iter * task_.horizon + t];
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 int idx = s * task_.horizon * NUM_JOINTS + t * NUM_JOINTS + j;
                 noise_[idx] = task_.noise_sigma[j] * anneal * normal_(rng_);
@@ -63,9 +78,8 @@ void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     d->qpos[5] = state.quat[2];  // y
     d->qpos[6] = state.quat[3];  // z
 
-    // Use LS_TO_QPOS mapping: LowState/actuator order → MuJoCo DOF tree order
     for (int j = 0; j < NUM_JOINTS; ++j)
-        d->qpos[7 + LS_TO_QPOS[j]] = state.q[j];
+        d->qpos[act_qpos_adr_[j]] = state.q[j];
 
     d->qvel[0] = state.vel[0];
     d->qvel[1] = state.vel[1];
@@ -75,7 +89,7 @@ void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     d->qvel[5] = state.gyro[2];
 
     for (int j = 0; j < NUM_JOINTS; ++j)
-        d->qvel[6 + LS_TO_QPOS[j]] = state.dq[j];
+        d->qvel[act_qvel_adr_[j]] = state.dq[j];
 
     mj_forward(model_, d);
 }

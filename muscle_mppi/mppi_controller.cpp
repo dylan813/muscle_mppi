@@ -2,6 +2,8 @@
 #include <cstring>
 #include <cmath>
 #include <chrono>
+#include <mutex>
+#include <thread>
 #include <unistd.h>
 
 #include <unitree/robot/channel/channel_publisher.hpp>
@@ -62,6 +64,8 @@ public:
 
         control_thread_ = CreateRecurrentThreadEx(
             "mppi_ctrl", UT_CPU_ID_NONE, 20000, &MPPIController::ControlLoop, this);
+
+        mppi_thread_ = std::thread(&MPPIController::MPPILoop, this);
     }
 
 private:
@@ -82,6 +86,7 @@ private:
 
     void LowStateHandler(const void* msg) {
         const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
+        std::lock_guard<std::mutex> lk(state_mutex_);
         for (int i = 0; i < NUM_JOINTS; ++i) {
             state_.q[i]  = s->motor_state()[i].q();
             state_.dq[i] = s->motor_state()[i].dq();
@@ -97,6 +102,7 @@ private:
 
     void SportModeHandler(const void* msg) {
         const auto* s = static_cast<const unitree_go::msg::dds_::SportModeState_*>(msg);
+        std::lock_guard<std::mutex> lk(state_mutex_);
         state_.pos[0] = s->position()[0];
         state_.pos[1] = s->position()[1];
         state_.pos[2] = s->position()[2];
@@ -106,18 +112,33 @@ private:
         state_.valid  = true;
     }
 
+    // 50 Hz servo loop: sends cached MPPI torques; runs standup during phase 1
     void ControlLoop() {
         running_time_ += dt_;
 
         if (running_time_ < STANDUP_DURATION) {
-            // ---- Phase 1: PD stand-up (identical to baseline) ----
-            double phase = std::tanh(running_time_ / 1.2);
-            for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = phase * stand_pos_[i] + (1.0 - phase) * crouch_pos_[i];
-                low_cmd_.motor_cmd()[i].kp()  = phase * 50.0 + (1.0 - phase) * 20.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 3.5;
-                low_cmd_.motor_cmd()[i].tau() = 0.0;
+            // Two-phase standup: 0–1.5 s → crouch, 1.5–3.0 s → stand
+            double alpha;
+            if (running_time_ < STANDUP_DURATION * 0.5) {
+                alpha = running_time_ / (STANDUP_DURATION * 0.5);
+                alpha = std::min(alpha, 1.0);
+                for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                    low_cmd_.motor_cmd()[i].q()   = crouch_pos_[i];
+                    low_cmd_.motor_cmd()[i].kp()  = alpha * 30.0;
+                    low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                    low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                    low_cmd_.motor_cmd()[i].tau() = 0.0;
+                }
+            } else {
+                alpha = (running_time_ - STANDUP_DURATION * 0.5) / (STANDUP_DURATION * 0.5);
+                alpha = std::min(alpha, 1.0);
+                for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                    low_cmd_.motor_cmd()[i].q()   = (1.0-alpha)*crouch_pos_[i] + alpha*stand_pos_[i];
+                    low_cmd_.motor_cmd()[i].kp()  = 30.0 + alpha * 20.0;
+                    low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                    low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                    low_cmd_.motor_cmd()[i].tau() = 0.0;
+                }
             }
             for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[i].q()   = 0.0;
@@ -127,52 +148,12 @@ private:
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
         } else {
-            // ---- Phase 2: MPPI (activation commands) + Hill-model torque control ----
-            double activations[NUM_JOINTS] = {};
-            mppi_.update(state_, activations);
-
-            // Transition: set motion command, capture height, print diagnostic
-            if (running_time_ - dt_ < STANDUP_DURATION) {
-                mppi_.set_command({.vx = 0.1});   // Phase 2: slow forward walk
-                mppi_.set_height_target(state_.pos[2]);
-
-                auto t0 = std::chrono::steady_clock::now();
-                mppi_.update(state_, activations);
-                auto t1 = std::chrono::steady_clock::now();
-                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-                std::cout << "Switching to muscle MPPI. Update: " << ms << " ms\n";
-                std::cout << "  base z            = " << state_.pos[2]  << " m\n";
-                std::cout << "  quat w            = " << state_.quat[0] << "\n";
-                std::cout << "  base vel          = " << state_.vel[0]  << " "
-                          << state_.vel[1] << " " << state_.vel[2]  << "\n";
-                std::cout << "  activation[0]     = " << mppi_.muscle_state().activation[0] << "\n";
-                std::cout << "  cost min/mean/max = "
-                          << mppi_.cost_min()  << " / "
-                          << mppi_.cost_mean() << " / "
-                          << mppi_.cost_max()  << "\n";
-                std::cout << "  command (vx,vy,wz) = ("
-                          << mppi_.command().vx << ", "
-                          << mppi_.command().vy << ", "
-                          << mppi_.command().wz << ")\n";
-
-                auto bd = mppi_.diagnose_cost(state_);
-                std::cout << "  -- cost breakdown (zero-noise nominal rollout) --\n"
-                          << "     height        = " << bd.height        << "\n"
-                          << "     orientation   = " << bd.orientation   << "\n"
-                          << "     posture       = " << bd.posture       << "\n"
-                          << "     contact_vel   = " << bd.contact_vel   << "\n"
-                          << "     contact_force = " << bd.contact_force << "\n"
-                          << "     act_smooth    = " << bd.act_smooth    << "\n"
-                          << "     terminal      = " << bd.terminal      << "\n"
-                          << "     TOTAL         = " << bd.total()       << "\n";
+            // Send cached Hill torques from background MPPI thread
+            double tau_cmd[NUM_JOINTS];
+            {
+                std::lock_guard<std::mutex> lk(cmd_mutex_);
+                std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
             }
-
-            // Hill model feedforward + hardware velocity damping.
-            // tau_effective[i] = tau_hill[i] - kd_[i] * actual_dq[i]
-            double tau_cmd[NUM_JOINTS] = {};
-            mppi_.compute_real_torques(state_, activations, tau_cmd);
-
             for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[i].kp()  = 0.0;
@@ -186,6 +167,50 @@ private:
             reinterpret_cast<uint32_t*>(&low_cmd_),
             (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
         lowcmd_publisher_->Write(low_cmd_);
+    }
+
+    // Background MPPI solver: starts after standup, runs as fast as it can
+    void MPPILoop() {
+        while (running_time_ < STANDUP_DURATION)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        {
+            std::lock_guard<std::mutex> lk(state_mutex_);
+            mppi_.set_height_target(state_.pos[2]);
+            std::cout << "Muscle MPPI started. height target = " << state_.pos[2] << " m\n";
+        }
+
+        int solve_count = 0;
+        double solve_sum_ms = 0.0;
+
+        while (true) {
+            RobotState snap;
+            {
+                std::lock_guard<std::mutex> lk(state_mutex_);
+                snap = state_;
+            }
+            if (!snap.valid) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            auto t0 = std::chrono::steady_clock::now();
+            double activations[NUM_JOINTS] = {};
+            mppi_.update(snap, activations);
+            double tau_cmd[NUM_JOINTS] = {};
+            mppi_.compute_real_torques(snap, activations, tau_cmd);
+            double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+
+            {
+                std::lock_guard<std::mutex> lk(cmd_mutex_);
+                std::copy(tau_cmd, tau_cmd + NUM_JOINTS, cached_tau_);
+            }
+
+            solve_sum_ms += ms;
+            if (++solve_count % 20 == 0)
+                std::cout << "Muscle MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
+        }
     }
 
     static constexpr double dt_              = 0.02;
@@ -203,41 +228,49 @@ private:
     };
 
     const double stand_pos_[NUM_LEG_JOINTS] = {
-         0.00572,  0.6088, -1.2176,
-        -0.00572,  0.6088, -1.2176,
-         0.00572,  0.6088, -1.2176,
-        -0.00572,  0.6088, -1.2176
+        0.0,  0.67, -1.3,
+        0.0,  0.67, -1.3,
+        0.0,  0.67, -1.3,
+        0.0,  0.67, -1.3,
     };
     const double crouch_pos_[NUM_LEG_JOINTS] = {
-         0.04735,  1.2219, -2.4438,
-        -0.04735,  1.2219, -2.4438,
-         0.04735,  1.2219, -2.4438,
-        -0.04735,  1.2219, -2.4438
+        0.0,  1.36, -2.65,
+        0.0,  1.36, -2.65,
+        0.0,  1.36, -2.65,
+        0.0,  1.36, -2.65,
     };
 
     double running_time_ = 0.0;
 
     MPPILocomotion mppi_;
-    RobotState     state_{};
+
+    std::mutex state_mutex_;
+    RobotState state_{};
+
+    std::mutex cmd_mutex_;
+    double cached_tau_[NUM_JOINTS] = {};
+
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
 
     ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_>            lowcmd_publisher_;
     ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_>         lowstate_subscriber_;
     ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_>   sportmode_subscriber_;
 
-    ThreadPtr control_thread_;
+    ThreadPtr   control_thread_;
+    std::thread mppi_thread_;
 };
 
 int main(int argc, const char** argv) {
     if (argc < 2)
         ChannelFactory::Instance()->Init(1, "lo");
     else
-        ChannelFactory::Instance()->Init(0, argv[1]);
+        ChannelFactory::Instance()->Init(1, argv[1]);
 
     std::cout << "MPPI Controller (Hill muscle model) — press Enter to start\n";
     std::cin.get();
 
-    MPPIController controller("stand");
+    const std::string task = (argc >= 3) ? argv[2] : "stand";
+    MPPIController controller(task);
     controller.Init();
 
     while (true) sleep(10);

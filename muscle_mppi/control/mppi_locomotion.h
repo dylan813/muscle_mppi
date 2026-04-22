@@ -60,9 +60,13 @@ private:
     double               last_compute_ms_ = 20.0;
     double               predicted_activation_[NUM_JOINTS] = {};
 
-    // Wheel body IDs and nominal contact force (computed at construction)
-    int    wheel_body_ids_[4];  // FR, FL, RR, RL wheel_link body IDs
-    double f_nominal_;          // nominal vertical contact force per wheel (N)
+    // Base (trunk) body ID — for forward-offset height cost
+    int base_bid_ = 1;
+
+    // Wheel body IDs, axle directions, and nominal contact force
+    int    wheel_body_ids_[4];     // FR, FL, RR, RL wheel_link body IDs
+    double wheel_axle_[4][3] = {}; // spin-joint axle in body frame (unit vector)
+    double f_nominal_;             // nominal vertical contact force per wheel (N)
 
     static constexpr double ACT_MIN = -1.0;
     static constexpr double ACT_MAX =  1.0;
