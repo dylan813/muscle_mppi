@@ -114,6 +114,7 @@ RefFreeMPPI::RefFreeMPPI(const std::string& task_name)
     std::cout << "RefFreeMPPI: model loaded, mass=" << total_mass_ << " kg\n";
     std::cout << "  K=" << K << " nodes, H=" << task_.rf.H_time
               << "s, I=" << task_.rf.I_iter << " iters, N=" << N << " samples\n";
+    std::cout << "  OpenMP threads available: " << omp_get_max_threads() << "\n";
 }
 
 RefFreeMPPI::~RefFreeMPPI() {
