@@ -45,6 +45,11 @@ class MPPIController {
 public:
     explicit MPPIController(const std::string& task = "stand") : mppi_(task) {}
 
+    void load_reference(const std::string& csv_path, double w_ref = 1.0) {
+        mppi_.set_act_reference_weight(w_ref);
+        mppi_.load_reference(csv_path);
+    }
+
     void Init() {
         InitLowCmd();
 
@@ -269,8 +274,17 @@ int main(int argc, const char** argv) {
     std::cout << "MPPI Controller (Hill muscle model) — press Enter to start\n";
     std::cin.get();
 
-    const std::string task = (argc >= 3) ? argv[2] : "stand";
+    // argv[1] = network interface
+    // argv[2] = task name       (default "stand")
+    // argv[3] = reference CSV   (optional — enables act_reference cost term)
+    const std::string task    = (argc >= 3) ? argv[2] : "stand";
+    const std::string ref_csv = (argc >= 4) ? argv[3] : "";
+
     MPPIController controller(task);
+
+    if (!ref_csv.empty())
+        controller.load_reference(ref_csv);
+
     controller.Init();
 
     while (true) sleep(10);

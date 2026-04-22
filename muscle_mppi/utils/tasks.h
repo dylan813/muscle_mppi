@@ -151,6 +151,7 @@ struct MuscleParams {
 
 // Cost weights matching paper Eq. (17-18), Table II (walking).
 // Running: c_t = w_h|Δz| + w_orient*θ² + w_q*||q-q0||² + w_cv*||v_c||₁ + w_cf*||f_c-f0||₁
+//              + w_vel*||v_base - v_des||²
 // Terminal: c_T = w_H * ||p_H - p_target||₁
 struct CostWeights {
     double height        = 100.0;  // w_h:       L1 body height deviation (paper Table II)
@@ -160,13 +161,17 @@ struct CostWeights {
     double contact_force =   0.0;  // w_c,force: disabled — height term handles vertical stability
     double terminal      = 2.5e3;  // w_H:       L1 terminal displacement (paper Table II)
     double act_smooth    =   0.1;  // activation rate-of-change penalty
+    double act_reference =   0.0;  // tracking weight vs dial-mpc reference (0 = disabled)
+    double vel_cmd       =   0.0;  // w_vel:     base velocity tracking weight (0 = stand)
+    double vel_des[3]    = {0.0, 0.0, 0.0};  // desired base velocity [vx, vy, wz] m/s
 };
 
 // Full task specification
 struct TaskConfig {
-    const char* model_path = "../../unitree_mujoco/unitree_robots/go2w/scene_terrain.xml";
+    // Flat scene for MPPI rollouts — terrain mesh makes each mj_step ~10x slower
+    // and adds no planning value (MPPI doesn't track terrain topology).
+    const char* model_path = "../../unitree_mujoco/unitree_robots/go2w/scene.xml";
 
-    double goal_pos[3]   = {0.0, 0.0, 0.0};
     double height_target = 0.0;  // always overwritten by measured trunk height after standup
 
     double nominal_pose[NUM_JOINTS] = {};
@@ -175,9 +180,9 @@ struct TaskConfig {
     MuscleParams muscle;
 
     int    n_samples    = 16;
-    int    horizon      = 45;
+    int    horizon      = 25;   // 25 * 0.02 s = 0.5 s lookahead
     int    substeps     = 10;  // 10 * 0.002 s = 0.02 s per MPC step = 50 Hz servo period
-    int    n_iterations = 3;    // inner planning loops per control step (Sec. III-D)
+    int    n_iterations = 2;    // inner planning loops per control step (Sec. III-D)
     double lambda       = 0.1;  // range-normalised: 0→winner-takes-all, 1→uniform weights
     double beta1        = 3.0;  // noise annealing: iteration decay (Eq. 8)
     double beta2        = 3.0;  // noise annealing: horizon decay (Eq. 8)

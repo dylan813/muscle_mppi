@@ -7,6 +7,9 @@
 #include <chrono>
 #include <omp.h>
 #include <stdexcept>
+#include <fstream>
+#include <sstream>
+#include <iostream>
 
 MPPILocomotion::MPPILocomotion(const std::string& task_name)
     : BaseMPPI(get_task(task_name))
@@ -57,6 +60,55 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name)
     for (int i = 1; i < model_->nbody; ++i)
         total_mass += model_->body_mass[i];
     f_nominal_ = total_mass * std::abs(model_->opt.gravity[2]) / 4.0;
+
+    // Sync MotionCommand from task config so terminal_cost uses the correct velocity targets.
+    // set_command() can override this at runtime (e.g. from a joystick).
+    cmd_.vx = task_.cost.vel_des[0];
+    cmd_.vy = task_.cost.vel_des[1];
+    cmd_.wz = task_.cost.vel_des[2];
+}
+
+// -----------------------------------------------------------------------
+// Reference activation loader — reads CSV produced by extract_reference.py
+// -----------------------------------------------------------------------
+void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
+{
+    std::ifstream f(csv_path);
+    if (!f.is_open())
+        throw std::runtime_error("load_reference: cannot open " + csv_path);
+
+    ref_act_.clear();
+    ref_steps_ = 0;
+    ref_dt_    = ref_dt;
+
+    std::string line;
+    // Skip optional header line (starts with a letter, not a digit or '-')
+    if (std::getline(f, line)) {
+        if (!line.empty() && (std::isalpha(line[0]) || line[0] == 'j')) {
+            // header — discard and proceed
+        } else {
+            // first data line — parse it
+            std::istringstream ss(line);
+            std::string tok;
+            while (std::getline(ss, tok, ','))
+                ref_act_.push_back(std::stod(tok));
+            ++ref_steps_;
+        }
+    }
+
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        std::string tok;
+        while (std::getline(ss, tok, ','))
+            ref_act_.push_back(std::stod(tok));
+        ++ref_steps_;
+    }
+
+    if (ref_steps_ == 0)
+        throw std::runtime_error("load_reference: empty file " + csv_path);
+
+    std::cout << "Loaded activation reference: " << ref_steps_
+              << " steps × " << NUM_JOINTS << " joints from " << csv_path << "\n";
 }
 
 // -----------------------------------------------------------------------
@@ -66,17 +118,14 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name)
 // -----------------------------------------------------------------------
 double MPPILocomotion::step_cost(const mjData* d,
                                   const double act_cmd[NUM_JOINTS],
-                                  const double act_prev[NUM_JOINTS])
+                                  const double act_prev[NUM_JOINTS],
+                                  int horizon_step)
 {
     const CostWeights& w = task_.cost;
     double cost = 0.0;
 
-    // -- Height (L1) at a point 0.1 m ahead of trunk in body frame --
-    // xmat column 0 = body x-axis in world; z-component = xmat[6] (R[2][0])
-    static constexpr double kHeightFwdOffset = 0.1;
-    const mjtNum* xmat  = d->xmat + 9 * base_bid_;
-    const double  z_fwd = d->xpos[base_bid_ * 3 + 2] + kHeightFwdOffset * xmat[6];
-    cost += w.height * std::abs(z_fwd - height_target_);
+    // -- Height (L1): base body z position --
+    cost += w.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
 
     // -- Orientation: geodesic angle² from upright.
     // ||log(R)||² = θ² where θ = 2*acos(|qw|).  Exact for all tilt magnitudes.
@@ -123,10 +172,28 @@ double MPPILocomotion::step_cost(const mjData* d,
         }
     }
 
+    // -- Base velocity tracking: penalise deviation from vel_des in world frame --
+    if (w.vel_cmd > 0.0) {
+        double dvx = d->qvel[0] - w.vel_des[0];
+        double dvy = d->qvel[1] - w.vel_des[1];
+        cost += w.vel_cmd * (dvx * dvx + dvy * dvy);
+    }
+
     // -- Activation smoothness --
     for (int j = 0; j < NUM_JOINTS; ++j) {
         double da = act_cmd[j] - act_prev[j];
         cost += w.act_smooth * da * da;
+    }
+
+    // -- Reference activation tracking (dial-mpc reference) --
+    if (w.act_reference > 0.0) {
+        const double* ref = ref_act_at(horizon_step);
+        if (ref) {
+            for (int j = 0; j < NUM_JOINTS; ++j) {
+                double da = act_cmd[j] - ref[j];
+                cost += w.act_reference * da * da;
+            }
+        }
     }
 
     return cost;
@@ -191,7 +258,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        total_cost += step_cost(d, act_cmd, act_prev);
+        total_cost += step_cost(d, act_cmd, act_prev, t);
         std::memcpy(act_prev, act_cmd, sizeof(act_cmd));
     }
 
@@ -268,6 +335,10 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         1, task_.horizon / 2);
 
     RobotState predicted = predict_state(state, n_skip);
+
+    // Advance reference trajectory pointer to align with predicted state time
+    if (ref_steps_ > 0)
+        ref_offset_ = (ref_offset_ + n_skip) % ref_steps_;
 
     start_pos_[0] = predicted.pos[0];
     start_pos_[1] = predicted.pos[1];
@@ -380,9 +451,7 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             mj_step(model_, d);
         }
 
-        const mjtNum* dxmat  = d->xmat + 9 * base_bid_;
-        const double  dz_fwd = d->xpos[base_bid_ * 3 + 2] + 0.1 * dxmat[6];
-        bd.height += w.height * std::abs(dz_fwd - height_target_);
+        bd.height += w.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
 
         double qw    = d->qpos[3];
         double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
@@ -418,10 +487,27 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             }
         }
 
+        if (w.vel_cmd > 0.0) {
+            double dvx = d->qvel[0] - w.vel_des[0];
+            double dvy = d->qvel[1] - w.vel_des[1];
+            bd.vel_tracking += w.vel_cmd * (dvx * dvx + dvy * dvy);
+        }
+
         for (int j = 0; j < NUM_JOINTS; ++j) {
             double da = act_cmd[j] - act_prev[j];
             bd.act_smooth += w.act_smooth * da * da;
         }
+
+        if (w.act_reference > 0.0) {
+            const double* ref = ref_act_at(t);
+            if (ref) {
+                for (int j = 0; j < NUM_JOINTS; ++j) {
+                    double da = act_cmd[j] - ref[j];
+                    bd.act_smooth += w.act_reference * da * da;  // folded into act_smooth breakdown
+                }
+            }
+        }
+
         std::memcpy(act_prev, act_cmd, sizeof(act_cmd));
     }
 

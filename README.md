@@ -19,18 +19,21 @@ export CYCLONEDDS_URI='<CycloneDDS><Domain><SharedMemory><Enable>false</Enable><
 LD_LIBRARY_PATH=/opt/unitree_robotics/lib:$LD_LIBRARY_PATH ./stand_go2
 ```
 
-building muscle mppi
+# building muscle mppi
+
+open mujoco sim
 ```bash
 cd unitree_mujoco/simulate/build
 export CYCLONEDDS_URI='<CycloneDDS><Domain><SharedMemory><Enable>false</Enable></SharedMemory></Domain></CycloneDDS>'
-./unitree_mujoco -r go2w -s scene_terrain.xml
+./unitree_mujoco -r go2w -s scene.xml
 ```
 
 record
 ```bash
-./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
+./unitree_mujoco -r go2w -s scene.xml -o ../../../analysis/videos/run.mp4
 ```
 
+run muscle mppi
 ```bash
 cd ~/Documents/dylan/muscle_mppi/muscle_mppi/build
 cmake ..

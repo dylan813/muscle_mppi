@@ -30,6 +30,9 @@ public:
     // Overwrite height target at runtime (measured from real robot at handoff)
     void set_height_target(double z) { height_target_ = z; }
 
+    // Runtime cost weight overrides
+    void set_act_reference_weight(double w) { task_.cost.act_reference = w; }
+
     // Cost diagnostics — valid after update() returns
     double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
     double cost_max()  const { return *std::max_element(costs_.begin(), costs_.end()); }

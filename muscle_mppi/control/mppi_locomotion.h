@@ -26,16 +26,22 @@ public:
     void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
     const MotionCommand& command() const { return cmd_; }
 
+    // Load a reference activation trajectory produced by extract_reference.py.
+    // Path to a CSV file: T rows × NUM_JOINTS columns, no header row.
+    // ref_dt: timestep of each row in seconds (must match dial-mpc dt, default 0.02 s).
+    // Once loaded, the act_reference cost weight is used; keep it 0.0 to disable.
+    void load_reference(const std::string& csv_path, double ref_dt = 0.02);
+
     const MuscleState&  muscle_state()  const { return muscle_state_; }
     const MuscleParams& muscle_params() const { return muscle_; }
 
     struct CostBreakdown {
         double height = 0, orientation = 0, posture = 0;
         double contact_vel = 0, contact_force = 0;
-        double act_smooth = 0, terminal = 0;
+        double vel_tracking = 0, act_smooth = 0, terminal = 0;
         double total() const {
             return height + orientation + posture
-                 + contact_vel + contact_force + act_smooth + terminal;
+                 + contact_vel + contact_force + vel_tracking + act_smooth + terminal;
         }
     };
     CostBreakdown diagnose_cost(const RobotState& state);
@@ -45,7 +51,8 @@ private:
 
     double step_cost(const mjData* d,
                      const double act_cmd[NUM_JOINTS],
-                     const double act_prev[NUM_JOINTS]);
+                     const double act_prev[NUM_JOINTS],
+                     int horizon_step);
 
     double terminal_cost(const mjData* d);
 
@@ -67,6 +74,24 @@ private:
     int    wheel_body_ids_[4];     // FR, FL, RR, RL wheel_link body IDs
     double wheel_axle_[4][3] = {}; // spin-joint axle in body frame (unit vector)
     double f_nominal_;             // nominal vertical contact force per wheel (N)
+
+    // Optional dial-mpc reference activation trajectory (LowState joint order).
+    // Populated by load_reference(); empty when act_reference weight == 0.
+    std::vector<double> ref_act_;   // flattened [ref_steps_ × NUM_JOINTS]
+    int                 ref_steps_ = 0;
+    double              ref_dt_    = 0.02;
+
+    // Index into ref_act_ at the start of the current MPPI update.
+    // Advances by n_skip each call; wraps mod ref_steps_ for looping gaits.
+    int ref_offset_ = 0;
+
+    // Returns the reference activation for rollout horizon step t.
+    // Handles wrapping so a finite reference loops indefinitely.
+    const double* ref_act_at(int t) const {
+        if (ref_steps_ == 0) return nullptr;
+        int idx = (ref_offset_ + t) % ref_steps_;
+        return ref_act_.data() + idx * NUM_JOINTS;
+    }
 
     static constexpr double ACT_MIN = -1.0;
     static constexpr double ACT_MAX =  1.0;
