@@ -193,17 +193,25 @@ def main(states_path: str):
     for t in range(T):
         ref_act[t] = inverse_hill(tau_ls[t], q_ls[t], dq_ls[t])
 
-    # Derive smooth activation by forward-simulating the activation dynamics
-    # a[t] = tanh(act_cmd) * alpha + a[t-1] * (1-alpha)
-    # Here act_cmd ≈ ref_act (the "commanded" value before filtering).
-    # We store the raw inverse result as the reference; the MPPI will match
-    # the filtered activation state to this.
-    alpha = 0.15
+    # Forward-simulate the Hill model activation dynamics to match muscle_mppi exactly.
+    #
+    # muscle_mppi applies:  a[sub] = tanh(act_cmd) * alpha + a[sub-1] * (1-alpha)
+    # once per physics substep (dt=0.002 s), with n_substeps=10 per 0.02 s control step.
+    # Effective blending per control step = 1 - (1-alpha)^n_substeps ≈ 80%.
+    #
+    # extract_reference.py has one row per 0.02 s control step, so we must apply
+    # the alpha update n_substeps times per row — NOT once — or the smoothed
+    # reference will have a ~5x slower time constant than the real controller.
+    alpha      = 0.15
+    n_substeps = 10   # must match TaskConfig::substeps (dt_ctrl/dt = 0.02/0.002)
+
     act_smooth = np.zeros_like(ref_act)
     act_smooth[0] = ref_act[0]
     for t in range(1, T):
-        act_smooth[t] = (np.tanh(ref_act[t]) * alpha
-                         + act_smooth[t-1]   * (1.0 - alpha))
+        a = act_smooth[t - 1]
+        for _ in range(n_substeps):
+            a = np.tanh(ref_act[t]) * alpha + a * (1.0 - alpha)
+        act_smooth[t] = a
 
     # Save
     stem = states_path.replace("_states.npy", "")

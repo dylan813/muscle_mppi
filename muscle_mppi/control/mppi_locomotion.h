@@ -15,7 +15,8 @@
 // -----------------------------------------------------------------------
 class MPPILocomotion : public BaseMPPI {
 public:
-    explicit MPPILocomotion(const std::string& task_name);
+    explicit MPPILocomotion(const std::string& task_name,
+                           const std::string& yaml_path = "../utils/tasks.yaml");
 
     void update(const RobotState& state, double activations_out[NUM_JOINTS]);
 
@@ -38,10 +39,10 @@ public:
     struct CostBreakdown {
         double height = 0, orientation = 0, posture = 0;
         double contact_vel = 0, contact_force = 0;
-        double vel_tracking = 0, act_smooth = 0, terminal = 0;
+        double vel_tracking = 0, act_effort = 0, terminal = 0;
         double total() const {
             return height + orientation + posture
-                 + contact_vel + contact_force + vel_tracking + act_smooth + terminal;
+                 + contact_vel + contact_force + vel_tracking + act_effort + terminal;
         }
     };
     CostBreakdown diagnose_cost(const RobotState& state);
@@ -51,7 +52,6 @@ private:
 
     double step_cost(const mjData* d,
                      const double act_cmd[NUM_JOINTS],
-                     const double act_prev[NUM_JOINTS],
                      int horizon_step);
 
     double terminal_cost(const mjData* d);

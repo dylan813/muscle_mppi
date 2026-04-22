@@ -11,7 +11,7 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     mju_user_warning = mujoco_warning_noop;
 
     char error[1000];
-    model_ = mj_loadXML(task_.model_path, nullptr, error, sizeof(error));
+    model_ = mj_loadXML(task_.model_path.c_str(), nullptr, error, sizeof(error));
     if (!model_) throw std::runtime_error("Failed to load model: " + std::string(error));
 
     model_->opt.timestep = task_.dt;

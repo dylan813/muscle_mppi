@@ -1,5 +1,4 @@
 #include "mppi_locomotion.h"
-#include "../utils/tasks.h"
 
 #include <cmath>
 #include <cstring>
@@ -11,8 +10,8 @@
 #include <sstream>
 #include <iostream>
 
-MPPILocomotion::MPPILocomotion(const std::string& task_name)
-    : BaseMPPI(get_task(task_name))
+MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& yaml_path)
+    : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
     best_trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
@@ -118,7 +117,6 @@ void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
 // -----------------------------------------------------------------------
 double MPPILocomotion::step_cost(const mjData* d,
                                   const double act_cmd[NUM_JOINTS],
-                                  const double act_prev[NUM_JOINTS],
                                   int horizon_step)
 {
     const CostWeights& w = task_.cost;
@@ -179,23 +177,6 @@ double MPPILocomotion::step_cost(const mjData* d,
         cost += w.vel_cmd * (dvx * dvx + dvy * dvy);
     }
 
-    // -- Activation smoothness --
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        double da = act_cmd[j] - act_prev[j];
-        cost += w.act_smooth * da * da;
-    }
-
-    // -- Reference activation tracking (dial-mpc reference) --
-    if (w.act_reference > 0.0) {
-        const double* ref = ref_act_at(horizon_step);
-        if (ref) {
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                double da = act_cmd[j] - ref[j];
-                cost += w.act_reference * da * da;
-            }
-        }
-    }
-
     return cost;
 }
 
@@ -228,9 +209,6 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 
     double total_cost = 0.0;
 
-    double act_prev[NUM_JOINTS];
-    std::memcpy(act_prev, predicted_activation_, sizeof(act_prev));
-
     for (int t = 0; t < task_.horizon; ++t) {
         double act_cmd[NUM_JOINTS];
         for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -241,6 +219,9 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         }
 
         double tau_out[NUM_JOINTS];
+        double effort_accum  = 0.0;
+        double ref_accum     = 0.0;
+        const double* ref    = ref_act_at(t);  // smoothed reference activation (or nullptr)
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -248,6 +229,21 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
+
+            // Metabolic effort: Σ a²·τ_max (leg joints, using actual filtered activation)
+            if (task_.cost.act_effort > 0.0) {
+                for (int j = 0; j < NUM_LEG_JOINTS; ++j)
+                    effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
+            }
+
+            // Reference tracking: compare filtered activation[] against smoothed ref
+            // Both are in output (activation state) space — apples to apples.
+            if (task_.cost.act_reference > 0.0 && ref) {
+                for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+                    double da = activation[j] - ref[j];
+                    ref_accum += da * da;
+                }
+            }
 
             for (int j = 0; j < NUM_JOINTS; ++j)
                 d->ctrl[j] = tau_out[j] - muscle_.kd_sim[j] * dq_cur[j];
@@ -258,8 +254,9 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        total_cost += step_cost(d, act_cmd, act_prev, t);
-        std::memcpy(act_prev, act_cmd, sizeof(act_cmd));
+        total_cost += task_.cost.act_effort    * effort_accum / task_.substeps;
+        total_cost += task_.cost.act_reference * ref_accum    / task_.substeps;
+        total_cost += step_cost(d, act_cmd, t);
     }
 
     total_cost += terminal_cost(d);
@@ -427,9 +424,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
     double activation[NUM_JOINTS];
     std::memcpy(activation, predicted_activation_, sizeof(activation));
 
-    double act_prev[NUM_JOINTS];
-    std::memcpy(act_prev, predicted_activation_, sizeof(act_prev));
-
     CostBreakdown bd;
     const CostWeights& w = task_.cost;
 
@@ -439,6 +433,9 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             act_cmd[j] = best_trajectory_[t * NUM_JOINTS + j];
 
         double tau_out[NUM_JOINTS];
+        double effort_accum = 0.0;
+        double ref_accum    = 0.0;
+        const double* ref   = ref_act_at(t);
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -446,10 +443,22 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
+            if (w.act_effort > 0.0) {
+                for (int j = 0; j < NUM_LEG_JOINTS; ++j)
+                    effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
+            }
+            if (w.act_reference > 0.0 && ref) {
+                for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+                    double da = activation[j] - ref[j];
+                    ref_accum += da * da;
+                }
+            }
             for (int j = 0; j < NUM_JOINTS; ++j)
                 d->ctrl[j] = tau_out[j] - muscle_.kd_sim[j] * dq_cur[j];
             mj_step(model_, d);
         }
+        bd.act_effort += w.act_effort    * effort_accum / task_.substeps
+                       + w.act_reference * ref_accum    / task_.substeps;
 
         bd.height += w.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
 
@@ -493,22 +502,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             bd.vel_tracking += w.vel_cmd * (dvx * dvx + dvy * dvy);
         }
 
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            double da = act_cmd[j] - act_prev[j];
-            bd.act_smooth += w.act_smooth * da * da;
-        }
-
-        if (w.act_reference > 0.0) {
-            const double* ref = ref_act_at(t);
-            if (ref) {
-                for (int j = 0; j < NUM_JOINTS; ++j) {
-                    double da = act_cmd[j] - ref[j];
-                    bd.act_smooth += w.act_reference * da * da;  // folded into act_smooth breakdown
-                }
-            }
-        }
-
-        std::memcpy(act_prev, act_cmd, sizeof(act_cmd));
     }
 
     // Terminal

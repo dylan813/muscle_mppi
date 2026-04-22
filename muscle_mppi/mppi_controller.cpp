@@ -43,7 +43,9 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
 
 class MPPIController {
 public:
-    explicit MPPIController(const std::string& task = "stand") : mppi_(task) {}
+    explicit MPPIController(const std::string& task     = "stand",
+                            const std::string& yaml_path = "../utils/tasks.yaml")
+        : mppi_(task, yaml_path) {}
 
     void load_reference(const std::string& csv_path, double w_ref = 1.0) {
         mppi_.set_act_reference_weight(w_ref);
@@ -275,12 +277,15 @@ int main(int argc, const char** argv) {
     std::cin.get();
 
     // argv[1] = network interface
-    // argv[2] = task name       (default "stand")
-    // argv[3] = reference CSV   (optional — enables act_reference cost term)
-    const std::string task    = (argc >= 3) ? argv[2] : "stand";
-    const std::string ref_csv = (argc >= 4) ? argv[3] : "";
+    // argv[2] = task name        (default "stand")
+    // argv[3] = reference CSV    (optional — enables act_reference cost term)
+    // argv[4] = tasks.yaml path  (default "../utils/tasks.yaml")
+    const std::string task      = (argc >= 3) ? argv[2] : "stand";
+    const std::string ref_csv   = (argc >= 4) ? argv[3] : "";
+    const std::string yaml_path = (argc >= 5) ? argv[4] : "../utils/tasks.yaml";
 
-    MPPIController controller(task);
+    std::cout << "Loading task '" << task << "' from " << yaml_path << "\n";
+    MPPIController controller(task, yaml_path);
 
     if (!ref_csv.empty())
         controller.load_reference(ref_csv);
