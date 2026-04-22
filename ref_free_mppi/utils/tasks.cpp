@@ -1,0 +1,48 @@
+#include "tasks.h"
+#include <stdexcept>
+#include <cstring>
+
+// Standing pose for Go2W [rad].
+// Actuator order: FR, FL, RR, RL (hip, thigh, calf) then FR/FL/RR/RL wheels.
+static const double STAND_POSE[NUM_JOINTS] = {
+     0.00572,  0.6088, -1.2176,   // FR leg
+    -0.00572,  0.6088, -1.2176,   // FL leg
+     0.00572,  0.6088, -1.2176,   // RR leg
+    -0.00572,  0.6088, -1.2176,   // RL leg
+    0.0, 0.0, 0.0, 0.0            // wheels: start at current position
+};
+
+TaskConfig get_task(const std::string& name) {
+    TaskConfig cfg;  // struct defaults applied
+
+    if (name == "stand") {
+        std::memcpy(cfg.nominal_pose, STAND_POSE, sizeof(STAND_POSE));
+        cfg.height_target     = 0.464;
+        cfg.cost.vel_cmd      = 0.0;
+        cfg.cost.vel_des[0]   = 0.0;
+        cfg.cost.vel_des[1]   = 0.0;
+        cfg.cost.vel_des[2]   = 0.0;
+        // Default weights already set for standing in CostWeights struct.
+    }
+    else if (name == "walk_forward") {
+        std::memcpy(cfg.nominal_pose, STAND_POSE, sizeof(STAND_POSE));
+        cfg.height_target     = 0.464;
+        cfg.cost.height       = 1e2;
+        cfg.cost.orientation  = 10.0;
+        cfg.cost.joint_reg    = 0.0;   // no pose regularisation during locomotion
+        cfg.cost.contact_vel  = 0.5;
+        cfg.cost.contact_frc  = 5e-2;
+        cfg.cost.terminal     = 2.5e3;
+        cfg.cost.vel_cmd      = 1.0;
+        cfg.cost.vel_des[0]   = 0.5;  // 0.5 m/s forward
+        cfg.cost.vel_des[1]   = 0.0;
+        cfg.cost.vel_des[2]   = 0.0;
+        cfg.rf.H_time         = 0.9;  // longer horizon for gait discovery
+        cfg.n_samples         = 50;
+    }
+    else {
+        throw std::runtime_error("Unknown task: " + name);
+    }
+
+    return cfg;
+}
