@@ -17,7 +17,6 @@ TaskConfig get_task(const std::string& name) {
 
     if (name == "stand") {
         std::memcpy(cfg.nominal_pose, STAND_POSE, sizeof(STAND_POSE));
-        cfg.height_target     = 0.464;
         cfg.cost.vel_cmd      = 0.0;
         cfg.cost.vel_des[0]   = 0.0;
         cfg.cost.vel_des[1]   = 0.0;
@@ -26,7 +25,6 @@ TaskConfig get_task(const std::string& name) {
     }
     else if (name == "walk_forward") {
         std::memcpy(cfg.nominal_pose, STAND_POSE, sizeof(STAND_POSE));
-        cfg.height_target     = 0.45;
         cfg.cost.height       = 1e2;
         cfg.cost.orientation  = 10.0;
         cfg.cost.joint_reg    = 0.0;

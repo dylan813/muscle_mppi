@@ -136,6 +136,9 @@ private:
     int act_qpos_adr_[NUM_JOINTS] = {};
     int act_qvel_adr_[NUM_JOINTS] = {};
 
+    // Base (trunk) body ID — used for height and orientation costs
+    int base_bid_ = 1;
+
     // Wheel body IDs for contact penalties (FR/FL/RR/RL wheel_link)
     int wheel_body_ids_[4] = {-1, -1, -1, -1};
 

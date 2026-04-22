@@ -80,6 +80,12 @@ RefFreeMPPI::RefFreeMPPI(const std::string& task_name)
 
     precompute_noise_schedule();
 
+    // Base body ID
+    for (const char* name : {"trunk", "base", "base_link"}) {
+        int bid = mj_name2id(model_, mjOBJ_BODY, name);
+        if (bid >= 0) { base_bid_ = bid; break; }
+    }
+
     // Wheel body IDs — Go2W foot/wheel bodies
     const char* wheel_names[4] = {
         "FR_wheel_link", "FL_wheel_link", "RR_wheel_link", "RL_wheel_link"
@@ -316,8 +322,13 @@ double RefFreeMPPI::step_cost(const mjData* d, double /*t_horizon*/) const {
     const CostWeights& w = task_.cost;
     double cost = 0.0;
 
-    // Height (L1)
-    cost += w.height * std::abs(d->qpos[2] - height_target_);
+    // Height (L1) measured at a point 0.1 m ahead of trunk in body frame.
+    // xmat is row-major body-to-world rotation; column 0 = body x-axis in world.
+    // z-component of body x-axis = xmat[6] (R[2][0]).
+    static constexpr double kHeightFwdOffset = 0.1;  // metres
+    const mjtNum* xmat = d->xmat + 9 * base_bid_;
+    const double z_fwd = d->xpos[base_bid_ * 3 + 2] + kHeightFwdOffset * xmat[6];
+    cost += w.height * std::abs(z_fwd - height_target_);
 
     // Orientation: angle of rotation from upright (Lie algebra log on SO(3))
     const double qw = std::abs(d->qpos[3]);
