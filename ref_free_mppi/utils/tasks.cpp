@@ -26,10 +26,10 @@ TaskConfig get_task(const std::string& name) {
     }
     else if (name == "walk_forward") {
         std::memcpy(cfg.nominal_pose, STAND_POSE, sizeof(STAND_POSE));
-        cfg.height_target     = 0.464;
+        cfg.height_target     = 0.45;
         cfg.cost.height       = 1e2;
         cfg.cost.orientation  = 10.0;
-        cfg.cost.joint_reg    = 0.0;   // no pose regularisation during locomotion
+        cfg.cost.joint_reg    = 0.0;
         cfg.cost.contact_vel  = 0.5;
         cfg.cost.contact_frc  = 5e-2;
         cfg.cost.terminal     = 2.5e3;

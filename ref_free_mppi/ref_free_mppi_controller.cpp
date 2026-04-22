@@ -126,15 +126,36 @@ private:
         running_time_ += dt_;
 
         if (running_time_ < STANDUP_DURATION) {
-            // Phase 1: PD stand-up
-            const double phase = std::tanh(running_time_ / 1.2);
-            for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   =
-                    phase * stand_pos_[i] + (1.0 - phase) * crouch_pos_[i];
-                low_cmd_.motor_cmd()[i].kp()  = phase * 50.0 + (1.0 - phase) * 20.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 3.5;
-                low_cmd_.motor_cmd()[i].tau() = 0.0;
+            // Two-phase standup matching Unitree go2w_stand_example:
+            //   0–1.5 s: current pose → crouch (thigh=1.36, calf=-2.65)
+            //   1.5–3.0 s: crouch → stand (thigh=0.67, calf=-1.3)
+            double alpha;
+            const double* from;
+            const double* to;
+            if (running_time_ < STANDUP_DURATION * 0.5) {
+                alpha = running_time_ / (STANDUP_DURATION * 0.5);
+                from  = crouch_pos_;  // start: assume lying flat ≈ crouch target
+                to    = crouch_pos_;
+                // ramp from whatever into crouch; use phase against zero as from
+                alpha = std::min(alpha, 1.0);
+                for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                    low_cmd_.motor_cmd()[i].q()   = crouch_pos_[i];
+                    low_cmd_.motor_cmd()[i].kp()  = alpha * 30.0;
+                    low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                    low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                    low_cmd_.motor_cmd()[i].tau() = 0.0;
+                }
+            } else {
+                alpha = (running_time_ - STANDUP_DURATION * 0.5) / (STANDUP_DURATION * 0.5);
+                alpha = std::min(alpha, 1.0);
+                for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                    low_cmd_.motor_cmd()[i].q()   =
+                        (1.0 - alpha) * crouch_pos_[i] + alpha * stand_pos_[i];
+                    low_cmd_.motor_cmd()[i].kp()  = 30.0 + alpha * 20.0;  // 30→50
+                    low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                    low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                    low_cmd_.motor_cmd()[i].tau() = 0.0;
+                }
             }
             for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[i].q()   = 0.0;
@@ -238,16 +259,16 @@ private:
     static constexpr double STANDUP_DURATION = 3.0;
 
     const double stand_pos_[NUM_LEG_JOINTS] = {
-         0.00572,  0.6088, -1.2176,
-        -0.00572,  0.6088, -1.2176,
-         0.00572,  0.6088, -1.2176,
-        -0.00572,  0.6088, -1.2176
+        0.0,  0.67, -1.3,
+        0.0,  0.67, -1.3,
+        0.0,  0.67, -1.3,
+        0.0,  0.67, -1.3,
     };
     const double crouch_pos_[NUM_LEG_JOINTS] = {
-         0.04735,  1.2219, -2.4438,
-        -0.04735,  1.2219, -2.4438,
-         0.04735,  1.2219, -2.4438,
-        -0.04735,  1.2219, -2.4438
+        0.0,  1.36, -2.65,
+        0.0,  1.36, -2.65,
+        0.0,  1.36, -2.65,
+        0.0,  1.36, -2.65,
     };
 
     double running_time_ = 0.0;
@@ -277,7 +298,7 @@ int main(int argc, const char** argv) {
     if (argc < 2)
         ChannelFactory::Instance()->Init(1, "lo");
     else
-        ChannelFactory::Instance()->Init(0, argv[1]);
+        ChannelFactory::Instance()->Init(1, argv[1]);
 
     std::cout << "Reference-Free MPPI Controller — press Enter to start\n";
     std::cin.get();
