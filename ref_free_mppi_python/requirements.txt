@@ -1,0 +1,9 @@
+# Core
+mujoco>=3.1.0
+jax[cuda12]>=0.4.26
+jaxlib>=0.4.26
+numpy>=1.24
+
+# Unitree SDK2 Python (for real-robot deployment)
+# Install separately: pip install unitree_sdk2py
+# or: pip install -e /path/to/unitree_sdk2py
