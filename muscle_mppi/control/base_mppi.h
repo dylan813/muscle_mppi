@@ -28,7 +28,8 @@ public:
     virtual ~BaseMPPI();
 
     // Overwrite height target at runtime (measured from real robot at handoff)
-    void set_height_target(double z) { height_target_ = z; }
+    void   set_height_target(double z) { height_target_ = z; }
+    double height_target()       const { return height_target_; }
 
     // Runtime cost weight overrides
     void set_act_reference_weight(double w) { task_.cost.act_reference = w; }

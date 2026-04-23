@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstring>
 #include <cmath>
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -43,7 +44,7 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
 
 class MPPIController {
 public:
-    explicit MPPIController(const std::string& task     = "stand",
+    explicit MPPIController(const std::string& task      = "walk",
                             const std::string& yaml_path = "../utils/tasks.yaml")
         : mppi_(task, yaml_path) {}
 
@@ -154,6 +155,22 @@ private:
                 low_cmd_.motor_cmd()[i].kd()  = 0.5;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
+        } else if (!mppi_ready_.load()) {
+            // Hold stand pose with PD until MPPI has converged
+            for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                low_cmd_.motor_cmd()[i].q()   = stand_pos_[i];
+                low_cmd_.motor_cmd()[i].kp()  = 50.0;
+                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                low_cmd_.motor_cmd()[i].tau() = 0.0;
+            }
+            for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
+                low_cmd_.motor_cmd()[i].q()   = 0.0;
+                low_cmd_.motor_cmd()[i].kp()  = 0.0;
+                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].kd()  = 0.5;
+                low_cmd_.motor_cmd()[i].tau() = 0.0;
+            }
         } else {
             // Send cached Hill torques from background MPPI thread
             double tau_cmd[NUM_JOINTS];
@@ -181,11 +198,7 @@ private:
         while (running_time_ < STANDUP_DURATION)
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        {
-            std::lock_guard<std::mutex> lk(state_mutex_);
-            mppi_.set_height_target(state_.pos[2]);
-            std::cout << "Muscle MPPI started. height target = " << state_.pos[2] << " m\n";
-        }
+        std::cout << "Muscle MPPI started. height target = " << mppi_.height_target() << " m\n";
 
         int solve_count = 0;
         double solve_sum_ms = 0.0;
@@ -215,17 +228,26 @@ private:
             }
 
             solve_sum_ms += ms;
-            if (++solve_count % 20 == 0)
+            ++solve_count;
+            if (solve_count % 20 == 0)
                 std::cout << "Muscle MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
+
+            // Hold PD for CONVERGENCE_SOLVES iterations so the trajectory self-converges
+            // before we hand over — avoids folding from a cold/wrong warm-start.
+            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES) {
+                std::cout << "MPPI converged after " << solve_count
+                          << " solves (avg " << solve_sum_ms / solve_count
+                          << " ms) — handing over to Hill torques\n";
+                mppi_ready_.store(true);
+            }
         }
     }
 
     static constexpr double dt_              = 0.02;
     static constexpr double STANDUP_DURATION = 3.0;
+    static constexpr int    CONVERGENCE_SOLVES = 20;  // ~1.6s of MPPI before handing over
 
     // Hardware velocity damping during Hill torque mode.
-    // tau_eff[i] = tau_hill[i] - kd_[i] * actual_dq[i]
-    // Start at standup kd for legs — tune down once standing is confirmed stable.
     const double kd_[NUM_JOINTS] = {
         2.0, 3.5, 3.5,   // FR  hip / thigh / calf
         2.0, 3.5, 3.5,   // FL
@@ -248,6 +270,7 @@ private:
     };
 
     double running_time_ = 0.0;
+    std::atomic<bool> mppi_ready_{false};
 
     MPPILocomotion mppi_;
 
@@ -277,18 +300,17 @@ int main(int argc, const char** argv) {
     std::cin.get();
 
     // argv[1] = network interface
-    // argv[2] = task name        (default "stand")
-    // argv[3] = reference CSV    (optional — enables act_reference cost term)
+    // argv[2] = task name        (default "walk")
+    // argv[3] = reference CSV    (default "../../reference/ref_torques.csv")
     // argv[4] = tasks.yaml path  (default "../utils/tasks.yaml")
-    const std::string task      = (argc >= 3) ? argv[2] : "stand";
-    const std::string ref_csv   = (argc >= 4) ? argv[3] : "";
+    const std::string task      = (argc >= 3) ? argv[2] : "walk";
+    const std::string ref_csv   = (argc >= 4) ? argv[3] : "../../reference/ref_torques.csv";
     const std::string yaml_path = (argc >= 5) ? argv[4] : "../utils/tasks.yaml";
 
     std::cout << "Loading task '" << task << "' from " << yaml_path << "\n";
     MPPIController controller(task, yaml_path);
 
-    if (!ref_csv.empty())
-        controller.load_reference(ref_csv);
+    controller.load_reference(ref_csv);
 
     controller.Init();
 

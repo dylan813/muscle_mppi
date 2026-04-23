@@ -29,6 +29,13 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
         act_qvel_adr_[j] = model_->jnt_dofadr[jid];
     }
 
+    // Replace the model's default joint damping with kd_sim so that
+    // d->ctrl[j] = tau_hill (pure Hill torque, always within ctrlrange)
+    // and MuJoCo applies the kd term automatically — matching hardware which does
+    // tau_eff = tau_hill - kd*dq via the motor controller.
+    for (int j = 0; j < NUM_JOINTS; ++j)
+        model_->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j];
+
     trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
     noise_.assign(task_.n_samples * task_.horizon * NUM_JOINTS, 0.0);
     costs_.resize(task_.n_samples);

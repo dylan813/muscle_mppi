@@ -16,22 +16,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     muscle_ = task_.muscle;
     best_trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
 
-    // Warm-start: initialize leg activations to approximate standing values so
-    // rollouts don't begin with zero torques and immediate collapse.
-    // Hip≈0 (minimal abduction load), thigh≈0.3, calf≈0.2, wheels≈0.
-    static constexpr double STAND_ACT[NUM_JOINTS] = {
-        0.0, 0.15, 0.15,   // FR hip/thigh/calf
-        0.0, 0.15, 0.15,   // FL
-        0.0, 0.15, 0.15,   // RR
-        0.0, 0.15, 0.15,   // RL
-        0.0, 0.0,  0.0, 0.0  // wheels
-    };
-    for (int t = 0; t < task_.horizon; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            best_trajectory_[t * NUM_JOINTS + j] = STAND_ACT[j];
-    std::memcpy(predicted_activation_, STAND_ACT, sizeof(STAND_ACT));
-    // Seed real-robot activation state so predict_state() starts with correct torques.
-    std::memcpy(muscle_state_.activation, STAND_ACT, sizeof(STAND_ACT));
+    // Zero warm-start: let MPPI self-converge over several solves while PD holds.
+    // Avoids sign errors from a hand-tuned guess; trajectory_ and muscle state start neutral.
 
     // Base body ID
     for (const char* name : {"trunk", "base", "base_link"}) {
@@ -77,8 +63,9 @@ void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
         throw std::runtime_error("load_reference: cannot open " + csv_path);
 
     ref_act_.clear();
-    ref_steps_ = 0;
-    ref_dt_    = ref_dt;
+    ref_steps_    = 0;
+    ref_n_joints_ = 0;
+    ref_dt_       = ref_dt;
 
     std::string line;
     // Skip optional header line (starts with a letter, not a digit or '-')
@@ -86,11 +73,12 @@ void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
         if (!line.empty() && (std::isalpha(line[0]) || line[0] == 'j')) {
             // header — discard and proceed
         } else {
-            // first data line — parse it
+            // first data line — parse it and detect column count
             std::istringstream ss(line);
             std::string tok;
             while (std::getline(ss, tok, ','))
                 ref_act_.push_back(std::stod(tok));
+            ref_n_joints_ = static_cast<int>(ref_act_.size());
             ++ref_steps_;
         }
     }
@@ -105,9 +93,12 @@ void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
 
     if (ref_steps_ == 0)
         throw std::runtime_error("load_reference: empty file " + csv_path);
+    if (ref_n_joints_ < NUM_LEG_JOINTS)
+        throw std::runtime_error("load_reference: CSV has only " + std::to_string(ref_n_joints_)
+                                 + " columns, need at least " + std::to_string(NUM_LEG_JOINTS));
 
     std::cout << "Loaded activation reference: " << ref_steps_
-              << " steps × " << NUM_JOINTS << " joints from " << csv_path << "\n";
+              << " steps × " << ref_n_joints_ << " joints from " << csv_path << "\n";
 }
 
 // -----------------------------------------------------------------------
@@ -211,12 +202,14 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 
     for (int t = 0; t < task_.horizon; ++t) {
         double act_cmd[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j) {
+        for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
             double nom   = trajectory_[t * NUM_JOINTS + j];
             double noisy = nom + noise_[s * task_.horizon * NUM_JOINTS
                                         + t * NUM_JOINTS + j];
             act_cmd[j] = std::clamp(noisy, ACT_MIN, ACT_MAX);
         }
+        for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
+            act_cmd[j] = 0.0;
 
         double tau_out[NUM_JOINTS];
         double effort_accum  = 0.0;
@@ -236,17 +229,17 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                     effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
             }
 
-            // Reference tracking: compare filtered activation[] against smoothed ref
-            // Both are in output (activation state) space — apples to apples.
+            // Reference tracking: compare Hill torques against reference torques,
+            // normalised by tau_max so the cost scale matches activation-space comparison.
             if (task_.cost.act_reference > 0.0 && ref) {
                 for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-                    double da = activation[j] - ref[j];
-                    ref_accum += da * da;
+                    double dt = (tau_out[j] - ref[j]) / muscle_.tau_max[j];
+                    ref_accum += dt * dt;
                 }
             }
 
             for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[j] = tau_out[j] - muscle_.kd_sim[j] * dq_cur[j];
+                d->ctrl[j] = tau_out[j];
 
             mj_step(model_, d);
 
@@ -290,7 +283,7 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
             for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[j] = tau_out[j] - muscle_.kd_sim[j] * dq_cur[j];
+                d->ctrl[j] = tau_out[j];
             mj_step(model_, d);
         }
     }
@@ -449,12 +442,12 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             }
             if (w.act_reference > 0.0 && ref) {
                 for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-                    double da = activation[j] - ref[j];
-                    ref_accum += da * da;
+                    double dt = (tau_out[j] - ref[j]) / muscle_.tau_max[j];
+                    ref_accum += dt * dt;
                 }
             }
             for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[j] = tau_out[j] - muscle_.kd_sim[j] * dq_cur[j];
+                d->ctrl[j] = tau_out[j];
             mj_step(model_, d);
         }
         bd.act_effort += w.act_effort    * effort_accum / task_.substeps
@@ -523,4 +516,6 @@ void MPPILocomotion::compute_real_torques(const RobotState& state,
 {
     hill_compute_torques(activations, state.q, state.dq, muscle_,
                          muscle_state_.activation, tau_out);
+    for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
+        tau_out[j] = 0.0;
 }
