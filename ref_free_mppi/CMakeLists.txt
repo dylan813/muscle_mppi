@@ -30,3 +30,15 @@ target_link_libraries(ref_free_mppi_controller
     pthread
     OpenMP::OpenMP_CXX
 )
+
+add_executable(generate_reference
+    generate_reference.cpp
+    control/ref_free_mppi.cpp
+    utils/tasks.cpp
+)
+
+target_link_libraries(generate_reference
+    mujoco
+    pthread
+    OpenMP::OpenMP_CXX
+)

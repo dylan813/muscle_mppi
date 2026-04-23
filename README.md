@@ -28,11 +28,6 @@ export CYCLONEDDS_URI='<CycloneDDS><Domain><SharedMemory><Enable>false</Enable><
 ./unitree_mujoco -r go2w -s scene.xml
 ```
 
-record
-```bash
-./unitree_mujoco -r go2w -s scene.xml -o ../../../analysis/videos/run.mp4
-```
-
 run muscle mppi
 ```bash
 cd ~/Documents/dylan/muscle_mppi/muscle_mppi/build
@@ -41,7 +36,12 @@ make -j$(nproc)
 ./muscle_mppi_controller
 ```
 
-record headless (this kinda sucks)
+record
+```bash
+./unitree_mujoco -r go2w -s scene.xml -o ../../../analysis/videos/run.mp4
+```
+
+record headless
 ```bash
 sudo apt install xvfb
 Xvfb :99 -screen 0 1280x720x24 &

@@ -16,34 +16,35 @@ static constexpr int NUM_WHEELS     = 4;
 struct CostWeights {
     double height      = 100.0;  // w_h:       L1 base height deviation
     double orientation = 10.0;   // w_orient:  SO(3) log angle squared
+    double ang_vel     = 1.0;    // w_omega:   L2 base angular velocity (gyro norm)
     double joint_reg   = 0.0;    // w_q:       L2 deviation from nominal pose
     double contact_vel = 0.5;    // w_c_vel:   L1 wheel body linear velocity (slip)
     double contact_frc = 5e-2;   // w_c_force: L1 vertical contact force deviation
     double terminal    = 2.5e3;  // w_H:       L1 horizontal base displacement
-    double vel_cmd     = 0.0;    // w_vel:     velocity command tracking (0 = stand)
+    double vel_cmd     = 0.5;    // w_vel:     velocity command tracking (0 = stand)
     double vel_des[3]  = {0.0, 0.0, 0.0};  // desired base velocity [m/s]
 };
 
 // Reference-free MPPI algorithm parameters (Sec. III of the paper).
 struct RefFreeParams {
     int    K      = 6;     // spline nodes; K-1 Hermite segments cover H_time
-    int    I_iter = 3;     // inner iterations per control step
-    double H_time = 0.9;   // horizon duration [s]
+    int    I_iter = 2;     // inner iterations per control step
+    double H_time = 0.5;   // horizon duration [s]
     double beta1  = 3.0;   // trajectory-level annealing temperature (Eq. 6)
     double beta2  = 3.0;   // action-level annealing temperature (Eq. 7)
 
     // Position noise std per joint [rad] — leg / wheel
     double scale_q_leg   = 0.05;
-    double scale_q_wheel = 0.15;  // wheels: larger, unbounded rotation
+    double scale_q_wheel = 0.0;  // wheels excluded from MPPI — position unbounded
 
     // Velocity noise std per joint [rad/s] — leg / wheel
     double scale_v_leg   = 0.3;
-    double scale_v_wheel = 1.0;   // wheels: rolling speed can vary widely
+    double scale_v_wheel = 0.0;  // wheels excluded from MPPI — reactive controller handles them
 };
 
 struct TaskConfig {
     const char* model_path =
-        "../../unitree_mujoco/unitree_robots/go2w/scene_terrain.xml";
+        "../../unitree_mujoco/unitree_robots/go2w/scene.xml";
 
     double height_target = 0.0;  // always overwritten by measured trunk height after standup
     double nominal_pose[NUM_JOINTS] = {};  // standing configuration
@@ -52,7 +53,7 @@ struct TaskConfig {
     RefFreeParams rf;
 
     // MPPI sampling
-    int    n_samples = 30;
+    int    n_samples = 16;
     double lambda    = 0.5;   // temperature on min-max normalized costs ∈ [0,1]
 
     // Physics
@@ -63,6 +64,13 @@ struct TaskConfig {
     // PD gains (must match values sent via LowCmd)
     double kp = 50.0;
     double kd =  3.5;
+
+    // Wheel rolling-constraint servo gains.
+    // Wheel ctrl = kp_wheel * (v_fwd/wheel_radius - omega_wheel).
+    // Not sent via LowCmd kp — applied as feedforward tau in the sim rollout
+    // and in get_torques() for the muscle_mppi reference.
+    double kp_wheel    = 5.0;
+    double wheel_radius = 0.04;  // metres (Go2W wheel radius)
 
     // Joint position limits used for Hermite velocity clamping (Eq. 5).
     // Wheels are unbounded — clamping is skipped for indices 12-15.

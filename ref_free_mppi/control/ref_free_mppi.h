@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mujoco/mujoco.h>
+#include <algorithm>
 #include <vector>
 #include <random>
 #include <string>
@@ -42,6 +43,15 @@ public:
 
     void set_height_target(double z) { height_target_ = z; }
 
+    // Wheel velocity command for the rolling constraint.
+    // clamp(vx, 0, vel_des) / r:
+    //   stand (vel_des=0)  → 0        → braking regardless of drift
+    //   walk, vx < vel_des → vx/r     → no-slip rolling assistance
+    //   walk, vx ≥ vel_des → vel_des/r → braking to cap speed
+    double wheel_omega_cmd(double vx) const {
+        return std::clamp(vx, 0.0, task_.cost.vel_des[0]) / task_.wheel_radius;
+    }
+
     // Update state-prediction horizon based on measured solve time.
     // Call after each solve: set_predict_delay(solve_ms / 1000.0)
     void set_predict_delay(double delay_s) {
@@ -54,6 +64,12 @@ public:
     void update(const RobotState& state,
                 double q_out[NUM_JOINTS],
                 double dq_out[NUM_JOINTS]);
+
+    // Compute the torques the current best trajectory would produce on `state`.
+    // Leg joints:  tau = kp*(q_des - q) + kd*(dq_des - dq)   (PD from spline t=0)
+    // Wheel joints: tau = kp_wheel*(v_fwd/r - omega)          (rolling constraint)
+    // Used by muscle_mppi as a torque reference — invert through Hill model to get activations.
+    void get_torques(const RobotState& state, double tau_out[NUM_JOINTS]) const;
 
 private:
     // ---- Spline helpers ----

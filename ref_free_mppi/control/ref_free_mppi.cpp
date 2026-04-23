@@ -285,12 +285,12 @@ RobotState RefFreeMPPI::predict_state(const RobotState& state) {
         spline_eval(theta_q_best_, theta_v_best_, t, q_des, dq_des);
 
         for (int sub = 0; sub < task_.substeps; ++sub) {
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double kp_j = (j < NUM_LEG_JOINTS) ? task_.kp : 0.0;
-                const double kd_j = (j < NUM_LEG_JOINTS) ? task_.kd : 0.5;
-                d->ctrl[j] = kp_j * (q_des[j]  - d->qpos[act_qpos_adr_[j]])
-                           + kd_j * (dq_des[j] - d->qvel[act_qvel_adr_[j]]);
+            for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+                d->ctrl[j] = task_.kp * (q_des[j]  - d->qpos[act_qpos_adr_[j]])
+                           + task_.kd * (dq_des[j] - d->qvel[act_qvel_adr_[j]]);
             }
+            for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
+                d->ctrl[j] = task_.kp_wheel * (0.0 - d->qvel[act_qvel_adr_[j]]);
             mj_step(model_, d);
         }
     }
@@ -334,6 +334,12 @@ double RefFreeMPPI::step_cost(const mjData* d, double /*t_horizon*/) const {
     const double qw = std::abs(d->qpos[3]);
     const double theta = 2.0 * std::acos(std::min(qw, 1.0));
     cost += w.orientation * theta * theta;
+
+    // Angular velocity: penalise spinning/tumbling rate (gyro L2 norm)
+    // qvel[3..5] = base angular velocity in world frame
+    cost += w.ang_vel * (d->qvel[3]*d->qvel[3]
+                       + d->qvel[4]*d->qvel[4]
+                       + d->qvel[5]*d->qvel[5]);
 
     // Joint regularisation (L2, leg joints only — wheels rotate freely)
     for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
@@ -437,12 +443,14 @@ double RefFreeMPPI::rollout(int s,
         spline_eval(tq, tv, t, q_des, dq_des);
 
         for (int sub = 0; sub < task_.substeps; ++sub) {
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double kp_j = (j < NUM_LEG_JOINTS) ? task_.kp : 0.0;
-                const double kd_j = (j < NUM_LEG_JOINTS) ? task_.kd : 0.5;
-                d->ctrl[j] = kp_j * (q_des[j]  - d->qpos[act_qpos_adr_[j]])
-                           + kd_j * (dq_des[j] - d->qvel[act_qvel_adr_[j]]);
+            // Leg joints: PD position control from spline targets
+            for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+                d->ctrl[j] = task_.kp * (q_des[j]  - d->qpos[act_qpos_adr_[j]])
+                           + task_.kd * (dq_des[j] - d->qvel[act_qvel_adr_[j]]);
             }
+            // Wheel joints: fully decoupled — hold stationary
+            for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
+                d->ctrl[j] = task_.kp_wheel * (0.0 - d->qvel[act_qvel_adr_[j]]);
             mj_step(model_, d);
         }
 
@@ -584,4 +592,32 @@ void RefFreeMPPI::update(const RobotState& state,
         q_out[j]  = theta_q_best_[j];
         dq_out[j] = theta_v_best_[j];
     }
+}
+
+// ---------------------------------------------------------------------------
+// get_torques — torque reference for muscle_mppi's act_reference cost.
+//
+// Computes the torques this controller would command on `state`:
+//   Legs:   tau = kp*(q_des - q) + kd*(dq_des - dq)   [PD from spline t=0]
+//   Wheels: tau = kp_wheel*(v_fwd/r - omega)            [rolling constraint]
+//
+// These torques can be fed into muscle_mppi's inverse_hill() to produce
+// reference activations without an offline dial-mpc rollout.
+// ---------------------------------------------------------------------------
+void RefFreeMPPI::get_torques(const RobotState& state,
+                               double tau_out[NUM_JOINTS]) const
+{
+    // Spline targets at t = 0 (the action being executed right now)
+    double q_des[NUM_JOINTS], dq_des[NUM_JOINTS];
+    spline_eval(theta_q_best_, theta_v_best_, 0.0, q_des, dq_des);
+
+    // Leg joints: PD torque
+    for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+        tau_out[j] = task_.kp * (q_des[j]  - state.q[j])
+                   + task_.kd * (dq_des[j] - state.dq[j]);
+    }
+
+    // Wheel joints: fully decoupled — hold stationary
+    for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
+        tau_out[j] = task_.kp_wheel * (0.0 - state.dq[j]);
 }

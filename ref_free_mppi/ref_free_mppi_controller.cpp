@@ -44,7 +44,15 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
 class RefFreeMPPIController {
 public:
     explicit RefFreeMPPIController(const std::string& task = "stand")
-        : mppi_(task) {}
+        : mppi_(task)
+    {
+        // Pre-seed so ControlLoop never sends all-zero targets when it first
+        // enters the MPPI phase.  Without this, there is a ~20 ms window where
+        // the PD controller targets q=0 for all joints at kp=50, kicking the
+        // robot and triggering runaway backward acceleration via the rolling
+        // constraint feedback loop.
+        for (int j = 0; j < NUM_LEG_JOINTS; ++j) cached_q_[j] = stand_pos_[j];
+    }
 
     void Init() {
         InitLowCmd();
@@ -179,11 +187,12 @@ private:
                 low_cmd_.motor_cmd()[i].kd()  = 3.5;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
+            // Wheels: fully decoupled — hold stationary, no body-state feedback
             for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = 0.0;
+                low_cmd_.motor_cmd()[i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[i].dq()  = dq[i];
-                low_cmd_.motor_cmd()[i].kd()  = 0.5;
+                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].kd()  = 5.0;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
         }
