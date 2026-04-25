@@ -1,8 +1,8 @@
 #include <iostream>
 #include <cstring>
 #include <cmath>
-#include <atomic>
 #include <chrono>
+#include <atomic>
 #include <mutex>
 #include <thread>
 #include <unistd.h>
@@ -15,7 +15,7 @@
 #include <unitree/common/time/time_tool.hpp>
 #include <unitree/common/thread/thread.hpp>
 
-#include "control/mppi_locomotion.h"
+#include "control/ref_free_mppi.h"
 
 using namespace unitree::common;
 using namespace unitree::robot;
@@ -41,15 +41,14 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
     return CRC32;
 }
 
-class MPPIController {
+class RefFreeMPPIController {
 public:
-    explicit MPPIController(const std::string& task      = "walk",
-                            const std::string& yaml_path = "../utils/tasks.yaml")
-        : mppi_(task, yaml_path) {}
-
-    void load_reference(const std::string& csv_path, double w_ref = 1.0) {
-        mppi_.set_act_reference_weight(w_ref);
-        mppi_.load_reference(csv_path);
+    explicit RefFreeMPPIController(const std::string& task = "stand")
+        : mppi_(task)
+    {
+        // Without pre-seeding, ControlLoop targets q=0 at kp=50 on first entry,
+        // kicking the robot into runaway backward acceleration.
+        for (int j = 0; j < NUM_LEG_JOINTS; ++j) cached_q_[j] = stand_pos_[j];
     }
 
     void Init() {
@@ -62,17 +61,20 @@ public:
         lowstate_subscriber_.reset(
             new ChannelSubscriber<unitree_go::msg::dds_::LowState_>(TOPIC_LOWSTATE));
         lowstate_subscriber_->InitChannel(
-            std::bind(&MPPIController::LowStateHandler, this, std::placeholders::_1), 1);
+            std::bind(&RefFreeMPPIController::LowStateHandler,
+                      this, std::placeholders::_1), 1);
 
         sportmode_subscriber_.reset(
             new ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_SPORTMODE));
         sportmode_subscriber_->InitChannel(
-            std::bind(&MPPIController::SportModeHandler, this, std::placeholders::_1), 1);
+            std::bind(&RefFreeMPPIController::SportModeHandler,
+                      this, std::placeholders::_1), 1);
 
         control_thread_ = CreateRecurrentThreadEx(
-            "mppi_ctrl", UT_CPU_ID_NONE, 20000, &MPPIController::ControlLoop, this);
+            "rf_servo", UT_CPU_ID_NONE, 20000,
+            &RefFreeMPPIController::ControlLoop, this);
 
-        mppi_thread_ = std::thread(&MPPIController::MPPILoop, this);
+        mppi_thread_ = std::thread(&RefFreeMPPIController::MPPILoop, this);
     }
 
 private:
@@ -92,7 +94,8 @@ private:
     }
 
     void LowStateHandler(const void* msg) {
-        const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
+        const auto* s =
+            static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
         for (int i = 0; i < NUM_JOINTS; ++i) {
             state_.q[i]  = s->motor_state()[i].q();
@@ -108,7 +111,8 @@ private:
     }
 
     void SportModeHandler(const void* msg) {
-        const auto* s = static_cast<const unitree_go::msg::dds_::SportModeState_*>(msg);
+        const auto* s =
+            static_cast<const unitree_go::msg::dds_::SportModeState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
         state_.pos[0] = s->position()[0];
         state_.pos[1] = s->position()[1];
@@ -125,8 +129,7 @@ private:
         if (running_time_ < STANDUP_DURATION) {
             double alpha;
             if (running_time_ < STANDUP_DURATION * 0.5) {
-                alpha = running_time_ / (STANDUP_DURATION * 0.5);
-                alpha = std::min(alpha, 1.0);
+                alpha = std::min(running_time_ / (STANDUP_DURATION * 0.5), 1.0);
                 for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
                     low_cmd_.motor_cmd()[i].q()   = crouch_pos_[i];
                     low_cmd_.motor_cmd()[i].kp()  = alpha * 30.0;
@@ -138,7 +141,8 @@ private:
                 alpha = (running_time_ - STANDUP_DURATION * 0.5) / (STANDUP_DURATION * 0.5);
                 alpha = std::min(alpha, 1.0);
                 for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
-                    low_cmd_.motor_cmd()[i].q()   = (1.0-alpha)*crouch_pos_[i] + alpha*stand_pos_[i];
+                    low_cmd_.motor_cmd()[i].q()   =
+                        (1.0 - alpha) * crouch_pos_[i] + alpha * stand_pos_[i];
                     low_cmd_.motor_cmd()[i].kp()  = 30.0 + alpha * 20.0;
                     low_cmd_.motor_cmd()[i].dq()  = 0.0;
                     low_cmd_.motor_cmd()[i].kd()  = 3.5;
@@ -152,34 +156,26 @@ private:
                 low_cmd_.motor_cmd()[i].kd()  = 0.5;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
-        } else if (!mppi_ready_.load()) {
-            // Hold stand pose with PD until MPPI has converged
+        } else {
+            double q[NUM_JOINTS], dq[NUM_JOINTS];
+            {
+                std::lock_guard<std::mutex> lk(cmd_mutex_);
+                std::copy(cached_q_,  cached_q_  + NUM_JOINTS, q);
+                std::copy(cached_dq_, cached_dq_ + NUM_JOINTS, dq);
+            }
             for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = stand_pos_[i];
+                low_cmd_.motor_cmd()[i].q()   = q[i];
                 low_cmd_.motor_cmd()[i].kp()  = 50.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].dq()  = dq[i];
                 low_cmd_.motor_cmd()[i].kd()  = 3.5;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
             for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = 0.0;
-                low_cmd_.motor_cmd()[i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 0.5;
-                low_cmd_.motor_cmd()[i].tau() = 0.0;
-            }
-        } else {
-            double tau_cmd[NUM_JOINTS];
-            {
-                std::lock_guard<std::mutex> lk(cmd_mutex_);
-                std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
-            }
-            for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[i].kp()  = 0.0;
                 low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = kd_[i];
-                low_cmd_.motor_cmd()[i].tau() = tau_cmd[i];
+                low_cmd_.motor_cmd()[i].kd()  = 5.0;
+                low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
         }
 
@@ -190,65 +186,62 @@ private:
     }
 
     void MPPILoop() {
-        while (running_time_ < STANDUP_DURATION)
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        while (running_time_ < STANDUP_DURATION) std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        std::cout << "Muscle MPPI started. height target = " << mppi_.height_target() << " m\n";
+        {
+            std::lock_guard<std::mutex> lk(state_mutex_);
+            mppi_.set_height_target(state_.pos[2]);
+            std::cout << "MPPI solver started.  height target = "
+                      << state_.pos[2] << " m\n";
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(cmd_mutex_);
+            for (int j = 0; j < NUM_LEG_JOINTS; ++j) cached_q_[j] = stand_pos_[j];
+            for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j) cached_q_[j] = 0.0;
+            std::fill(cached_dq_, cached_dq_ + NUM_JOINTS, 0.0);
+        }
 
         int solve_count = 0;
         double solve_sum_ms = 0.0;
 
         while (true) {
-            RobotState snap;
+            RobotState state_snap;
             {
                 std::lock_guard<std::mutex> lk(state_mutex_);
-                snap = state_;
+                state_snap = state_;
             }
-            if (!snap.valid) {
+            if (!state_snap.valid) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
 
             auto t0 = std::chrono::steady_clock::now();
-            double activations[NUM_JOINTS] = {};
-            mppi_.update(snap, activations);
-            double tau_cmd[NUM_JOINTS] = {};
-            mppi_.compute_real_torques(snap, activations, tau_cmd);
-            double ms = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - t0).count();
+            double q_out[NUM_JOINTS], dq_out[NUM_JOINTS];
+            mppi_.update(state_snap, q_out, dq_out);
+            auto t1 = std::chrono::steady_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
             {
                 std::lock_guard<std::mutex> lk(cmd_mutex_);
-                std::copy(tau_cmd, tau_cmd + NUM_JOINTS, cached_tau_);
+                std::copy(q_out,  q_out  + NUM_JOINTS, cached_q_);
+                std::copy(dq_out, dq_out + NUM_JOINTS, cached_dq_);
             }
+
+            mppi_.set_predict_delay(ms / 1000.0);
 
             solve_sum_ms += ms;
             ++solve_count;
             if (solve_count % 20 == 0)
-                std::cout << "Muscle MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
-
-            // Wait for CONVERGENCE_SOLVES iterations before handing over to avoid
-            // instability from a cold warm-start.
-            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES) {
-                std::cout << "MPPI converged after " << solve_count
-                          << " solves (avg " << solve_sum_ms / solve_count
-                          << " ms) — handing over to Hill torques\n";
-                mppi_ready_.store(true);
-            }
+                std::cout << "MPPI avg solve: "
+                          << solve_sum_ms / solve_count << " ms  ("
+                          << static_cast<int>(std::round(solve_sum_ms / solve_count / 20.0))
+                          << " steps predicted)\n";
         }
     }
 
     static constexpr double dt_              = 0.02;
     static constexpr double STANDUP_DURATION = 3.0;
-    static constexpr int    CONVERGENCE_SOLVES = 20;
-
-    const double kd_[NUM_JOINTS] = {
-        2.0, 3.5, 3.5,   // FR  hip / thigh / calf
-        2.0, 3.5, 3.5,   // FL
-        2.0, 3.5, 3.5,   // RR
-        2.0, 3.5, 3.5,   // RL
-        2.0, 2.0, 2.0, 2.0  // wheels
-    };
 
     const double stand_pos_[NUM_LEG_JOINTS] = {
         0.0,  0.67, -1.3,
@@ -264,15 +257,15 @@ private:
     };
 
     double running_time_ = 0.0;
-    std::atomic<bool> mppi_ready_{false};
 
-    MPPILocomotion mppi_;
+    RefFreeMPPI mppi_;
 
-    std::mutex state_mutex_;
-    RobotState state_{};
+    std::mutex  state_mutex_;
+    RobotState  state_{};
 
     std::mutex cmd_mutex_;
-    double cached_tau_[NUM_JOINTS] = {};
+    double cached_q_[NUM_JOINTS]  = {};
+    double cached_dq_[NUM_JOINTS] = {};
 
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
 
@@ -290,18 +283,11 @@ int main(int argc, const char** argv) {
     else
         ChannelFactory::Instance()->Init(1, argv[1]);
 
-    std::cout << "MPPI Controller (Hill muscle model) — press Enter to start\n";
+    std::cout << "Reference-Free MPPI Controller — press Enter to start\n";
     std::cin.get();
 
-    const std::string task      = (argc >= 3) ? argv[2] : "walk";
-    const std::string ref_csv   = (argc >= 4) ? argv[3] : "../../reference/ref_torques.csv";
-    const std::string yaml_path = (argc >= 5) ? argv[4] : "../utils/tasks.yaml";
-
-    std::cout << "Loading task '" << task << "' from " << yaml_path << "\n";
-    MPPIController controller(task, yaml_path);
-
-    controller.load_reference(ref_csv);
-
+    const std::string task = (argc >= 3) ? argv[2] : "stand";
+    RefFreeMPPIController controller(task);
     controller.Init();
 
     while (true) sleep(10);

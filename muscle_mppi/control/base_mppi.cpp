@@ -16,23 +16,19 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
 
     model_->opt.timestep = task_.dt;
 
-    // n_samples rollout slots + 1 dedicated slot for state prediction/diagnosis
     data_.resize(task_.n_samples + 1);
     for (int i = 0; i <= task_.n_samples; ++i)
         data_[i] = mj_makeData(model_);
 
-    // Populate actuator → DOF address mapping dynamically from the model
-    // so no hardcoded LS_TO_QPOS table is needed.
+    // Build actuator → DOF mapping from the model so no hardcoded index table is needed.
     for (int j = 0; j < NUM_JOINTS; ++j) {
         int jid = model_->actuator_trnid[2 * j];
         act_qpos_adr_[j] = model_->jnt_qposadr[jid];
         act_qvel_adr_[j] = model_->jnt_dofadr[jid];
     }
 
-    // Replace the model's default joint damping with kd_sim so that
-    // d->ctrl[j] = tau_hill (pure Hill torque, always within ctrlrange)
-    // and MuJoCo applies the kd term automatically — matching hardware which does
-    // tau_eff = tau_hill - kd*dq via the motor controller.
+    // Set joint damping to kd_sim so MuJoCo applies it automatically,
+    // matching hardware where tau_eff = tau_hill - kd*dq.
     for (int j = 0; j < NUM_JOINTS; ++j)
         model_->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j];
 
@@ -40,7 +36,6 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     noise_.assign(task_.n_samples * task_.horizon * NUM_JOINTS, 0.0);
     costs_.resize(task_.n_samples);
 
-    // Precompute noise annealing schedule (Eq. 8): factor[iter][t]
     const int N = task_.n_iterations;
     const int H = task_.horizon;
     noise_sched_.resize(N * H);
@@ -56,8 +51,6 @@ BaseMPPI::~BaseMPPI() {
     mj_deleteModel(model_);
 }
 
-// Annealed noise per Eq. (8): σ(iter,t) = σ_base * anneal[iter][t]
-// Schedule is precomputed in constructor; reused across all samples.
 void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
     for (int s = 0; s < task_.n_samples; ++s)
         for (int t = 0; t < task_.horizon; ++t) {
@@ -69,21 +62,17 @@ void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
         }
 }
 
-// -----------------------------------------------------------------------
-// Write a RobotState into a mjData, then call mj_forward.
-// qpos: [base_xyz(3), base_quat(4), joints(16)] = 23
-// qvel: [base_linvel(3), base_angvel(3), joint_vel(16)] = 22
-// -----------------------------------------------------------------------
+// qpos: [xyz(3), quat(4), joints(16)] — qvel: [linvel(3), angvel(3), joint_vel(16)]
 void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     mj_resetData(model_, d);
 
     d->qpos[0] = state.pos[0];
     d->qpos[1] = state.pos[1];
     d->qpos[2] = state.pos[2];
-    d->qpos[3] = state.quat[0];  // w
-    d->qpos[4] = state.quat[1];  // x
-    d->qpos[5] = state.quat[2];  // y
-    d->qpos[6] = state.quat[3];  // z
+    d->qpos[3] = state.quat[0];
+    d->qpos[4] = state.quat[1];
+    d->qpos[5] = state.quat[2];
+    d->qpos[6] = state.quat[3];
 
     for (int j = 0; j < NUM_JOINTS; ++j)
         d->qpos[act_qpos_adr_[j]] = state.q[j];

@@ -16,16 +16,11 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     muscle_ = task_.muscle;
     best_trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
 
-    // Zero warm-start: let MPPI self-converge over several solves while PD holds.
-    // Avoids sign errors from a hand-tuned guess; trajectory_ and muscle state start neutral.
-
-    // Base body ID
     for (const char* name : {"trunk", "base", "base_link"}) {
         int bid = mj_name2id(model_, mjOBJ_BODY, name);
         if (bid >= 0) { base_bid_ = bid; break; }
     }
 
-    // Wheel body IDs and spin-axle directions — FR, FL, RR, RL
     static const char* WHEEL_BODY_NAMES[4] = {
         "FR_wheel_link", "FL_wheel_link", "RR_wheel_link", "RL_wheel_link"
     };
@@ -33,52 +28,44 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         wheel_body_ids_[k] = mj_name2id(model_, mjOBJ_BODY, WHEEL_BODY_NAMES[k]);
         if (wheel_body_ids_[k] < 0)
             throw std::runtime_error(std::string("Body not found: ") + WHEEL_BODY_NAMES[k]);
-        // Actuator NUM_LEG_JOINTS+k is the wheel joint; read its axis from the model
         const int jid = model_->actuator_trnid[2 * (NUM_LEG_JOINTS + k)];
         wheel_axle_[k][0] = model_->jnt_axis[3 * jid + 0];
         wheel_axle_[k][1] = model_->jnt_axis[3 * jid + 1];
         wheel_axle_[k][2] = model_->jnt_axis[3 * jid + 2];
     }
 
-    // Nominal contact force per wheel: total_mass * |g| / 4
     double total_mass = 0.0;
     for (int i = 1; i < model_->nbody; ++i)
         total_mass += model_->body_mass[i];
     f_nominal_ = total_mass * std::abs(model_->opt.gravity[2]) / 4.0;
 
-    // Sync MotionCommand from task config so terminal_cost uses the correct velocity targets.
-    // set_command() can override this at runtime (e.g. from a joystick).
     cmd_.vx = task_.cost.vel_des[0];
     cmd_.vy = task_.cost.vel_des[1];
     cmd_.wz = task_.cost.vel_des[2];
 }
 
-// -----------------------------------------------------------------------
-// Reference activation loader — reads CSV produced by extract_reference.py
-// -----------------------------------------------------------------------
 void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
 {
     std::ifstream f(csv_path);
     if (!f.is_open())
         throw std::runtime_error("load_reference: cannot open " + csv_path);
 
-    ref_act_.clear();
+    reference_.clear();
     ref_steps_    = 0;
     ref_n_joints_ = 0;
     ref_dt_       = ref_dt;
 
     std::string line;
-    // Skip optional header line (starts with a letter, not a digit or '-')
     if (std::getline(f, line)) {
         if (!line.empty() && (std::isalpha(line[0]) || line[0] == 'j')) {
-            // header — discard and proceed
+            // skip header
         } else {
             // first data line — parse it and detect column count
             std::istringstream ss(line);
             std::string tok;
             while (std::getline(ss, tok, ','))
-                ref_act_.push_back(std::stod(tok));
-            ref_n_joints_ = static_cast<int>(ref_act_.size());
+                reference_.push_back(std::stod(tok));
+            ref_n_joints_ = static_cast<int>(reference_.size());
             ++ref_steps_;
         }
     }
@@ -87,7 +74,7 @@ void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
         std::istringstream ss(line);
         std::string tok;
         while (std::getline(ss, tok, ','))
-            ref_act_.push_back(std::stod(tok));
+            reference_.push_back(std::stod(tok));
         ++ref_steps_;
     }
 
@@ -101,11 +88,6 @@ void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
               << " steps × " << ref_n_joints_ << " joints from " << csv_path << "\n";
 }
 
-// -----------------------------------------------------------------------
-// step_cost — paper Eq. (17), Table II walking weights
-//
-// c_t = w_h|Δz| + w_orient*θ² + w_q*||q-q0||² + w_cv*||v_c||₁ + w_cf*||f_c-f0||₁
-// -----------------------------------------------------------------------
 double MPPILocomotion::step_cost(const mjData* d,
                                   const double act_cmd[NUM_JOINTS],
                                   int horizon_step)
@@ -113,16 +95,12 @@ double MPPILocomotion::step_cost(const mjData* d,
     const CostWeights& w = task_.cost;
     double cost = 0.0;
 
-    // -- Height (L1): base body z position --
     cost += w.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
 
-    // -- Orientation: geodesic angle² from upright.
-    // ||log(R)||² = θ² where θ = 2*acos(|qw|).  Exact for all tilt magnitudes.
     double qw    = d->qpos[3];
     double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
     cost += w.orientation * angle * angle;
 
-    // -- Posture: leg joints near nominal (w_q=0 disables for walking) --
     if (w.posture > 0.0) {
         for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
             double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
@@ -130,15 +108,12 @@ double MPPILocomotion::step_cost(const mjData* d,
         }
     }
 
-    // -- Contact velocity: lateral slip only (velocity along wheel axle).
-    // Rolling (perpendicular to axle) is free; only sideways slip is penalised.
+    // lateral slip: penalise velocity along wheel axle (rolling is free)
     if (w.contact_vel > 0.0) {
         for (int k = 0; k < 4; ++k) {
             mjtNum vel6[6];
             mj_objectVelocity(model_, d, mjOBJ_BODY, wheel_body_ids_[k], vel6, 0);
-            // vel6[3..5] = linear velocity in world frame
             const mjtNum* wmat = d->xmat + 9 * wheel_body_ids_[k];
-            // Rotate axle from body frame to world frame (column 0 of rotation matrix)
             const double ax = wmat[0]*wheel_axle_[k][0] + wmat[1]*wheel_axle_[k][1] + wmat[2]*wheel_axle_[k][2];
             const double ay = wmat[3]*wheel_axle_[k][0] + wmat[4]*wheel_axle_[k][1] + wmat[5]*wheel_axle_[k][2];
             const double az = wmat[6]*wheel_axle_[k][0] + wmat[7]*wheel_axle_[k][1] + wmat[8]*wheel_axle_[k][2];
@@ -147,21 +122,17 @@ double MPPILocomotion::step_cost(const mjData* d,
         }
     }
 
-    // -- Contact force: L1 deviation of wheel body force from nominal.
-    // cfrc_ext[6*bid + 3..5] = external contact force on body (world frame).
     if (w.contact_force > 0.0) {
         for (int k = 0; k < 4; ++k) {
             int bid = wheel_body_ids_[k];
             double fx = d->cfrc_ext[6*bid + 3];
             double fy = d->cfrc_ext[6*bid + 4];
             double fz = d->cfrc_ext[6*bid + 5];
-            // fx/fy should be ~0; fz should be ~f_nominal_
             cost += w.contact_force * (std::abs(fx) + std::abs(fy)
                                       + std::abs(fz - f_nominal_));
         }
     }
 
-    // -- Base velocity tracking: penalise deviation from vel_des in world frame --
     if (w.vel_cmd > 0.0) {
         double dvx = d->qvel[0] - w.vel_des[0];
         double dvy = d->qvel[1] - w.vel_des[1];
@@ -171,10 +142,6 @@ double MPPILocomotion::step_cost(const mjData* d,
     return cost;
 }
 
-// -----------------------------------------------------------------------
-// terminal_cost — paper Eq. (18)
-// c_T = w_H * ||p_base(xH) - p_target||₁,  p_target = p_0 + v_des*H*dt
-// -----------------------------------------------------------------------
 double MPPILocomotion::terminal_cost(const mjData* d)
 {
     const CostWeights& w = task_.cost;
@@ -187,9 +154,6 @@ double MPPILocomotion::terminal_cost(const mjData* d)
                         + std::abs(d->qpos[1] - py_target));
 }
 
-// -----------------------------------------------------------------------
-// Rollout
-// -----------------------------------------------------------------------
 double MPPILocomotion::rollout(int s, const RobotState& state)
 {
     mjData* d = data_[s];
@@ -214,7 +178,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         double tau_out[NUM_JOINTS];
         double effort_accum  = 0.0;
         double ref_accum     = 0.0;
-        const double* ref    = ref_act_at(t);  // smoothed reference activation (or nullptr)
+        const double* ref    = reference_at(t);
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -223,14 +187,11 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
 
-            // Metabolic effort: Σ a²·τ_max (leg joints, using actual filtered activation)
             if (task_.cost.act_effort > 0.0) {
                 for (int j = 0; j < NUM_LEG_JOINTS; ++j)
                     effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
             }
 
-            // Reference tracking: compare Hill torques against reference torques,
-            // normalised by tau_max so the cost scale matches activation-space comparison.
             if (task_.cost.act_reference > 0.0 && ref) {
                 for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
                     double dt = (tau_out[j] - ref[j]) / muscle_.tau_max[j];
@@ -256,11 +217,6 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
-// -----------------------------------------------------------------------
-// State prediction (Sec. III-E, Eq. 14-15): simulate n_steps ahead using
-// the prefix of best_trajectory_ to compensate for compute latency.
-// Uses the dedicated slot data_[task_.n_samples] — isolated from rollout slots.
-// -----------------------------------------------------------------------
 RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
 {
     mjData* d = data_[task_.n_samples];
@@ -303,10 +259,6 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
     return predicted;
 }
 
-// -----------------------------------------------------------------------
-// MPPI update — state prediction + multiple planning iterations with noise
-// annealing and best-trajectory tracking (Sec. III-D/E, Eq. 8).
-// -----------------------------------------------------------------------
 void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_JOINTS])
 {
     auto t_start = std::chrono::steady_clock::now();
@@ -317,8 +269,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         return;
     }
 
-    // Predict state n_skip MPC steps ahead to compensate for compute latency.
-    // n_skip = round(last_compute_ms / dt_step), clamped to [1, horizon/2].
     const double dt_step = task_.substeps * task_.dt;
     const int n_skip = std::clamp(
         static_cast<int>(std::round(last_compute_ms_ * 1e-3 / dt_step)),
@@ -326,7 +276,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
 
     RobotState predicted = predict_state(state, n_skip);
 
-    // Advance reference trajectory pointer to align with predicted state time
     if (ref_steps_ > 0)
         ref_offset_ = (ref_offset_ + n_skip) % ref_steps_;
 
@@ -334,7 +283,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
     start_pos_[1] = predicted.pos[1];
     start_pos_[2] = predicted.pos[2];
 
-    // Warm-start: shift best_trajectory_ forward by n_skip steps, pad tail.
     for (int t = 0; t < task_.horizon - n_skip; ++t)
         for (int j = 0; j < NUM_JOINTS; ++j)
             trajectory_[t * NUM_JOINTS + j] =
@@ -354,7 +302,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         for (int s = 0; s < task_.n_samples; ++s)
             costs_[s] = rollout(s, predicted);
 
-        // Track best rollout seen across all iterations
         for (int s = 0; s < task_.n_samples; ++s) {
             if (costs_[s] < best_cost_) {
                 best_cost_ = costs_[s];
@@ -368,7 +315,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
             }
         }
 
-        // Weighted average → update trajectory_ for next iteration
         double cost_min   = *std::min_element(costs_.begin(), costs_.end());
         double cost_max   = *std::max_element(costs_.begin(), costs_.end());
         double cost_range = cost_max - cost_min;
@@ -397,7 +343,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         trajectory_ = std::move(new_traj);
     }
 
-    // Execute from best_trajectory_ (not weighted average)
     for (int j = 0; j < NUM_JOINTS; ++j)
         activations_out[j] = best_trajectory_[j];
 
@@ -405,9 +350,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         std::chrono::steady_clock::now() - t_start).count();
 }
 
-// -----------------------------------------------------------------------
-// Cost breakdown (zero-noise nominal rollout)
-// -----------------------------------------------------------------------
 MPPILocomotion::CostBreakdown
 MPPILocomotion::diagnose_cost(const RobotState& state)
 {
@@ -428,7 +370,7 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
         double tau_out[NUM_JOINTS];
         double effort_accum = 0.0;
         double ref_accum    = 0.0;
-        const double* ref   = ref_act_at(t);
+        const double* ref   = reference_at(t);
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -497,7 +439,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
 
     }
 
-    // Terminal
     const double dt_step   = task_.dt * task_.substeps;
     const double px_target = start_pos_[0] + cmd_.vx * task_.horizon * dt_step;
     const double py_target = start_pos_[1] + cmd_.vy * task_.horizon * dt_step;
@@ -507,9 +448,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
     return bd;
 }
 
-// -----------------------------------------------------------------------
-// Real-robot Hill model
-// -----------------------------------------------------------------------
 void MPPILocomotion::compute_real_torques(const RobotState& state,
                                           const double activations[NUM_JOINTS],
                                           double tau_out[NUM_JOINTS])

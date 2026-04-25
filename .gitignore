@@ -2,7 +2,7 @@
 muscle_mppi/build/
 ref_free_mppi/build/
 
-# Third-party repos (cloned separately, not part of this project)
+# Third-party repos
 unitree_mujoco/
 unitree_sdk2/
 
@@ -10,7 +10,7 @@ unitree_sdk2/
 MUJOCO_LOG.TXT
 **/MUJOCO_LOG.TXT
 
-# CMake artifacts if built outside mppi/build/
+# CMake artifacts
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

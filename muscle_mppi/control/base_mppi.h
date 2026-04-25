@@ -7,34 +7,26 @@
 #include <algorithm>
 #include "../utils/tasks.h"
 
-// Sensor data assembled from rt/lowstate + rt/sportmodestate
 struct RobotState {
-    double pos[3]  = {};            // base position (x, y, z)
-    double vel[3]  = {};            // base linear velocity
-    double quat[4] = {1,0,0,0};    // IMU quaternion (w, x, y, z)
-    double gyro[3] = {};            // IMU angular velocity
-    double q[16]   = {};            // joint positions
-    double dq[16]  = {};            // joint velocities
+    double pos[3]  = {};
+    double vel[3]  = {};
+    double quat[4] = {1,0,0,0};  // w, x, y, z
+    double gyro[3] = {};
+    double q[16]   = {};
+    double dq[16]  = {};
     bool   valid   = false;
 };
 
-// Engine base — analogous to MPPI_quad's base_controller.py (BaseMPPI).
-// Owns the MuJoCo model, data pool, trajectory/noise/cost buffers, and
-// noise sampling.  Does NOT know about cost functions or control strategy;
-// those are provided by the derived class via rollout().
 class BaseMPPI {
 public:
     explicit BaseMPPI(const TaskConfig& task);
     virtual ~BaseMPPI();
 
-    // Overwrite height target at runtime (measured from real robot at handoff)
     void   set_height_target(double z) { height_target_ = z; }
     double height_target()       const { return height_target_; }
 
-    // Runtime cost weight overrides
     void set_act_reference_weight(double w) { task_.cost.act_reference = w; }
 
-    // Cost diagnostics — valid after update() returns
     double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
     double cost_max()  const { return *std::max_element(costs_.begin(), costs_.end()); }
     double cost_mean() const {
@@ -44,24 +36,22 @@ public:
     }
 
 protected:
-    // Derived class provides one rollout; returns total cost for sample s.
     virtual double rollout(int s, const RobotState& state) = 0;
 
-    // Helpers available to derived class
     void   sample_noise(int iter, int n_iters);
     void   set_mj_state(mjData* d, const RobotState& state);
 
     TaskConfig task_;
 
     mjModel*             model_ = nullptr;
-    std::vector<mjData*> data_;        // [n_samples + 1]: samples + dedicated prediction slot
+    std::vector<mjData*> data_;        // [n_samples + 1]: rollout slots + prediction
 
-    std::vector<double> trajectory_;   // [horizon × NUM_JOINTS] position targets
-    std::vector<double> noise_;        // [n_samples × horizon × NUM_JOINTS]
-    std::vector<double> costs_;        // [n_samples]
-    std::vector<double> noise_sched_;  // [n_iterations × horizon] precomputed annealing factors
+    std::vector<double> trajectory_;
+    std::vector<double> noise_;
+    std::vector<double> costs_;
+    std::vector<double> noise_sched_;
 
-    // Actuator → MuJoCo DOF addresses (from model actuator_trnid — no hardcoded mapping)
+    // Actuator → MuJoCo DOF addresses (from actuator_trnid — no hardcoded mapping)
     int act_qpos_adr_[NUM_JOINTS] = {};
     int act_qvel_adr_[NUM_JOINTS] = {};
 

@@ -57,7 +57,5 @@ struct MotionCommand {
     double height = 0.0;
 };
 
-// Load a named task from tasks.yaml.
-// Default yaml_path is relative to the build directory.
 TaskConfig load_task(const std::string& task_name,
                      const std::string& yaml_path = "../utils/tasks.yaml");
