@@ -127,7 +127,7 @@ private:
             if (running_time_ < STANDUP_DURATION * 0.5) {
                 alpha = running_time_ / (STANDUP_DURATION * 0.5);
                 alpha = std::min(alpha, 1.0);
-                for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                for (int i = 0; i < NUM_JOINTS; ++i) {
                     low_cmd_.motor_cmd()[i].q()   = crouch_pos_[i];
                     low_cmd_.motor_cmd()[i].kp()  = alpha * 30.0;
                     low_cmd_.motor_cmd()[i].dq()  = 0.0;
@@ -137,7 +137,7 @@ private:
             } else {
                 alpha = (running_time_ - STANDUP_DURATION * 0.5) / (STANDUP_DURATION * 0.5);
                 alpha = std::min(alpha, 1.0);
-                for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+                for (int i = 0; i < NUM_JOINTS; ++i) {
                     low_cmd_.motor_cmd()[i].q()   = (1.0-alpha)*crouch_pos_[i] + alpha*stand_pos_[i];
                     low_cmd_.motor_cmd()[i].kp()  = 30.0 + alpha * 20.0;
                     low_cmd_.motor_cmd()[i].dq()  = 0.0;
@@ -145,27 +145,13 @@ private:
                     low_cmd_.motor_cmd()[i].tau() = 0.0;
                 }
             }
-            for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = 0.0;
-                low_cmd_.motor_cmd()[i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 0.5;
-                low_cmd_.motor_cmd()[i].tau() = 0.0;
-            }
         } else if (!mppi_ready_.load()) {
             // Hold stand pose with PD until MPPI has converged
-            for (int i = 0; i < NUM_LEG_JOINTS; ++i) {
+            for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[i].q()   = stand_pos_[i];
                 low_cmd_.motor_cmd()[i].kp()  = 50.0;
                 low_cmd_.motor_cmd()[i].dq()  = 0.0;
                 low_cmd_.motor_cmd()[i].kd()  = 3.5;
-                low_cmd_.motor_cmd()[i].tau() = 0.0;
-            }
-            for (int i = NUM_LEG_JOINTS; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = 0.0;
-                low_cmd_.motor_cmd()[i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 0.5;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
         } else {
@@ -247,7 +233,6 @@ private:
         2.0, 3.5, 3.5,   // FL
         2.0, 3.5, 3.5,   // RR
         2.0, 3.5, 3.5,   // RL
-        2.0, 2.0, 2.0, 2.0  // wheels
     };
 
     const double stand_pos_[NUM_LEG_JOINTS] = {

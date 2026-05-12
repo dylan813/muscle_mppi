@@ -47,14 +47,14 @@ make -j$(nproc)
 Terminal 1: Open the MuJoCo simulation with the Unitree Go2-W
 ```bash
 cd muscle_mppi/unitree_mujoco/simulate/build
-./unitree_mujoco -r go2w -s scene.xml
+./unitree_mujoco -r go2 -s scene.xml
 ```
 
 For recording rollout,
 ```bash
 sudo apt install ffmpeg
 cd muscle_mppi/unitree_mujoco/simulate/build
-./unitree_mujoco -r go2w -s scene.xml -o ../../../analysis/videos/run.mp4
+./unitree_mujoco -r go2 -s scene.xml -o ../../../analysis/videos/run.mp4
 ```
 
 Terminal 2: Run muscle-inspired torque-level MPPI controller

@@ -21,17 +21,13 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         if (bid >= 0) { base_bid_ = bid; break; }
     }
 
-    static const char* WHEEL_BODY_NAMES[4] = {
-        "FR_wheel_link", "FL_wheel_link", "RR_wheel_link", "RL_wheel_link"
+    static const char* FOOT_BODY_NAMES[4] = {
+        "FR_foot", "FL_foot", "RR_foot", "RL_foot"
     };
     for (int k = 0; k < 4; ++k) {
-        wheel_body_ids_[k] = mj_name2id(model_, mjOBJ_BODY, WHEEL_BODY_NAMES[k]);
-        if (wheel_body_ids_[k] < 0)
-            throw std::runtime_error(std::string("Body not found: ") + WHEEL_BODY_NAMES[k]);
-        const int jid = model_->actuator_trnid[2 * (NUM_LEG_JOINTS + k)];
-        wheel_axle_[k][0] = model_->jnt_axis[3 * jid + 0];
-        wheel_axle_[k][1] = model_->jnt_axis[3 * jid + 1];
-        wheel_axle_[k][2] = model_->jnt_axis[3 * jid + 2];
+        foot_body_ids_[k] = mj_name2id(model_, mjOBJ_BODY, FOOT_BODY_NAMES[k]);
+        if (foot_body_ids_[k] < 0)
+            throw std::runtime_error(std::string("Body not found: ") + FOOT_BODY_NAMES[k]);
     }
 
     double total_mass = 0.0;
@@ -108,23 +104,18 @@ double MPPILocomotion::step_cost(const mjData* d,
         }
     }
 
-    // lateral slip: penalise velocity along wheel axle (rolling is free)
     if (w.contact_vel > 0.0) {
         for (int k = 0; k < 4; ++k) {
             mjtNum vel6[6];
-            mj_objectVelocity(model_, d, mjOBJ_BODY, wheel_body_ids_[k], vel6, 0);
-            const mjtNum* wmat = d->xmat + 9 * wheel_body_ids_[k];
-            const double ax = wmat[0]*wheel_axle_[k][0] + wmat[1]*wheel_axle_[k][1] + wmat[2]*wheel_axle_[k][2];
-            const double ay = wmat[3]*wheel_axle_[k][0] + wmat[4]*wheel_axle_[k][1] + wmat[5]*wheel_axle_[k][2];
-            const double az = wmat[6]*wheel_axle_[k][0] + wmat[7]*wheel_axle_[k][1] + wmat[8]*wheel_axle_[k][2];
-            const double slip = ax*vel6[3] + ay*vel6[4] + az*vel6[5];
-            cost += w.contact_vel * std::abs(slip);
+            mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_ids_[k], vel6, 0);
+            double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
+            cost += w.contact_vel * speed;
         }
     }
 
     if (w.contact_force > 0.0) {
         for (int k = 0; k < 4; ++k) {
-            int bid = wheel_body_ids_[k];
+            int bid = foot_body_ids_[k];
             double fx = d->cfrc_ext[6*bid + 3];
             double fy = d->cfrc_ext[6*bid + 4];
             double fz = d->cfrc_ext[6*bid + 5];
@@ -166,14 +157,12 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 
     for (int t = 0; t < task_.horizon; ++t) {
         double act_cmd[NUM_JOINTS];
-        for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+        for (int j = 0; j < NUM_JOINTS; ++j) {
             double nom   = trajectory_[t * NUM_JOINTS + j];
             double noisy = nom + noise_[s * task_.horizon * NUM_JOINTS
                                         + t * NUM_JOINTS + j];
             act_cmd[j] = std::clamp(noisy, ACT_MIN, ACT_MAX);
         }
-        for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
-            act_cmd[j] = 0.0;
 
         double tau_out[NUM_JOINTS];
         double effort_accum  = 0.0;
@@ -411,18 +400,15 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
         if (w.contact_vel > 0.0) {
             for (int k = 0; k < 4; ++k) {
                 mjtNum vel6[6];
-                mj_objectVelocity(model_, d, mjOBJ_BODY, wheel_body_ids_[k], vel6, 0);
-                const mjtNum* wmat = d->xmat + 9 * wheel_body_ids_[k];
-                const double ax = wmat[0]*wheel_axle_[k][0] + wmat[1]*wheel_axle_[k][1] + wmat[2]*wheel_axle_[k][2];
-                const double ay = wmat[3]*wheel_axle_[k][0] + wmat[4]*wheel_axle_[k][1] + wmat[5]*wheel_axle_[k][2];
-                const double az = wmat[6]*wheel_axle_[k][0] + wmat[7]*wheel_axle_[k][1] + wmat[8]*wheel_axle_[k][2];
-                bd.contact_vel += w.contact_vel * std::abs(ax*vel6[3] + ay*vel6[4] + az*vel6[5]);
+                mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_ids_[k], vel6, 0);
+                double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
+                bd.contact_vel += w.contact_vel * speed;
             }
         }
 
         if (w.contact_force > 0.0) {
             for (int k = 0; k < 4; ++k) {
-                int bid = wheel_body_ids_[k];
+                int bid = foot_body_ids_[k];
                 double fx = d->cfrc_ext[6*bid + 3];
                 double fy = d->cfrc_ext[6*bid + 4];
                 double fz = d->cfrc_ext[6*bid + 5];
@@ -454,6 +440,4 @@ void MPPILocomotion::compute_real_torques(const RobotState& state,
 {
     hill_compute_torques(activations, state.q, state.dq, muscle_,
                          muscle_state_.activation, tau_out);
-    for (int j = NUM_LEG_JOINTS; j < NUM_JOINTS; ++j)
-        tau_out[j] = 0.0;
 }

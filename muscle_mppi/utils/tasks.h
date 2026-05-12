@@ -2,9 +2,8 @@
 
 #include <string>
 
-static constexpr int NUM_JOINTS     = 16;
+static constexpr int NUM_JOINTS     = 12;
 static constexpr int NUM_LEG_JOINTS = 12;
-static constexpr int NUM_WHEELS     = 4;
 
 struct MuscleParams {
     double activation_alpha = 0.15;

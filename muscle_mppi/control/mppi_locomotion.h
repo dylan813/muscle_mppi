@@ -55,8 +55,7 @@ private:
 
     int base_bid_ = 1;
 
-    int    wheel_body_ids_[4];
-    double wheel_axle_[4][3] = {};
+    int    foot_body_ids_[4];
     double f_nominal_;
 
     std::vector<double> reference_;
