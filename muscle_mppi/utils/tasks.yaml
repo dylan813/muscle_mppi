@@ -1,30 +1,32 @@
 # muscle_mppi task configuration — edit here, no rebuild needed.
 # Run the binary from build/: model_path is relative to the working directory.
 #
-# Joint order for all 12-element arrays (LowState / actuator order):
-#   0-2:  FR (hip, thigh, calf)    3-5:  FL (hip, thigh, calf)
-#   6-8:  RR (hip, thigh, calf)    9-11: RL (hip, thigh, calf)
+# Joint order for all 3-element arrays (FL leg only, JOINT_OFFSET=3):
+#   0: FL_hip   1: FL_thigh   2: FL_calf
 
 # Shared muscle parameters — both tasks reference this anchor.
 default_muscle: &default_muscle
   activation_alpha: 0.15
-  tau_max:     [23.7, 23.7, 35.55, 23.7, 23.7, 35.55, 23.7, 23.7, 35.55, 23.7, 23.7, 35.55]
-  dq_max:      [30.1, 30.1, 20.07, 30.1, 30.1, 20.07, 30.1, 30.1, 20.07, 30.1, 30.1, 20.07]
-  b_damp:      [0.0, 0.5, 0.5, 0.0, 0.5, 0.5, 0.0, 0.5, 0.5, 0.0, 0.5, 0.5]
-  kd_sim:      [2.0, 3.5, 3.5, 2.0, 3.5, 3.5, 2.0, 3.5, 3.5, 2.0, 3.5, 3.5]
-  k_plus:      [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
-  k_minus:     [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
-  alpha_plus:  [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
-  alpha_minus: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
-  # Passive spring onset (0.1 rad inside hard XML limits). Front thigh: [-1.5708, 3.4907]; rear thigh: [-0.5236, 4.5379]; knee: [-2.7227, -0.83776]
-  q_plus0:     [0.9472, 3.3907, -0.9378, 0.9472, 3.3907, -0.9378, 0.9472, 4.4379, -0.9378, 0.9472, 4.4379, -0.9378]
-  q_minus0:    [-0.9472, -1.4708, -2.6227, -0.9472, -1.4708, -2.6227, -0.9472, -0.4236, -2.6227, -0.9472, -0.4236, -2.6227]
+  tau_max:     [23.7, 23.7, 35.55]
+  dq_max:      [30.1, 30.1, 20.07]
+  b_damp:      [0.0, 0.5, 0.5]
+  kd_sim:      [2.0, 3.5, 3.5]
+  k_plus:      [5.0, 5.0, 5.0]
+  k_minus:     [5.0, 5.0, 5.0]
+  alpha_plus:  [10.0, 10.0, 10.0]
+  alpha_minus: [10.0, 10.0, 10.0]
+  # Passive spring onset (0.1 rad inside hard XML limits). Front thigh: [-1.5708, 3.4907]; knee: [-2.7227, -0.83776]
+  q_plus0:     [0.9472, 3.3907, -0.9378]
+  q_minus0:    [-0.9472, -1.4708, -2.6227]
 
 # -----------------------------------------------------------------------
-stand:
-  model_path:   "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+reach:
+  model_path:   "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
   height_target: 0.0
-  n_samples:    16
+  # FL foot target in world frame (x, y, z). Base is fixed at z=0.8.
+  # FL hip is at (0.193, 0.142, 0.8). Max leg reach ~0.64m.
+  foot_target:  [0.30, 0.25, 0.40]
+  n_samples:    64
   horizon:      25
   substeps:     10
   n_iterations: 3
@@ -34,48 +36,18 @@ stand:
   dt:           0.002
 
   cost:
-    height:        100.0
-    orientation:    10.0
-    posture:         5.0
-    contact_vel:     0.5
-    contact_force:   0.0
-    terminal:     2500.0
-    act_effort:     0.01
-    act_reference:   0.0
-    vel_cmd:         0.0
+    height:        0.0
+    orientation:   0.0
+    posture:       1.0    # light regularization toward nominal pose
+    contact_vel:   0.5    # damp foot velocity when near target
+    contact_force: 0.0
+    terminal:      50.0   # heavily penalize foot distance at end of horizon
+    act_effort:    0.01
+    vel_cmd:       0.0
     vel_des:       [0.0, 0.0, 0.0]
+    foot_pos:      10.0   # per-step foot position error
 
-  nominal_pose: [0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3]
-  noise_sigma:  [0.05, 0.08, 0.08, 0.05, 0.08, 0.08, 0.05, 0.08, 0.08, 0.05, 0.08, 0.08]
-
-  muscle: *default_muscle
-
-# -----------------------------------------------------------------------
-walk:
-  model_path:   "../../unitree_mujoco/unitree_robots/go2/scene.xml"
-  height_target: 0.44
-  n_samples:    16
-  horizon:      25
-  substeps:     10
-  n_iterations: 3
-  lambda:       0.1
-  beta1:        3.0
-  beta2:        3.0
-  dt:           0.002
-
-  cost:
-    height:        100.0
-    orientation:    10.0
-    posture:         0.0   # disabled — walking moves joints away from nominal
-    contact_vel:     0.5
-    contact_force:   0.05
-    terminal:     2500.0
-    act_effort:     0.01
-    act_reference:   1.0   # enabled — no-op unless a CSV is loaded
-    vel_cmd:         1.0
-    vel_des:       [0.5, 0.0, 0.0]  # 0.5 m/s forward
-
-  nominal_pose: [0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3]
-  noise_sigma:  [0.05, 0.08, 0.08, 0.05, 0.08, 0.08, 0.05, 0.08, 0.08, 0.05, 0.08, 0.08]
+  nominal_pose: [0.0, 0.67, -1.3]
+  noise_sigma:  [0.05, 0.08, 0.08]
 
   muscle: *default_muscle

@@ -47,11 +47,6 @@ public:
                             const std::string& yaml_path = "../utils/tasks.yaml")
         : mppi_(task, yaml_path) {}
 
-    void load_reference(const std::string& csv_path, double w_ref = 1.0) {
-        mppi_.set_act_reference_weight(w_ref);
-        mppi_.load_reference(csv_path);
-    }
-
     void Init() {
         InitLowCmd();
 
@@ -95,8 +90,8 @@ private:
         const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
         for (int i = 0; i < NUM_JOINTS; ++i) {
-            state_.q[i]  = s->motor_state()[i].q();
-            state_.dq[i] = s->motor_state()[i].dq();
+            state_.q[i]  = s->motor_state()[JOINT_OFFSET + i].q();
+            state_.dq[i] = s->motor_state()[JOINT_OFFSET + i].dq();
         }
         state_.quat[0] = s->imu_state().quaternion()[0];
         state_.quat[1] = s->imu_state().quaternion()[1];
@@ -119,40 +114,30 @@ private:
         state_.valid  = true;
     }
 
-    void ControlLoop() {
-        running_time_ += dt_;
-
-        if (running_time_ < STANDUP_DURATION) {
-            double alpha;
-            if (running_time_ < STANDUP_DURATION * 0.5) {
-                alpha = running_time_ / (STANDUP_DURATION * 0.5);
-                alpha = std::min(alpha, 1.0);
-                for (int i = 0; i < NUM_JOINTS; ++i) {
-                    low_cmd_.motor_cmd()[i].q()   = crouch_pos_[i];
-                    low_cmd_.motor_cmd()[i].kp()  = alpha * 30.0;
-                    low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                    low_cmd_.motor_cmd()[i].kd()  = 3.5;
-                    low_cmd_.motor_cmd()[i].tau() = 0.0;
-                }
-            } else {
-                alpha = (running_time_ - STANDUP_DURATION * 0.5) / (STANDUP_DURATION * 0.5);
-                alpha = std::min(alpha, 1.0);
-                for (int i = 0; i < NUM_JOINTS; ++i) {
-                    low_cmd_.motor_cmd()[i].q()   = (1.0-alpha)*crouch_pos_[i] + alpha*stand_pos_[i];
-                    low_cmd_.motor_cmd()[i].kp()  = 30.0 + alpha * 20.0;
-                    low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                    low_cmd_.motor_cmd()[i].kd()  = 3.5;
-                    low_cmd_.motor_cmd()[i].tau() = 0.0;
-                }
-            }
-        } else if (!mppi_ready_.load()) {
-            // Hold stand pose with PD until MPPI has converged
+    void SetProneLegs() {
+        for (int leg = 0; leg < 3; ++leg) {
+            const int off = OTHER_LEG_OFFSETS[leg];
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = stand_pos_[i];
-                low_cmd_.motor_cmd()[i].kp()  = 50.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 3.5;
-                low_cmd_.motor_cmd()[i].tau() = 0.0;
+                low_cmd_.motor_cmd()[off + i].q()   = prone_pos_[i];
+                low_cmd_.motor_cmd()[off + i].kp()  = 30.0;
+                low_cmd_.motor_cmd()[off + i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[off + i].kd()  = 3.5;
+                low_cmd_.motor_cmd()[off + i].tau() = 0.0;
+            }
+        }
+    }
+
+    void ControlLoop() {
+        SetProneLegs();
+
+        if (!mppi_ready_.load()) {
+            // Hold FL at nominal pose with PD until MPPI has converged
+            for (int i = 0; i < NUM_JOINTS; ++i) {
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = stand_pos_[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 50.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
             }
         } else {
             double tau_cmd[NUM_JOINTS];
@@ -161,11 +146,11 @@ private:
                 std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
             }
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[i].q()   = PosStopF;
-                low_cmd_.motor_cmd()[i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = kd_[i];
-                low_cmd_.motor_cmd()[i].tau() = tau_cmd[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = kd_[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = tau_cmd[i];
             }
         }
 
@@ -176,10 +161,7 @@ private:
     }
 
     void MPPILoop() {
-        while (running_time_ < STANDUP_DURATION)
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-        std::cout << "Muscle MPPI started. height target = " << mppi_.height_target() << " m\n";
+        std::cout << "Muscle MPPI started.\n";
 
         int solve_count = 0;
         double solve_sum_ms = 0.0;
@@ -224,31 +206,21 @@ private:
         }
     }
 
-    static constexpr double dt_              = 0.02;
-    static constexpr double STANDUP_DURATION = 3.0;
-    static constexpr int    CONVERGENCE_SOLVES = 20;
+    static constexpr int CONVERGENCE_SOLVES = 20;
+
+    // FR=0, RR=6, RL=9 — actuator offsets for the three non-FL legs
+    static constexpr int OTHER_LEG_OFFSETS[3] = {0, 6, 9};
 
     const double kd_[NUM_JOINTS] = {
-        2.0, 3.5, 3.5,   // FR  hip / thigh / calf
-        2.0, 3.5, 3.5,   // FL
-        2.0, 3.5, 3.5,   // RR
-        2.0, 3.5, 3.5,   // RL
+        2.0, 3.5, 3.5,   // FL hip / thigh / calf
     };
 
-    const double stand_pos_[NUM_LEG_JOINTS] = {
-        0.0,  0.67, -1.3,
-        0.0,  0.67, -1.3,
-        0.0,  0.67, -1.3,
-        0.0,  0.67, -1.3,
-    };
-    const double crouch_pos_[NUM_LEG_JOINTS] = {
-        0.0,  1.36, -2.65,
-        0.0,  1.36, -2.65,
-        0.0,  1.36, -2.65,
-        0.0,  1.36, -2.65,
-    };
+    // FL nominal position held during MPPI convergence
+    const double stand_pos_[NUM_JOINTS] = { 0.0, 0.67, -1.3 };
 
-    double running_time_ = 0.0;
+    // Prone position for FR/RR/RL: legs folded up tight, clear of FL workspace
+    const double prone_pos_[NUM_JOINTS] = { 0.0, 1.5, -2.5 };
+
     std::atomic<bool> mppi_ready_{false};
 
     MPPILocomotion mppi_;
@@ -278,14 +250,11 @@ int main(int argc, const char** argv) {
     std::cout << "MPPI Controller (Hill muscle model) — press Enter to start\n";
     std::cin.get();
 
-    const std::string task      = (argc >= 3) ? argv[2] : "walk";
-    const std::string ref_csv   = (argc >= 4) ? argv[3] : "../../reference/ref_torques.csv";
-    const std::string yaml_path = (argc >= 5) ? argv[4] : "../utils/tasks.yaml";
+    const std::string task      = (argc >= 3) ? argv[2] : "reach";
+    const std::string yaml_path = (argc >= 4) ? argv[3] : "../utils/tasks.yaml";
 
     std::cout << "Loading task '" << task << "' from " << yaml_path << "\n";
     MPPIController controller(task, yaml_path);
-
-    controller.load_reference(ref_csv);
 
     controller.Init();
 

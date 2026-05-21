@@ -6,8 +6,6 @@
 #include <chrono>
 #include <omp.h>
 #include <stdexcept>
-#include <fstream>
-#include <sstream>
 #include <iostream>
 
 MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& yaml_path)
@@ -21,14 +19,9 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         if (bid >= 0) { base_bid_ = bid; break; }
     }
 
-    static const char* FOOT_BODY_NAMES[4] = {
-        "FR_foot", "FL_foot", "RR_foot", "RL_foot"
-    };
-    for (int k = 0; k < 4; ++k) {
-        foot_body_ids_[k] = mj_name2id(model_, mjOBJ_BODY, FOOT_BODY_NAMES[k]);
-        if (foot_body_ids_[k] < 0)
-            throw std::runtime_error(std::string("Body not found: ") + FOOT_BODY_NAMES[k]);
-    }
+    foot_body_ids_[0] = mj_name2id(model_, mjOBJ_BODY, "FL_foot");
+    if (foot_body_ids_[0] < 0)
+        throw std::runtime_error("Body not found: FL_foot");
 
     double total_mass = 0.0;
     for (int i = 1; i < model_->nbody; ++i)
@@ -40,49 +33,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     cmd_.wz = task_.cost.vel_des[2];
 }
 
-void MPPILocomotion::load_reference(const std::string& csv_path, double ref_dt)
-{
-    std::ifstream f(csv_path);
-    if (!f.is_open())
-        throw std::runtime_error("load_reference: cannot open " + csv_path);
-
-    reference_.clear();
-    ref_steps_    = 0;
-    ref_n_joints_ = 0;
-    ref_dt_       = ref_dt;
-
-    std::string line;
-    if (std::getline(f, line)) {
-        if (!line.empty() && (std::isalpha(line[0]) || line[0] == 'j')) {
-            // skip header
-        } else {
-            // first data line — parse it and detect column count
-            std::istringstream ss(line);
-            std::string tok;
-            while (std::getline(ss, tok, ','))
-                reference_.push_back(std::stod(tok));
-            ref_n_joints_ = static_cast<int>(reference_.size());
-            ++ref_steps_;
-        }
-    }
-
-    while (std::getline(f, line)) {
-        std::istringstream ss(line);
-        std::string tok;
-        while (std::getline(ss, tok, ','))
-            reference_.push_back(std::stod(tok));
-        ++ref_steps_;
-    }
-
-    if (ref_steps_ == 0)
-        throw std::runtime_error("load_reference: empty file " + csv_path);
-    if (ref_n_joints_ < NUM_LEG_JOINTS)
-        throw std::runtime_error("load_reference: CSV has only " + std::to_string(ref_n_joints_)
-                                 + " columns, need at least " + std::to_string(NUM_LEG_JOINTS));
-
-    std::cout << "Loaded activation reference: " << ref_steps_
-              << " steps × " << ref_n_joints_ << " joints from " << csv_path << "\n";
-}
 
 double MPPILocomotion::step_cost(const mjData* d,
                                   const double act_cmd[NUM_JOINTS],
@@ -98,30 +48,33 @@ double MPPILocomotion::step_cost(const mjData* d,
     cost += w.orientation * angle * angle;
 
     if (w.posture > 0.0) {
-        for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+        for (int j = 0; j < NUM_JOINTS; ++j) {
             double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
             cost += w.posture * dq * dq;
         }
     }
 
+    if (w.foot_pos > 0.0) {
+        const double* fp = d->xpos + 3 * foot_body_ids_[0];
+        double dx = fp[0] - task_.foot_target[0];
+        double dy = fp[1] - task_.foot_target[1];
+        double dz = fp[2] - task_.foot_target[2];
+        cost += w.foot_pos * std::sqrt(dx*dx + dy*dy + dz*dz);
+    }
+
     if (w.contact_vel > 0.0) {
-        for (int k = 0; k < 4; ++k) {
-            mjtNum vel6[6];
-            mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_ids_[k], vel6, 0);
-            double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
-            cost += w.contact_vel * speed;
-        }
+        mjtNum vel6[6];
+        mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_ids_[0], vel6, 0);
+        double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
+        cost += w.contact_vel * speed;
     }
 
     if (w.contact_force > 0.0) {
-        for (int k = 0; k < 4; ++k) {
-            int bid = foot_body_ids_[k];
-            double fx = d->cfrc_ext[6*bid + 3];
-            double fy = d->cfrc_ext[6*bid + 4];
-            double fz = d->cfrc_ext[6*bid + 5];
-            cost += w.contact_force * (std::abs(fx) + std::abs(fy)
-                                      + std::abs(fz - f_nominal_));
-        }
+        int bid = foot_body_ids_[0];
+        double fx = d->cfrc_ext[6*bid + 3];
+        double fy = d->cfrc_ext[6*bid + 4];
+        double fz = d->cfrc_ext[6*bid + 5];
+        cost += w.contact_force * (std::abs(fx) + std::abs(fy) + std::abs(fz - f_nominal_));
     }
 
     if (w.vel_cmd > 0.0) {
@@ -135,14 +88,11 @@ double MPPILocomotion::step_cost(const mjData* d,
 
 double MPPILocomotion::terminal_cost(const mjData* d)
 {
-    const CostWeights& w = task_.cost;
-
-    const double dt_step   = task_.dt * task_.substeps;
-    const double px_target = start_pos_[0] + cmd_.vx * task_.horizon * dt_step;
-    const double py_target = start_pos_[1] + cmd_.vy * task_.horizon * dt_step;
-
-    return w.terminal * (std::abs(d->qpos[0] - px_target)
-                        + std::abs(d->qpos[1] - py_target));
+    const double* fp = d->xpos + 3 * foot_body_ids_[0];
+    double dx = fp[0] - task_.foot_target[0];
+    double dy = fp[1] - task_.foot_target[1];
+    double dz = fp[2] - task_.foot_target[2];
+    return task_.cost.terminal * std::sqrt(dx*dx + dy*dy + dz*dz);
 }
 
 double MPPILocomotion::rollout(int s, const RobotState& state)
@@ -165,9 +115,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         }
 
         double tau_out[NUM_JOINTS];
-        double effort_accum  = 0.0;
-        double ref_accum     = 0.0;
-        const double* ref    = reference_at(t);
+        double effort_accum = 0.0;
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -177,19 +125,14 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
 
             if (task_.cost.act_effort > 0.0) {
-                for (int j = 0; j < NUM_LEG_JOINTS; ++j)
+                for (int j = 0; j < NUM_JOINTS; ++j)
                     effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
             }
 
-            if (task_.cost.act_reference > 0.0 && ref) {
-                for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-                    double dt = (tau_out[j] - ref[j]) / muscle_.tau_max[j];
-                    ref_accum += dt * dt;
-                }
-            }
-
+            for (int j = 0; j < model_->nu; ++j)
+                d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[j] = tau_out[j];
+                d->ctrl[JOINT_OFFSET + j] = tau_out[j];
 
             mj_step(model_, d);
 
@@ -197,8 +140,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        total_cost += task_.cost.act_effort    * effort_accum / task_.substeps;
-        total_cost += task_.cost.act_reference * ref_accum    / task_.substeps;
+        total_cost += task_.cost.act_effort * effort_accum / task_.substeps;
         total_cost += step_cost(d, act_cmd, t);
     }
 
@@ -227,18 +169,22 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
+            for (int j = 0; j < model_->nu; ++j)
+                d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[j] = tau_out[j];
+                d->ctrl[JOINT_OFFSET + j] = tau_out[j];
             mj_step(model_, d);
         }
     }
 
     RobotState predicted;
-    predicted.pos[0]  = d->qpos[0];  predicted.pos[1]  = d->qpos[1];  predicted.pos[2]  = d->qpos[2];
-    predicted.quat[0] = d->qpos[3];  predicted.quat[1] = d->qpos[4];
-    predicted.quat[2] = d->qpos[5];  predicted.quat[3] = d->qpos[6];
-    predicted.vel[0]  = d->qvel[0];  predicted.vel[1]  = d->qvel[1];  predicted.vel[2]  = d->qvel[2];
-    predicted.gyro[0] = d->qvel[3];  predicted.gyro[1] = d->qvel[4];  predicted.gyro[2] = d->qvel[5];
+    if (has_freejoint_) {
+        predicted.pos[0]  = d->qpos[0];  predicted.pos[1]  = d->qpos[1];  predicted.pos[2]  = d->qpos[2];
+        predicted.quat[0] = d->qpos[3];  predicted.quat[1] = d->qpos[4];
+        predicted.quat[2] = d->qpos[5];  predicted.quat[3] = d->qpos[6];
+        predicted.vel[0]  = d->qvel[0];  predicted.vel[1]  = d->qvel[1];  predicted.vel[2]  = d->qvel[2];
+        predicted.gyro[0] = d->qvel[3];  predicted.gyro[1] = d->qvel[4];  predicted.gyro[2] = d->qvel[5];
+    }
     for (int j = 0; j < NUM_JOINTS; ++j) {
         predicted.q[j]  = d->qpos[act_qpos_adr_[j]];
         predicted.dq[j] = d->qvel[act_qvel_adr_[j]];
@@ -264,9 +210,6 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         1, task_.horizon / 2);
 
     RobotState predicted = predict_state(state, n_skip);
-
-    if (ref_steps_ > 0)
-        ref_offset_ = (ref_offset_ + n_skip) % ref_steps_;
 
     start_pos_[0] = predicted.pos[0];
     start_pos_[1] = predicted.pos[1];
@@ -358,8 +301,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
 
         double tau_out[NUM_JOINTS];
         double effort_accum = 0.0;
-        double ref_accum    = 0.0;
-        const double* ref   = reference_at(t);
         for (int sub = 0; sub < task_.substeps; ++sub) {
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -368,21 +309,16 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             }
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
             if (w.act_effort > 0.0) {
-                for (int j = 0; j < NUM_LEG_JOINTS; ++j)
+                for (int j = 0; j < NUM_JOINTS; ++j)
                     effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
             }
-            if (w.act_reference > 0.0 && ref) {
-                for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
-                    double dt = (tau_out[j] - ref[j]) / muscle_.tau_max[j];
-                    ref_accum += dt * dt;
-                }
-            }
+            for (int j = 0; j < model_->nu; ++j)
+                d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[j] = tau_out[j];
+                d->ctrl[JOINT_OFFSET + j] = tau_out[j];
             mj_step(model_, d);
         }
-        bd.act_effort += w.act_effort    * effort_accum / task_.substeps
-                       + w.act_reference * ref_accum    / task_.substeps;
+        bd.act_effort += w.act_effort * effort_accum / task_.substeps;
 
         bd.height += w.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
 
@@ -391,30 +327,26 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
         bd.orientation += w.orientation * angle * angle;
 
         if (w.posture > 0.0) {
-            for (int j = 0; j < NUM_LEG_JOINTS; ++j) {
+            for (int j = 0; j < NUM_JOINTS; ++j) {
                 double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
                 bd.posture += w.posture * dq * dq;
             }
         }
 
         if (w.contact_vel > 0.0) {
-            for (int k = 0; k < 4; ++k) {
-                mjtNum vel6[6];
-                mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_ids_[k], vel6, 0);
-                double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
-                bd.contact_vel += w.contact_vel * speed;
-            }
+            mjtNum vel6[6];
+            mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_ids_[0], vel6, 0);
+            double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
+            bd.contact_vel += w.contact_vel * speed;
         }
 
         if (w.contact_force > 0.0) {
-            for (int k = 0; k < 4; ++k) {
-                int bid = foot_body_ids_[k];
-                double fx = d->cfrc_ext[6*bid + 3];
-                double fy = d->cfrc_ext[6*bid + 4];
-                double fz = d->cfrc_ext[6*bid + 5];
-                bd.contact_force += w.contact_force
-                    * (std::abs(fx) + std::abs(fy) + std::abs(fz - f_nominal_));
-            }
+            int bid = foot_body_ids_[0];
+            double fx = d->cfrc_ext[6*bid + 3];
+            double fy = d->cfrc_ext[6*bid + 4];
+            double fz = d->cfrc_ext[6*bid + 5];
+            bd.contact_force += w.contact_force
+                * (std::abs(fx) + std::abs(fy) + std::abs(fz - f_nominal_));
         }
 
         if (w.vel_cmd > 0.0) {

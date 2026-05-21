@@ -20,9 +20,12 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     for (int i = 0; i <= task_.n_samples; ++i)
         data_[i] = mj_makeData(model_);
 
-    // Build actuator → DOF mapping from the model so no hardcoded index table is needed.
+    // Detect freejoint (freejoint adds 1 extra qpos DOF via quaternion, so nq != nv).
+    has_freejoint_ = (model_->nq != model_->nv);
+
+    // Build actuator → DOF mapping for the controlled joints starting at JOINT_OFFSET.
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        int jid = model_->actuator_trnid[2 * j];
+        int jid = model_->actuator_trnid[2 * (JOINT_OFFSET + j)];
         act_qpos_adr_[j] = model_->jnt_qposadr[jid];
         act_qvel_adr_[j] = model_->jnt_dofadr[jid];
     }
@@ -62,27 +65,28 @@ void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
         }
 }
 
-// qpos: [xyz(3), quat(4), joints(16)] — qvel: [linvel(3), angvel(3), joint_vel(16)]
 void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     mj_resetData(model_, d);
 
-    d->qpos[0] = state.pos[0];
-    d->qpos[1] = state.pos[1];
-    d->qpos[2] = state.pos[2];
-    d->qpos[3] = state.quat[0];
-    d->qpos[4] = state.quat[1];
-    d->qpos[5] = state.quat[2];
-    d->qpos[6] = state.quat[3];
+    if (has_freejoint_) {
+        d->qpos[0] = state.pos[0];
+        d->qpos[1] = state.pos[1];
+        d->qpos[2] = state.pos[2];
+        d->qpos[3] = state.quat[0];
+        d->qpos[4] = state.quat[1];
+        d->qpos[5] = state.quat[2];
+        d->qpos[6] = state.quat[3];
+
+        d->qvel[0] = state.vel[0];
+        d->qvel[1] = state.vel[1];
+        d->qvel[2] = state.vel[2];
+        d->qvel[3] = state.gyro[0];
+        d->qvel[4] = state.gyro[1];
+        d->qvel[5] = state.gyro[2];
+    }
 
     for (int j = 0; j < NUM_JOINTS; ++j)
         d->qpos[act_qpos_adr_[j]] = state.q[j];
-
-    d->qvel[0] = state.vel[0];
-    d->qvel[1] = state.vel[1];
-    d->qvel[2] = state.vel[2];
-    d->qvel[3] = state.gyro[0];
-    d->qvel[4] = state.gyro[1];
-    d->qvel[5] = state.gyro[2];
 
     for (int j = 0; j < NUM_JOINTS; ++j)
         d->qvel[act_qvel_adr_[j]] = state.dq[j];

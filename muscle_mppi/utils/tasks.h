@@ -2,8 +2,8 @@
 
 #include <string>
 
-static constexpr int NUM_JOINTS     = 12;
-static constexpr int NUM_LEG_JOINTS = 12;
+static constexpr int NUM_JOINTS   = 3;   // FL leg: hip, thigh, calf
+static constexpr int JOINT_OFFSET = 3;   // FL actuators start at index 3 in the model
 
 struct MuscleParams {
     double activation_alpha = 0.15;
@@ -27,15 +27,16 @@ struct CostWeights {
     double contact_force = 0.0;
     double terminal      = 0.0;
     double act_effort    = 0.0;
-    double act_reference = 0.0;
     double vel_cmd       = 0.0;
     double vel_des[3]    = {};
+    double foot_pos      = 0.0;
 };
 
 struct TaskConfig {
     std::string  model_path;
-    double       height_target    = 0.0;
+    double       height_target       = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
+    double       foot_target[3]      = {};   // FL foot target in world frame (x, y, z)
     CostWeights  cost;
     MuscleParams muscle;
     int          n_samples    = 16;

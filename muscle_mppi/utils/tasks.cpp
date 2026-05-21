@@ -43,6 +43,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     load_doubles(t["noise_sigma"],  cfg.noise_sigma,  NUM_JOINTS, "noise_sigma");
+    load_doubles(t["foot_target"],  cfg.foot_target,  3,          "foot_target");
 
     const YAML::Node& c = t["cost"];
     cfg.cost.height        = c["height"].as<double>();
@@ -52,9 +53,9 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.cost.contact_force = c["contact_force"].as<double>();
     cfg.cost.terminal      = c["terminal"].as<double>();
     cfg.cost.act_effort    = c["act_effort"].as<double>();
-    cfg.cost.act_reference = c["act_reference"].as<double>();
     cfg.cost.vel_cmd       = c["vel_cmd"].as<double>();
     load_doubles(c["vel_des"], cfg.cost.vel_des, 3, "vel_des");
+    cfg.cost.foot_pos      = c["foot_pos"].as<double>();
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.activation_alpha = m["activation_alpha"].as<double>();

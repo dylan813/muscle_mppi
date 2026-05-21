@@ -50,6 +50,11 @@ cd muscle_mppi/unitree_mujoco/simulate/build
 ./unitree_mujoco -r go2 -s scene.xml
 ```
 
+```bash
+cd muscle_mppi/unitree_mujoco/simulate/build
+./unitree_mujoco -r go2 -s scene_suspended.xml
+```
+
 For recording rollout,
 ```bash
 sudo apt install ffmpeg

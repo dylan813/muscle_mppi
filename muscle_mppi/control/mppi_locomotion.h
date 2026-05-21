@@ -17,8 +17,6 @@ public:
     void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
     const MotionCommand& command() const { return cmd_; }
 
-    void load_reference(const std::string& csv_path, double ref_dt = 0.02);
-
     const MuscleState&  muscle_state()  const { return muscle_state_; }
     const MuscleParams& muscle_params() const { return muscle_; }
 
@@ -55,21 +53,8 @@ private:
 
     int base_bid_ = 1;
 
-    int    foot_body_ids_[4];
+    int    foot_body_ids_[1];  // FL_foot only
     double f_nominal_;
-
-    std::vector<double> reference_;
-    int                 ref_steps_    = 0;
-    int                 ref_n_joints_ = NUM_JOINTS;
-    double              ref_dt_       = 0.02;
-    int                 ref_offset_   = 0;
-
-    // Wraps reference index so a finite trajectory loops indefinitely.
-    const double* reference_at(int t) const {
-        if (ref_steps_ == 0) return nullptr;
-        int idx = (ref_offset_ + t) % ref_steps_;
-        return reference_.data() + idx * ref_n_joints_;
-    }
 
     static constexpr double ACT_MIN = -1.0;
     static constexpr double ACT_MAX =  1.0;
