@@ -41,9 +41,9 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.beta2         = t["beta2"].as<double>();
     cfg.dt            = t["dt"].as<double>();
 
-    load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
-    load_doubles(t["noise_sigma"],  cfg.noise_sigma,  NUM_JOINTS, "noise_sigma");
-    load_doubles(t["foot_target"],  cfg.foot_target,  3,          "foot_target");
+    load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS,  "nominal_pose");
+    load_doubles(t["noise_sigma"],  cfg.noise_sigma,  NUM_MUSCLES, "noise_sigma");
+    load_doubles(t["foot_target"],  cfg.foot_target,  3,           "foot_target");
 
     const YAML::Node& c = t["cost"];
     cfg.cost.height        = c["height"].as<double>();
@@ -58,17 +58,16 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.cost.foot_pos      = c["foot_pos"].as<double>();
 
     const YAML::Node& m = t["muscle"];
-    cfg.muscle.activation_alpha = m["activation_alpha"].as<double>();
-    load_doubles(m["tau_max"],     cfg.muscle.tau_max,     NUM_JOINTS, "tau_max");
-    load_doubles(m["dq_max"],      cfg.muscle.dq_max,      NUM_JOINTS, "dq_max");
-    load_doubles(m["b_damp"],      cfg.muscle.b_damp,      NUM_JOINTS, "b_damp");
-    load_doubles(m["kd_sim"],      cfg.muscle.kd_sim,      NUM_JOINTS, "kd_sim");
-    load_doubles(m["k_plus"],      cfg.muscle.k_plus,      NUM_JOINTS, "k_plus");
-    load_doubles(m["k_minus"],     cfg.muscle.k_minus,     NUM_JOINTS, "k_minus");
-    load_doubles(m["alpha_plus"],  cfg.muscle.alpha_plus,  NUM_JOINTS, "alpha_plus");
-    load_doubles(m["alpha_minus"], cfg.muscle.alpha_minus, NUM_JOINTS, "alpha_minus");
-    load_doubles(m["q_plus0"],     cfg.muscle.q_plus0,     NUM_JOINTS, "q_plus0");
-    load_doubles(m["q_minus0"],    cfg.muscle.q_minus0,    NUM_JOINTS, "q_minus0");
+    cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();
+    load_doubles(m["peak_force"], cfg.muscle.peak_force, NUM_JOINTS, "peak_force");
+    load_doubles(m["lce_min"],    cfg.muscle.lce_min,    NUM_JOINTS, "lce_min");
+    load_doubles(m["lce_max"],    cfg.muscle.lce_max,    NUM_JOINTS, "lce_max");
+    load_doubles(m["phi_min"],    cfg.muscle.phi_min,    NUM_JOINTS, "phi_min");
+    load_doubles(m["phi_max"],    cfg.muscle.phi_max,    NUM_JOINTS, "phi_max");
+    load_doubles(m["vmax"],       cfg.muscle.vmax,       NUM_JOINTS, "vmax");
+    load_doubles(m["fvmax"],      cfg.muscle.fvmax,      NUM_JOINTS, "fvmax");
+    load_doubles(m["fpmax"],      cfg.muscle.fpmax,      NUM_JOINTS, "fpmax");
+    load_doubles(m["kd_sim"],     cfg.muscle.kd_sim,     NUM_JOINTS, "kd_sim");
 
     return cfg;
 }

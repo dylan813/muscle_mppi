@@ -178,7 +178,7 @@ private:
             }
 
             auto t0 = std::chrono::steady_clock::now();
-            double activations[NUM_JOINTS] = {};
+            double activations[NUM_MUSCLES] = {};
             mppi_.update(snap, activations);
             double tau_cmd[NUM_JOINTS] = {};
             mppi_.compute_real_torques(snap, activations, tau_cmd);

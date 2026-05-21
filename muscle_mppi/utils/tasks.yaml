@@ -1,23 +1,41 @@
 # muscle_mppi task configuration — edit here, no rebuild needed.
 # Run the binary from build/: model_path is relative to the working directory.
 #
-# Joint order for all 3-element arrays (FL leg only, JOINT_OFFSET=3):
+# Joint order for all NUM_JOINTS-element arrays (FL leg only, JOINT_OFFSET=3):
 #   0: FL_hip   1: FL_thigh   2: FL_calf
+#
+# noise_sigma has NUM_MUSCLES=6 elements, interleaved per joint:
+#   [hip_agonist, hip_antagonist, thigh_agonist, thigh_antagonist, calf_agonist, calf_antagonist]
 
-# Shared muscle parameters — both tasks reference this anchor.
+# Shared muscle parameters.
 default_muscle: &default_muscle
-  activation_alpha: 0.15
-  tau_max:     [23.7, 23.7, 35.55]
-  dq_max:      [30.1, 30.1, 20.07]
-  b_damp:      [0.0, 0.5, 0.5]
-  kd_sim:      [2.0, 3.5, 3.5]
-  k_plus:      [5.0, 5.0, 5.0]
-  k_minus:     [5.0, 5.0, 5.0]
-  alpha_plus:  [10.0, 10.0, 10.0]
-  alpha_minus: [10.0, 10.0, 10.0]
-  # Passive spring onset (0.1 rad inside hard XML limits). Front thigh: [-1.5708, 3.4907]; knee: [-2.7227, -0.83776]
-  q_plus0:     [0.9472, 3.3907, -0.9378]
-  q_minus0:    [-0.9472, -1.4708, -2.6227]
+  act_bandwidth: 100.0           # activation filter bandwidth (Hz): act += bandwidth*dt*(ctrl-act)
+
+  # Peak isometric force (N). Scales FL*FV output to torque via the moment arm.
+  # Moment arm = (lce_max - lce_min) / (phi_max - phi_min) — approximately 0.16 for hip/calf, 0.062 for thigh.
+  # Rough targets: hip ~23.7 Nm → 150N; thigh ~23.7 Nm → 380N; calf ~35.55 Nm → 200N.
+  peak_force:    [150.0, 380.0, 200.0]
+
+  # Fiber length range (normalized by optimal isometric length l_opt).
+  # Both muscles in the antagonistic pair span this range as the joint sweeps phi_min→phi_max.
+  lce_min:       [0.75, 0.75, 0.75]
+  lce_max:       [1.05, 1.05, 1.05]
+
+  # Joint angle range (rad) corresponding to [lce_min, lce_max] for the agonist muscle.
+  # Use the physical joint limits from the XML (slightly inside to avoid singularities).
+  # FL hip: [-0.9472, 0.9472], thigh: [-1.4708, 3.3907], calf: [-2.6227, -0.9378]
+  phi_min:       [-0.9472, -1.4708, -2.6227]
+  phi_max:       [0.9472,  3.3907,  -0.9378]
+
+  # Force-velocity parameters.
+  vmax:          [10.0, 10.0, 10.0]   # max contraction velocity (fiber lengths/s)
+  fvmax:         [1.33, 1.33, 1.33]   # eccentric force amplification plateau
+
+  # Passive parallel elasticity at max extension (dimensionless, scales with peak_force).
+  fpmax:         [1.3, 1.3, 1.3]
+
+  # MuJoCo joint damping applied directly to simulation DOFs (N·m·s/rad).
+  kd_sim:        [2.0, 3.5, 3.5]
 
 # -----------------------------------------------------------------------
 reach:
@@ -38,16 +56,18 @@ reach:
   cost:
     height:        0.0
     orientation:   0.0
-    posture:       1.0    # light regularization toward nominal pose
-    contact_vel:   0.5    # damp foot velocity when near target
+    posture:       1.0
+    contact_vel:   0.5
     contact_force: 0.0
-    terminal:      50.0   # heavily penalize foot distance at end of horizon
+    terminal:      50.0
     act_effort:    0.01
     vel_cmd:       0.0
     vel_des:       [0.0, 0.0, 0.0]
-    foot_pos:      10.0   # per-step foot position error
+    foot_pos:      10.0
 
   nominal_pose: [0.0, 0.67, -1.3]
-  noise_sigma:  [0.05, 0.08, 0.08]
+
+  # 6 sigmas: [hip_agonist, hip_antagonist, thigh_agonist, thigh_antagonist, calf_agonist, calf_antagonist]
+  noise_sigma:  [0.05, 0.05, 0.08, 0.08, 0.08, 0.08]
 
   muscle: *default_muscle

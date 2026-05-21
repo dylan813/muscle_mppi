@@ -2,21 +2,21 @@
 
 #include <string>
 
-static constexpr int NUM_JOINTS   = 3;   // FL leg: hip, thigh, calf
-static constexpr int JOINT_OFFSET = 3;   // FL actuators start at index 3 in the model
+static constexpr int NUM_JOINTS   = 3;             // FL leg: hip, thigh, calf
+static constexpr int NUM_MUSCLES  = 2 * NUM_JOINTS; // antagonistic pair per joint
+static constexpr int JOINT_OFFSET = 3;             // FL actuators start at index 3 in the model
 
 struct MuscleParams {
-    double activation_alpha = 0.15;
-    double tau_max[NUM_JOINTS]    = {};
-    double dq_max[NUM_JOINTS]     = {};
-    double q_plus0[NUM_JOINTS]    = {};
-    double q_minus0[NUM_JOINTS]   = {};
-    double k_plus[NUM_JOINTS]     = {};
-    double k_minus[NUM_JOINTS]    = {};
-    double alpha_plus[NUM_JOINTS] = {};
-    double alpha_minus[NUM_JOINTS]= {};
-    double b_damp[NUM_JOINTS]     = {};
-    double kd_sim[NUM_JOINTS]     = {};
+    double act_bandwidth = 100.0;              // activation filter bandwidth (Hz)
+    double peak_force[NUM_JOINTS] = {};        // peak isometric force (N), scales FL*FV output
+    double lce_min[NUM_JOINTS]    = {};        // min fiber length (normalized by l_opt)
+    double lce_max[NUM_JOINTS]    = {};        // max fiber length (normalized by l_opt)
+    double phi_min[NUM_JOINTS]    = {};        // joint angle (rad) mapping to lce_min for agonist
+    double phi_max[NUM_JOINTS]    = {};        // joint angle (rad) mapping to lce_max for agonist
+    double vmax[NUM_JOINTS]       = {};        // max contraction velocity (fiber lengths / s)
+    double fvmax[NUM_JOINTS]      = {};        // eccentric force amplification (>1)
+    double fpmax[NUM_JOINTS]      = {};        // passive force at max extension
+    double kd_sim[NUM_JOINTS]     = {};        // MuJoCo joint damping (applied to sim dofs)
 };
 
 struct CostWeights {
@@ -34,9 +34,9 @@ struct CostWeights {
 
 struct TaskConfig {
     std::string  model_path;
-    double       height_target       = 0.0;
+    double       height_target           = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
-    double       foot_target[3]      = {};   // FL foot target in world frame (x, y, z)
+    double       foot_target[3]          = {};
     CostWeights  cost;
     MuscleParams muscle;
     int          n_samples    = 16;
@@ -47,7 +47,7 @@ struct TaskConfig {
     double       beta1        = 3.0;
     double       beta2        = 3.0;
     double       dt           = 0.002;
-    double       noise_sigma[NUM_JOINTS] = {};
+    double       noise_sigma[NUM_MUSCLES] = {};   // one sigma per virtual muscle
 };
 
 struct MotionCommand {

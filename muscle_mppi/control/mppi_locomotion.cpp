@@ -12,7 +12,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
-    best_trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
+    best_trajectory_.assign(task_.horizon * NUM_MUSCLES, 0.0);
 
     for (const char* name : {"trunk", "base", "base_link"}) {
         int bid = mj_name2id(model_, mjOBJ_BODY, name);
@@ -35,7 +35,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 
 
 double MPPILocomotion::step_cost(const mjData* d,
-                                  const double act_cmd[NUM_JOINTS],
+                                  const double act_cmd[NUM_MUSCLES],
                                   int horizon_step)
 {
     const CostWeights& w = task_.cost;
@@ -100,18 +100,18 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
     mjData* d = data_[s];
     set_mj_state(d, state);
 
-    double activation[NUM_JOINTS];
-    std::memcpy(activation, predicted_activation_, sizeof(activation));
+    double activation[NUM_MUSCLES];
+    std::memcpy(activation, predicted_activation_, NUM_MUSCLES * sizeof(double));
 
     double total_cost = 0.0;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        double act_cmd[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            double nom   = trajectory_[t * NUM_JOINTS + j];
-            double noisy = nom + noise_[s * task_.horizon * NUM_JOINTS
-                                        + t * NUM_JOINTS + j];
-            act_cmd[j] = std::clamp(noisy, ACT_MIN, ACT_MAX);
+        double act_cmd[NUM_MUSCLES];
+        for (int m = 0; m < NUM_MUSCLES; ++m) {
+            double nom   = trajectory_[t * NUM_MUSCLES + m];
+            double noisy = nom + noise_[s * task_.horizon * NUM_MUSCLES
+                                        + t * NUM_MUSCLES + m];
+            act_cmd[m] = std::clamp(noisy, ACT_MIN, ACT_MAX);
         }
 
         double tau_out[NUM_JOINTS];
@@ -122,11 +122,13 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 q_cur[j]  = d->qpos[act_qpos_adr_[j]];
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
-            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
+            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
 
             if (task_.cost.act_effort > 0.0) {
                 for (int j = 0; j < NUM_JOINTS; ++j)
-                    effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
+                    effort_accum += (activation[2*j]   * activation[2*j]
+                                   + activation[2*j+1] * activation[2*j+1])
+                                   * muscle_.peak_force[j];
             }
 
             for (int j = 0; j < model_->nu; ++j)
@@ -153,13 +155,13 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
     mjData* d = data_[task_.n_samples];
     set_mj_state(d, state);
 
-    double activation[NUM_JOINTS];
-    std::memcpy(activation, muscle_state_.activation, sizeof(activation));
+    double activation[NUM_MUSCLES];
+    std::memcpy(activation, muscle_state_.activation, NUM_MUSCLES * sizeof(double));
 
     for (int t = 0; t < n_steps; ++t) {
-        double act_cmd[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            act_cmd[j] = best_trajectory_[t * NUM_JOINTS + j];
+        double act_cmd[NUM_MUSCLES];
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            act_cmd[m] = best_trajectory_[t * NUM_MUSCLES + m];
 
         double tau_out[NUM_JOINTS];
         for (int sub = 0; sub < task_.substeps; ++sub) {
@@ -168,7 +170,7 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
                 q_cur[j]  = d->qpos[act_qpos_adr_[j]];
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
-            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
+            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
             for (int j = 0; j < model_->nu; ++j)
                 d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j)
@@ -190,17 +192,17 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
         predicted.dq[j] = d->qvel[act_qvel_adr_[j]];
     }
     predicted.valid = true;
-    std::memcpy(predicted_activation_, activation, sizeof(activation));
+    std::memcpy(predicted_activation_, activation, NUM_MUSCLES * sizeof(double));
     return predicted;
 }
 
-void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_JOINTS])
+void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_MUSCLES])
 {
     auto t_start = std::chrono::steady_clock::now();
 
     if (!state.valid) {
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            activations_out[j] = best_trajectory_[j];
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            activations_out[m] = best_trajectory_[m];
         return;
     }
 
@@ -216,13 +218,13 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
     start_pos_[2] = predicted.pos[2];
 
     for (int t = 0; t < task_.horizon - n_skip; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            trajectory_[t * NUM_JOINTS + j] =
-                best_trajectory_[(t + n_skip) * NUM_JOINTS + j];
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            trajectory_[t * NUM_MUSCLES + m] =
+                best_trajectory_[(t + n_skip) * NUM_MUSCLES + m];
     for (int t = task_.horizon - n_skip; t < task_.horizon; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            trajectory_[t * NUM_JOINTS + j] =
-                best_trajectory_[(task_.horizon - 1) * NUM_JOINTS + j];
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            trajectory_[t * NUM_MUSCLES + m] =
+                best_trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
 
     const int N = task_.n_iterations;
     best_cost_ = 1e9;
@@ -238,10 +240,10 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
             if (costs_[s] < best_cost_) {
                 best_cost_ = costs_[s];
                 for (int t = 0; t < task_.horizon; ++t)
-                    for (int j = 0; j < NUM_JOINTS; ++j) {
-                        int idx = t * NUM_JOINTS + j;
+                    for (int m = 0; m < NUM_MUSCLES; ++m) {
+                        int idx = t * NUM_MUSCLES + m;
                         best_trajectory_[idx] = std::clamp(
-                            trajectory_[idx] + noise_[s * task_.horizon * NUM_JOINTS + idx],
+                            trajectory_[idx] + noise_[s * task_.horizon * NUM_MUSCLES + idx],
                             ACT_MIN, ACT_MAX);
                     }
             }
@@ -259,14 +261,14 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
             weight_sum  += weights[s];
         }
 
-        std::vector<double> new_traj(task_.horizon * NUM_JOINTS, 0.0);
+        std::vector<double> new_traj(task_.horizon * NUM_MUSCLES, 0.0);
         for (int s = 0; s < task_.n_samples; ++s) {
             double w = weights[s] / weight_sum;
             for (int t = 0; t < task_.horizon; ++t)
-                for (int j = 0; j < NUM_JOINTS; ++j) {
-                    int idx = t * NUM_JOINTS + j;
+                for (int m = 0; m < NUM_MUSCLES; ++m) {
+                    int idx = t * NUM_MUSCLES + m;
                     new_traj[idx] += w * (trajectory_[idx]
-                        + noise_[s * task_.horizon * NUM_JOINTS + idx]);
+                        + noise_[s * task_.horizon * NUM_MUSCLES + idx]);
                 }
         }
         for (auto& v : new_traj)
@@ -275,8 +277,8 @@ void MPPILocomotion::update(const RobotState& state, double activations_out[NUM_
         trajectory_ = std::move(new_traj);
     }
 
-    for (int j = 0; j < NUM_JOINTS; ++j)
-        activations_out[j] = best_trajectory_[j];
+    for (int m = 0; m < NUM_MUSCLES; ++m)
+        activations_out[m] = best_trajectory_[m];
 
     last_compute_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - t_start).count();
@@ -288,16 +290,16 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
     mjData* d = data_[task_.n_samples];
     set_mj_state(d, state);
 
-    double activation[NUM_JOINTS];
-    std::memcpy(activation, predicted_activation_, sizeof(activation));
+    double activation[NUM_MUSCLES];
+    std::memcpy(activation, predicted_activation_, NUM_MUSCLES * sizeof(double));
 
     CostBreakdown bd;
     const CostWeights& w = task_.cost;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        double act_cmd[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            act_cmd[j] = best_trajectory_[t * NUM_JOINTS + j];
+        double act_cmd[NUM_MUSCLES];
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            act_cmd[m] = best_trajectory_[t * NUM_MUSCLES + m];
 
         double tau_out[NUM_JOINTS];
         double effort_accum = 0.0;
@@ -307,10 +309,12 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
                 q_cur[j]  = d->qpos[act_qpos_adr_[j]];
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
-            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, activation, tau_out);
+            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
             if (w.act_effort > 0.0) {
                 for (int j = 0; j < NUM_JOINTS; ++j)
-                    effort_accum += activation[j] * activation[j] * muscle_.tau_max[j];
+                    effort_accum += (activation[2*j]   * activation[2*j]
+                                   + activation[2*j+1] * activation[2*j+1])
+                                   * muscle_.peak_force[j];
             }
             for (int j = 0; j < model_->nu; ++j)
                 d->ctrl[j] = 0.0;
@@ -354,7 +358,6 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
             double dvy = d->qvel[1] - w.vel_des[1];
             bd.vel_tracking += w.vel_cmd * (dvx * dvx + dvy * dvy);
         }
-
     }
 
     const double dt_step   = task_.dt * task_.substeps;
@@ -367,9 +370,9 @@ MPPILocomotion::diagnose_cost(const RobotState& state)
 }
 
 void MPPILocomotion::compute_real_torques(const RobotState& state,
-                                          const double activations[NUM_JOINTS],
+                                          const double activations[NUM_MUSCLES],
                                           double tau_out[NUM_JOINTS])
 {
-    hill_compute_torques(activations, state.q, state.dq, muscle_,
+    hill_compute_torques(activations, state.q, state.dq, muscle_, task_.dt,
                          muscle_state_.activation, tau_out);
 }

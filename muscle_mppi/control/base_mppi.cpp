@@ -35,8 +35,8 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     for (int j = 0; j < NUM_JOINTS; ++j)
         model_->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j];
 
-    trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
-    noise_.assign(task_.n_samples * task_.horizon * NUM_JOINTS, 0.0);
+    trajectory_.assign(task_.horizon * NUM_MUSCLES, 0.0);
+    noise_.assign(task_.n_samples * task_.horizon * NUM_MUSCLES, 0.0);
     costs_.resize(task_.n_samples);
 
     const int N = task_.n_iterations;
@@ -58,9 +58,9 @@ void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
     for (int s = 0; s < task_.n_samples; ++s)
         for (int t = 0; t < task_.horizon; ++t) {
             const double anneal = noise_sched_[iter * task_.horizon + t];
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                int idx = s * task_.horizon * NUM_JOINTS + t * NUM_JOINTS + j;
-                noise_[idx] = task_.noise_sigma[j] * anneal * normal_(rng_);
+            for (int m = 0; m < NUM_MUSCLES; ++m) {
+                int idx = s * task_.horizon * NUM_MUSCLES + t * NUM_MUSCLES + m;
+                noise_[idx] = task_.noise_sigma[m] * anneal * normal_(rng_);
             }
         }
 }
