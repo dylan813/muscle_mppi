@@ -80,3 +80,11 @@ sudo apt install xvfb
 Xvfb :99 -screen 0 1280x720x24 &
 DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
 ``` -->
+
+# Unit Tests
+
+```bash
+cd muscle_mppi/log
+python3 plot_force_length.py
+python3 plot_force_velocity.py
+```
