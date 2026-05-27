@@ -14,8 +14,8 @@ struct MuscleParams {
     double phi_min[NUM_JOINTS]    = {};        // joint angle (rad) mapping to lce_min for agonist
     double phi_max[NUM_JOINTS]    = {};        // joint angle (rad) mapping to lce_max for agonist
     double vmax[NUM_JOINTS]       = {};        // max contraction velocity (fiber lengths / s)
-    double fvmax[NUM_JOINTS]      = {};        // eccentric force amplification (>1)
-    double pflmax[NUM_JOINTS]     = {};        // passive force at max extension
+    double FVmax[NUM_JOINTS]      = {};        // eccentric force amplification (>1)
+    double pFLmax[NUM_JOINTS]     = {};        // passive force at max extension
     double kd_sim[NUM_JOINTS]     = {};        // MuJoCo joint damping (applied to sim dofs)
 };
 

@@ -36,13 +36,13 @@ static inline double active_force_length(double length, double A, double mid, do
 
 // MuJoCo's force-velocity curve.
 // Concentric (shortening, vel<0): quadratic rise 0→1.
-// Eccentric (lengthening, vel>0): quadratic rise 1→fvmax.
-static inline double force_vel(double velocity, double c, double vmax, double fvmax) {
+// Eccentric (lengthening, vel>0): quadratic rise 1→FVmax.
+static inline double force_vel(double velocity, double c, double vmax, double FVmax) {
     const double eff_vel = velocity / vmax;
     if (eff_vel < -1.0) return 0.0;
     if (eff_vel <= 0.0) return (eff_vel + 1.0) * (eff_vel + 1.0);
-    if (eff_vel <= c)   return fvmax - (c - eff_vel) * (c - eff_vel) / c;
-    return fvmax;
+    if (eff_vel <= c)   return FVmax - (c - eff_vel) * (c - eff_vel) / c;
+    return FVmax;
 }
 
 // MuJoCo's parallel elastic (passive) force.
@@ -110,15 +110,15 @@ inline void hill_compute_torques(
 
         // Force-velocity.
         const double vmax  = p.vmax[j];
-        const double fvmax = p.fvmax[j];
-        const double c     = fvmax - 1.0;
-        const double FV1   = force_vel(lce_dot1, c, vmax, fvmax);
-        const double FV2   = force_vel(lce_dot2, c, vmax, fvmax);
+        const double FVmax = p.FVmax[j];
+        const double c     = FVmax - 1.0;
+        const double FV1   = force_vel(lce_dot1, c, vmax, FVmax);
+        const double FV2   = force_vel(lce_dot2, c, vmax, FVmax);
 
         // Passive parallel elasticity.
         const double b_passive = 0.5 * (lmax + 1.0);
-        const double passive_FL1 = passive_force_length(lce1, p.pflmax[j], b_passive);
-        const double passive_FL2 = passive_force_length(lce2, p.pflmax[j], b_passive);
+        const double passive_FL1 = passive_force_length(lce1, p.pFLmax[j], b_passive);
+        const double passive_FL2 = passive_force_length(lce2, p.pFLmax[j], b_passive);
 
         // Total force per muscle (normalized), scaled to Newtons by peak_force.
         const double F1 = (active_FL1 * FV1 * act1 + passive_FL1) * p.peak_force[j];

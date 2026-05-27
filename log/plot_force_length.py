@@ -23,7 +23,7 @@ with open(yaml_path) as f:
 muscle = cfg["default_muscle"]
 lce_min = muscle["lce_min"][0]   # same for all joints
 lce_max = muscle["lce_max"][0]
-fpmax   = muscle["pflmax"][0]
+fpmax   = muscle["pFLmax"][0]
 
 b_passive = 0.5 * (lce_max + 1.0)  # matches muscle.h
 
