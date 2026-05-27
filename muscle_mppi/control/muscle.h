@@ -47,15 +47,15 @@ static inline double force_vel(double velocity, double c, double vmax, double fv
 
 // MuJoCo's parallel elastic (passive) force.
 // Zero below optimal length, cubic then linear above.
-static inline double passive_force_length(double length, double fpmax, double b) {
+static inline double passive_force_length(double length, double max, double b) {
     if (length <= 1.0) return 0.0;
     double temp;
     if (length <= b) {
         temp = (length - 1.0) / (b - 1.0);
-        return 0.25 * fpmax * temp * temp * temp;
+        return 0.25 * max * temp * temp * temp;
     }
     temp = (length - b) / (b - 1.0);
-    return 0.25 * fpmax * (1.0 + 3.0 * temp);
+    return 0.25 * max * (1.0 + 3.0 * temp);
 }
 
 // Compute joint torques from antagonistic muscle pairs.
