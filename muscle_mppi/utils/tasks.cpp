@@ -66,7 +66,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     load_doubles(m["phi_max"],    cfg.muscle.phi_max,    NUM_JOINTS, "phi_max");
     load_doubles(m["vmax"],       cfg.muscle.vmax,       NUM_JOINTS, "vmax");
     load_doubles(m["fvmax"],      cfg.muscle.fvmax,      NUM_JOINTS, "fvmax");
-    load_doubles(m["fpmax"],      cfg.muscle.fpmax,      NUM_JOINTS, "fpmax");
+    load_doubles(m["pflmax"],     cfg.muscle.pflmax,     NUM_JOINTS, "pflmax");
     load_doubles(m["kd_sim"],     cfg.muscle.kd_sim,     NUM_JOINTS, "kd_sim");
 
     return cfg;

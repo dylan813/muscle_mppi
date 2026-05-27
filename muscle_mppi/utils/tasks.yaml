@@ -32,7 +32,7 @@ default_muscle: &default_muscle
   fvmax:         [1.33, 1.33, 1.33]   # eccentric force amplification plateau
 
   # Passive parallel elasticity at max extension (dimensionless, scales with peak_force).
-  fpmax:         [1.3, 1.3, 1.3]
+  pflmax:        [1.3, 1.3, 1.3]
 
   # MuJoCo joint damping applied directly to simulation DOFs (N·m·s/rad).
   kd_sim:        [2.0, 3.5, 3.5]

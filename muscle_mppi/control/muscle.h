@@ -117,8 +117,8 @@ inline void hill_compute_torques(
 
         // Passive parallel elasticity.
         const double b_passive = 0.5 * (lmax + 1.0);
-        const double passive_FL1 = passive_force_length(lce1, p.fpmax[j], b_passive);
-        const double passive_FL2 = passive_force_length(lce2, p.fpmax[j], b_passive);
+        const double passive_FL1 = passive_force_length(lce1, p.pflmax[j], b_passive);
+        const double passive_FL2 = passive_force_length(lce2, p.pflmax[j], b_passive);
 
         // Total force per muscle (normalized), scaled to Newtons by peak_force.
         const double F1 = (active_FL1 * FV1 * act1 + passive_FL1) * p.peak_force[j];
