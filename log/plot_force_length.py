@@ -30,7 +30,7 @@ b_passive = 0.5 * (lce_max + 1.0)  # matches muscle.h
 # ---------------------------------------------------------------------------
 # Reimplementation of muscle.h helpers
 # ---------------------------------------------------------------------------
-def bump(length, A, mid, B):
+def active_force_length(length, A, mid, B):
     left  = 0.5 * (A + mid)
     right = 0.5 * (mid + B)
     if length <= A or length >= B:
@@ -50,11 +50,11 @@ def bump(length, A, mid, B):
 
 
 def active_fl(lce, lmin, lmax):
-    return (bump(lce, lmin, 1.0, lmax)
-            + 0.15 * bump(lce, lmin, 0.5 * (lmin + 0.95), 0.95))
+    return (active_force_length(lce, lmin, 1.0, lmax)
+            + 0.15 * active_force_length(lce, lmin, 0.5 * (lmin + 0.95), 0.95))
 
 
-def passive_fl(lce, fpmax, b):
+def passive_force_length(lce, fpmax, b):
     if lce <= 1.0:
         return 0.0
     elif lce <= b:
@@ -71,7 +71,7 @@ def passive_fl(lce, fpmax, b):
 lce = np.linspace(0.5, 1.4, 500)
 
 fl_active  = np.array([active_fl(l, lce_min, lce_max) for l in lce])
-fl_passive = np.array([passive_fl(l, fpmax, b_passive) for l in lce])
+fl_passive = np.array([passive_force_length(l, fpmax, b_passive) for l in lce])
 fl_total   = fl_active + fl_passive
 
 # ---------------------------------------------------------------------------

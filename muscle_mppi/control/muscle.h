@@ -14,7 +14,7 @@ struct MuscleState {
 
 // MuJoCo's piecewise-quadratic force-length bump.
 // Returns a value in [0,1] peaked at 1.0 when length==mid, zero outside [A,B].
-static inline double bump(double length, double A, double mid, double B) {
+static inline double active_force_length(double length, double A, double mid, double B) {
     const double left  = 0.5 * (A + mid);
     const double right = 0.5 * (mid + B);
     if (length <= A || length >= B) return 0.0;
@@ -47,7 +47,7 @@ static inline double force_vel(double velocity, double c, double vmax, double fv
 
 // MuJoCo's parallel elastic (passive) force.
 // Zero below optimal length, cubic then linear above.
-static inline double passive_force(double length, double fpmax, double b) {
+static inline double passive_force_length(double length, double fpmax, double b) {
     if (length <= 1.0) return 0.0;
     double temp;
     if (length <= b) {
@@ -103,10 +103,10 @@ inline void hill_compute_torques(
         // Force-length: primary bell + secondary shoulder at short lengths.
         const double lmin = p.lce_min[j];
         const double lmax = p.lce_max[j];
-        const double FL1 = bump(lce1, lmin, 1.0, lmax)
-                         + 0.15 * bump(lce1, lmin, 0.5 * (lmin + 0.95), 0.95);
-        const double FL2 = bump(lce2, lmin, 1.0, lmax)
-                         + 0.15 * bump(lce2, lmin, 0.5 * (lmin + 0.95), 0.95);
+        const double active_FL1 = active_force_length(lce1, lmin, 1.0, lmax)
+                                + 0.15 * active_force_length(lce1, lmin, 0.5 * (lmin + 0.95), 0.95);
+        const double active_FL2 = active_force_length(lce2, lmin, 1.0, lmax)
+                                + 0.15 * active_force_length(lce2, lmin, 0.5 * (lmin + 0.95), 0.95);
 
         // Force-velocity.
         const double vmax  = p.vmax[j];
@@ -117,12 +117,12 @@ inline void hill_compute_torques(
 
         // Passive parallel elasticity.
         const double b_passive = 0.5 * (lmax + 1.0);
-        const double FP1 = passive_force(lce1, p.fpmax[j], b_passive);
-        const double FP2 = passive_force(lce2, p.fpmax[j], b_passive);
+        const double passive_FL1 = passive_force_length(lce1, p.fpmax[j], b_passive);
+        const double passive_FL2 = passive_force_length(lce2, p.fpmax[j], b_passive);
 
         // Total force per muscle (normalized), scaled to Newtons by peak_force.
-        const double F1 = (FL1 * FV1 * act1 + FP1) * p.peak_force[j];
-        const double F2 = (FL2 * FV2 * act2 + FP2) * p.peak_force[j];
+        const double F1 = (active_FL1 * FV1 * act1 + passive_FL1) * p.peak_force[j];
+        const double F2 = (active_FL2 * FV2 * act2 + passive_FL2) * p.peak_force[j];
 
         // Net joint torque: minus because muscles pull (matching MuJoCo convention).
         tau_out[j] = -(F1 * r1 + F2 * r2);
