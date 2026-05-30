@@ -9,32 +9,48 @@
 
 # Shared muscle parameters.
 default_muscle: &default_muscle
-  act_bandwidth: 100.0           # activation filter bandwidth (Hz): act += bandwidth*dt*(ctrl-act)
 
-  # Peak isometric force (N). Scales FL*FV output to torque via the moment arm.
-  # Moment arm = (lce_max - lce_min) / (phi_max - phi_min) — approximately 0.16 for hip/calf, 0.062 for thigh.
-  # Rough targets: hip ~23.7 Nm → 150N; thigh ~23.7 Nm → 380N; calf ~35.55 Nm → 200N.
-  peak_force:    [150.0, 380.0, 200.0]
+  # Activation filter bandwidth (Hz). First-order filter: act += bandwidth * dt * (ctrl - act).
+  # 100 Hz → 10 ms time constant, matching biological skeletal muscle. Physiological constant.
+  act_bandwidth: 100.0
 
-  # Fiber length range (normalized by optimal isometric length l_opt).
-  # Both muscles in the antagonistic pair span this range as the joint sweeps phi_min→phi_max.
+  # Peak isometric force per joint (N). Maximum force when FL=1, FV=1, act=1.
+  # Determined by: peak_force = tau_max / r
+  #   r = (lce_max - lce_min) / (phi_max - phi_min)  [moment arm, dimensionless]
+  #   tau_max from go2.xml ctrlrange: hip=23.7 Nm, thigh=23.7 Nm, calf=45.43 Nm
+  #   r values: hip=0.1584, thigh=0.0617, calf=0.1781
+  peak_force:    [149.7, 384.1, 255.1]
+
+  # Fiber length range normalized by optimal isometric length (l_opt).
+  # Both muscles in the antagonistic pair span [lce_min, lce_max] as the joint sweeps phi_min→phi_max.
+  # Taken from learningwithmuscles (mjmuscle_geometry_free.pyx). Design choice: keeps both
+  # muscles operating on the ascending limb and peak of the FL curve throughout the range of motion.
   lce_min:       [0.75, 0.75, 0.75]
   lce_max:       [1.05, 1.05, 1.05]
 
-  # Joint angle range (rad) corresponding to [lce_min, lce_max] for the agonist muscle.
-  # Use the physical joint limits from the XML (slightly inside to avoid singularities).
-  # FL hip: [-0.9472, 0.9472], thigh: [-1.4708, 3.3907], calf: [-2.6227, -0.9378]
+  # Joint angle range (rad) mapped linearly to [lce_min, lce_max] for the agonist muscle.
+  # Taken from go2.xml joint limits, 0.1 rad inside the hard stops to avoid singularities at limits.
+  # go2.xml limits — hip: [-1.0472, 1.0472], thigh: [-1.5708, 3.4907], calf: [-2.7227, -0.83776]
   phi_min:       [-0.9472, -1.4708, -2.6227]
   phi_max:       [0.9472,  3.3907,  -0.9378]
 
-  # Force-velocity parameters.
-  vmax:          [10.0, 10.0, 10.0]   # max contraction velocity (fiber lengths/s)
-  FVmax:         [1.33, 1.33, 1.33]   # eccentric force amplification plateau
+  # Maximum fiber contraction velocity (fiber lengths / s). FV curve → 0 at lce_dot = -vmax.
+  # Determined by: vmax = r * dq_max
+  #   dq_max from Go2 URDF file found in Unitree documentation: hip=30.1 rad/s, thigh=30.1 rad/s, calf=15.70 rad/s
+  #   r values: hip=0.1584, thigh=0.0617, calf=0.1781
+  vmax:          [4.77, 1.86, 2.80]
 
-  # Passive parallel elasticity at max extension (dimensionless, scales with peak_force).
+  # Eccentric force amplification plateau. FV saturates at FVmax when the muscle is lengthening.
+  # Physiological constant: experimental data puts this at 1.2–1.5. MuJoCo default is 1.33.
+  FVmax:         [1.33, 1.33, 1.33]
+
+  # Passive parallel elasticity scale. Force at maximum extension relative to peak_force.
+  # Inflection point b = 0.5 * (lce_max + 1.0) = 1.025. With lce_max=1.05 this is very stiff
+  # — acts as a near-hard boundary beyond optimal length. MuJoCo default; physiological constant.
   pFLmax:        [1.3, 1.3, 1.3]
 
-  # MuJoCo joint damping applied directly to simulation DOFs (N·m·s/rad).
+  # MuJoCo joint damping (N·m·s/rad) written directly to simulation DOFs at startup.
+  # Overrides the go2.xml default of 0.1. Values should match Go2 motor driver kd gains.
   kd_sim:        [2.0, 3.5, 3.5]
 
 # -----------------------------------------------------------------------
