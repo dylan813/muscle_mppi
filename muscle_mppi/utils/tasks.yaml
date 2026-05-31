@@ -1,13 +1,19 @@
 # muscle_mppi task configuration — edit here, no rebuild needed.
 # Run the binary from build/: model_path is relative to the working directory.
 #
-# Joint order for all NUM_JOINTS-element arrays (FL leg only, JOINT_OFFSET=3):
+# --- Single-leg tasks (reach) ---
+# Joint order (NUM_JOINTS=3, JOINT_OFFSET=3):
 #   0: FL_hip   1: FL_thigh   2: FL_calf
 #
-# noise_sigma has NUM_MUSCLES=6 elements, interleaved per joint:
-#   [hip_agonist, hip_antagonist, thigh_agonist, thigh_antagonist, calf_agonist, calf_antagonist]
+# --- Quadruped tasks (walk) ---
+# Joint order (NUM_JOINTS=12, JOINT_OFFSET=0):
+#   0-2:  FR_hip, FR_thigh, FR_calf
+#   3-5:  FL_hip, FL_thigh, FL_calf
+#   6-8:  RR_hip, RR_thigh, RR_calf
+#   9-11: RL_hip, RL_thigh, RL_calf
 
-# Shared muscle parameters.
+# -----------------------------------------------------------------------
+# Single-leg muscle parameters (3 joints).
 default_muscle: &default_muscle
 
   # Activation filter bandwidth (Hz). First-order filter: act += bandwidth * dt * (ctrl - act).
@@ -54,6 +60,20 @@ default_muscle: &default_muscle
   kd_sim:        [2.0, 3.5, 3.5]
 
 # -----------------------------------------------------------------------
+# Quadruped muscle parameters (12 joints — same values repeated 4× for FR/FL/RR/RL).
+default_muscle_quad: &default_muscle_quad
+  act_bandwidth: 100.0
+  peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
+  lce_min:     [0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75]
+  lce_max:     [1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05]
+  phi_min:     [-0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227]
+  phi_max:     [ 0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378]
+  vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
+  FVmax:       [1.33, 1.33, 1.33,  1.33, 1.33, 1.33,  1.33, 1.33, 1.33,  1.33, 1.33, 1.33]
+  pFLmax:      [1.3, 1.3, 1.3,  1.3, 1.3, 1.3,  1.3, 1.3, 1.3,  1.3, 1.3, 1.3]
+  kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
+
+# -----------------------------------------------------------------------
 reach:
   model_path:   "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
   height_target: 0.0
@@ -87,3 +107,43 @@ reach:
   noise_sigma:  [0.05, 0.05, 0.08, 0.08, 0.08, 0.08]
 
   muscle: *default_muscle
+
+# -----------------------------------------------------------------------
+# Locomotion task — spline-parameterised MPPI with muscle inverse tracking.
+# Replaces the paper's PD controller with the Hill muscle model.
+# All cost weights follow Table II of the reference-free MPPI paper.
+walk:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+  height_target: 0.34
+  foot_target:   [0.0, 0.0, 0.0]   # unused (foot_pos weight = 0)
+  n_samples:     30
+  horizon:       45                  # 0.9 s at dt_step = 0.02 s
+  substeps:      10
+  n_iterations:  3
+  n_nodes:       10                  # K = 10 Hermite nodes → Δt_node = 0.1 s
+  lambda:        0.1
+  beta1:         3.0
+  beta2:         3.0
+  dt:            0.002
+
+  cost:
+    height:        100.0
+    orientation:   10.0
+    posture:       0.0
+    contact_vel:   0.5
+    contact_force: 0.05
+    terminal:      2500.0
+    act_effort:    0.0
+    vel_cmd:       1.0
+    vel_des:       [0.5, 0.0, 0.0]
+    foot_pos:      0.0
+
+  # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
+  nominal_pose: [0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3]
+
+  noise_sigma_q: [0.15, 0.20, 0.20,  0.15, 0.20, 0.20,  0.15, 0.20, 0.20,  0.15, 0.20, 0.20]
+  noise_sigma_v: [0.50, 0.70, 0.70,  0.50, 0.70, 0.70,  0.50, 0.70, 0.70,  0.50, 0.70, 0.70]
+  kp_muscle:     [40.0, 80.0, 80.0,  40.0, 80.0, 80.0,  40.0, 80.0, 80.0,  40.0, 80.0, 80.0]
+  kd_muscle:     [2.0,  3.5,  3.5,   2.0,  3.5,  3.5,   2.0,  3.5,  3.5,   2.0,  3.5,  3.5]
+
+  muscle: *default_muscle_quad

@@ -114,24 +114,9 @@ private:
         state_.valid  = true;
     }
 
-    void SetProneLegs() {
-        for (int leg = 0; leg < 3; ++leg) {
-            const int off = OTHER_LEG_OFFSETS[leg];
-            for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[off + i].q()   = prone_pos_[i];
-                low_cmd_.motor_cmd()[off + i].kp()  = 30.0;
-                low_cmd_.motor_cmd()[off + i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[off + i].kd()  = 3.5;
-                low_cmd_.motor_cmd()[off + i].tau() = 0.0;
-            }
-        }
-    }
-
     void ControlLoop() {
-        SetProneLegs();
-
         if (!mppi_ready_.load()) {
-            // Hold FL at nominal pose with PD until MPPI has converged
+            // Hold all joints at nominal stance with PD until MPPI has converged.
             for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = stand_pos_[i];
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 50.0;
@@ -178,10 +163,12 @@ private:
             }
 
             auto t0 = std::chrono::steady_clock::now();
-            double activations[NUM_MUSCLES] = {};
-            mppi_.update(snap, activations);
+            // Spline MPPI returns joint targets; muscle inverse maps them to torques.
+            double q_des[NUM_JOINTS] = {};
+            double dq_des[NUM_JOINTS] = {};
+            mppi_.update(snap, q_des, dq_des);
             double tau_cmd[NUM_JOINTS] = {};
-            mppi_.compute_real_torques(snap, activations, tau_cmd);
+            mppi_.compute_real_torques(snap, q_des, dq_des, tau_cmd);
             double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 
@@ -208,18 +195,21 @@ private:
 
     static constexpr int CONVERGENCE_SOLVES = 20;
 
-    // FR=0, RR=6, RL=9 — actuator offsets for the three non-FL legs
-    static constexpr int OTHER_LEG_OFFSETS[3] = {0, 6, 9};
-
+    // Damping gains applied after handover (one per joint: hip, thigh, calf × 4 legs).
     const double kd_[NUM_JOINTS] = {
-        2.0, 3.5, 3.5,   // FL hip / thigh / calf
+        2.0, 3.5, 3.5,   // FR
+        2.0, 3.5, 3.5,   // FL
+        2.0, 3.5, 3.5,   // RR
+        2.0, 3.5, 3.5,   // RL
     };
 
-    // FL nominal position held during MPPI convergence
-    const double stand_pos_[NUM_JOINTS] = { 0.0, 0.67, -1.3 };
-
-    // Prone position for FR/RR/RL: legs folded up tight, clear of FL workspace
-    const double prone_pos_[NUM_JOINTS] = { 0.0, 1.5, -2.5 };
+    // Nominal standing pose held during MPPI convergence.
+    const double stand_pos_[NUM_JOINTS] = {
+        0.0, 0.67, -1.3,   // FR
+        0.0, 0.67, -1.3,   // FL
+        0.0, 0.67, -1.3,   // RR
+        0.0, 0.67, -1.3,   // RL
+    };
 
     std::atomic<bool> mppi_ready_{false};
 

@@ -15,17 +15,25 @@ link_directories(${MUJOCO_DIR}/lib)
 
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags,-rpath,/opt/unitree_robotics/lib")
 
+set(COMMON_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
+
+# --- Quadruped locomotion controller (NUM_JOINTS=12, JOINT_OFFSET=0) ---
 add_executable(muscle_mppi_controller
     mppi_controller.cpp
     control/base_mppi.cpp
     control/mppi_locomotion.cpp
     utils/tasks.cpp
 )
+target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
+# No compile definitions needed — tasks.h defaults to NUM_JOINTS=12, JOINT_OFFSET=0.
 
-target_link_libraries(muscle_mppi_controller
-    unitree_sdk2
-    mujoco
-    yaml-cpp
-    pthread
-    OpenMP::OpenMP_CXX
-)
+# --- Single-leg reach controller (NUM_JOINTS=3, JOINT_OFFSET=3) ---
+# Uncomment when ready to build single_leg_reach.
+# add_executable(single_leg_controller
+#     single_leg_controller.cpp      # top-level entry point (mirrors mppi_controller.cpp)
+#     control/base_mppi.cpp
+#     control/single_leg_reach.cpp
+#     utils/tasks.cpp
+# )
+# target_compile_definitions(single_leg_controller PRIVATE NUM_JOINTS=3 JOINT_OFFSET=3)
+# target_link_libraries(single_leg_controller ${COMMON_LIBS})

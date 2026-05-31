@@ -42,8 +42,16 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.dt            = t["dt"].as<double>();
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS,  "nominal_pose");
-    load_doubles(t["noise_sigma"],  cfg.noise_sigma,  NUM_MUSCLES, "noise_sigma");
     load_doubles(t["foot_target"],  cfg.foot_target,  3,           "foot_target");
+    if (t["noise_sigma"])
+        load_doubles(t["noise_sigma"], cfg.noise_sigma, NUM_MUSCLES, "noise_sigma");
+
+    // Spline parameterisation fields (optional — only used by MPPILocomotion).
+    cfg.n_nodes = t["n_nodes"] ? t["n_nodes"].as<int>() : 10;
+    if (t["noise_sigma_q"]) load_doubles(t["noise_sigma_q"], cfg.noise_sigma_q, NUM_JOINTS, "noise_sigma_q");
+    if (t["noise_sigma_v"]) load_doubles(t["noise_sigma_v"], cfg.noise_sigma_v, NUM_JOINTS, "noise_sigma_v");
+    if (t["kp_muscle"])     load_doubles(t["kp_muscle"],     cfg.kp_muscle,     NUM_JOINTS, "kp_muscle");
+    if (t["kd_muscle"])     load_doubles(t["kd_muscle"],     cfg.kd_muscle,     NUM_JOINTS, "kd_muscle");
 
     const YAML::Node& c = t["cost"];
     cfg.cost.height        = c["height"].as<double>();

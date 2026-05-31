@@ -2,9 +2,14 @@
 
 #include <string>
 
-static constexpr int NUM_JOINTS   = 3;             // FL leg: hip, thigh, calf
-static constexpr int NUM_MUSCLES  = 2 * NUM_JOINTS; // antagonistic pair per joint
-static constexpr int JOINT_OFFSET = 3;             // FL actuators start at index 3 in the model
+// These are overridable at compile time via -DNUM_JOINTS=N -DJOINT_OFFSET=N.
+// Defaults: full quadruped (12 joints, offset 0).
+// Single-leg build: -DNUM_JOINTS=3 -DJOINT_OFFSET=3
+#ifndef NUM_JOINTS
+static constexpr int NUM_JOINTS   = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
+static constexpr int JOINT_OFFSET = 0;    // actuators start at index 0
+#endif
+static constexpr int NUM_MUSCLES  = 2 * NUM_JOINTS;  // antagonistic pair per joint
 
 struct MuscleParams {
     double act_bandwidth = 100.0;              // activation filter bandwidth (Hz)
@@ -34,9 +39,9 @@ struct CostWeights {
 
 struct TaskConfig {
     std::string  model_path;
-    double       height_target           = 0.0;
+    double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
-    double       foot_target[3]          = {};
+    double       foot_target[3]           = {};
     CostWeights  cost;
     MuscleParams muscle;
     int          n_samples    = 16;
@@ -47,7 +52,16 @@ struct TaskConfig {
     double       beta1        = 3.0;
     double       beta2        = 3.0;
     double       dt           = 0.002;
-    double       noise_sigma[NUM_MUSCLES] = {};   // one sigma per virtual muscle
+
+    // --- direct activation noise (used by SingleLegReach / BaseMPPI::sample_noise) ---
+    double noise_sigma[NUM_MUSCLES] = {};
+
+    // --- spline parameterisation (used by MPPILocomotion) ---
+    int    n_nodes                   = 10;    // K spline control points
+    double noise_sigma_q[NUM_JOINTS] = {};    // per-joint position noise (rad)
+    double noise_sigma_v[NUM_JOINTS] = {};    // per-joint velocity noise (rad/s)
+    double kp_muscle[NUM_JOINTS]     = {};    // impedance stiffness (N·m/rad)
+    double kd_muscle[NUM_JOINTS]     = {};    // impedance damping  (N·m·s/rad)
 };
 
 struct MotionCommand {
