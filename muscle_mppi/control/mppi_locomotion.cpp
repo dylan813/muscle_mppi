@@ -4,6 +4,7 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <omp.h>
 #include <stdexcept>
 #include <iostream>
@@ -12,7 +13,8 @@
 // Constructor
 // ============================================================================
 
-MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& yaml_path)
+MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& yaml_path,
+                                const std::string& log_dir)
     : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
@@ -71,6 +73,11 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     cmd_.vx = task_.cost.vel_des[0];
     cmd_.vy = task_.cost.vel_des[1];
     cmd_.wz = task_.cost.vel_des[2];
+
+    std::filesystem::create_directories(log_dir);
+    lat_log_.open(log_dir + "/walk_latency.csv", std::ios::out | std::ios::trunc);
+    lat_log_ << "call,total_ms,predict_ms,warmstart_ms,iterations_ms,"
+                "avg_hill_ms,avg_mjstep_ms,avg_cost_ms\n";
 }
 
 // ============================================================================
@@ -232,6 +239,9 @@ void MPPILocomotion::sample_spline_noise(int iter)
 
 double MPPILocomotion::rollout(int s, const RobotState& state)
 {
+    using Clock = std::chrono::steady_clock;
+    using Us    = std::chrono::microseconds;
+
     mjData* d = data_[s];
     set_mj_state(d, state);
 
@@ -267,29 +277,45 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
 
+            auto t_h = Clock::now();
             double act_cmd[NUM_MUSCLES];
             for (int j = 0; j < NUM_JOINTS; ++j)
                 activations_from_target(j, q_des[j], dq_des[j],
                                          q_cur[j], dq_cur[j],
                                          act_cmd[2*j], act_cmd[2*j+1]);
-
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
+            lat_hill_us_.fetch_add(
+                std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
+                std::memory_order_relaxed);
 
             for (int j = 0; j < model_->nu; ++j)
                 d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j)
                 d->ctrl[JOINT_OFFSET + j] = tau_out[j];
 
+            auto t_mj = Clock::now();
             mj_step(model_, d);
+            lat_mjstep_us_.fetch_add(
+                std::chrono::duration_cast<Us>(Clock::now() - t_mj).count(),
+                std::memory_order_relaxed);
 
             if (!std::isfinite(d->qpos[2]) || d->qpos[2] < -1.0)
                 return 1e6;
         }
 
+        auto t_c = Clock::now();
         total_cost += step_cost(d, t);
+        lat_cost_us_.fetch_add(
+            std::chrono::duration_cast<Us>(Clock::now() - t_c).count(),
+            std::memory_order_relaxed);
     }
 
+    auto t_tc = Clock::now();
     total_cost += terminal_cost(d);
+    lat_cost_us_.fetch_add(
+        std::chrono::duration_cast<Us>(Clock::now() - t_tc).count(),
+        std::memory_order_relaxed);
+
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
@@ -424,6 +450,11 @@ void MPPILocomotion::update(const RobotState& state,
                              double dq_des_out[NUM_JOINTS])
 {
     auto t_start = std::chrono::steady_clock::now();
+    using Clock = std::chrono::steady_clock;
+    using Us    = std::chrono::microseconds;
+    auto elapsed_us = [](auto t0) {
+        return std::chrono::duration_cast<Us>(Clock::now() - t0).count();
+    };
 
     if (!state.valid) {
         for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -433,13 +464,19 @@ void MPPILocomotion::update(const RobotState& state,
         return;
     }
 
+    lat_hill_us_.store(0,   std::memory_order_relaxed);
+    lat_mjstep_us_.store(0, std::memory_order_relaxed);
+    lat_cost_us_.store(0,   std::memory_order_relaxed);
+
     // Latency compensation: n_skip in horizon steps (Eq. 14).
     const double dt_step = task_.substeps * task_.dt;
     const int n_skip = std::clamp(
         static_cast<int>(std::round(last_compute_ms_ * 1e-3 / dt_step)),
         1, task_.horizon / 2);
 
+    auto t_pred = Clock::now();
     RobotState predicted = predict_state(state, n_skip);
+    long long pred_us = elapsed_us(t_pred);
 
     start_pos_[0] = predicted.pos[0];
     start_pos_[1] = predicted.pos[1];
@@ -447,6 +484,7 @@ void MPPILocomotion::update(const RobotState& state,
 
     // Warm-start: shift spline nodes forward by n_skip steps (Eq. 15).
     // Convert horizon-step skip to node skip.
+    auto t_ws = Clock::now();
     const int n_skip_nodes = std::clamp(
         static_cast<int>(std::round(n_skip * dt_step / dt_node_)),
         1, n_nodes_ - 1);
@@ -465,11 +503,13 @@ void MPPILocomotion::update(const RobotState& state,
             shifted[k * 2 * NU + NU + j] = 0.0;
         }
     trajectory_ = shifted;
+    long long ws_us = elapsed_us(t_ws);
 
     // MPPI iterations.
     const int N = task_.n_iterations;
     best_cost_ = 1e9;
 
+    auto t_iter = Clock::now();
     for (int iter = 0; iter < N; ++iter) {
         sample_spline_noise(iter);
 
@@ -521,6 +561,8 @@ void MPPILocomotion::update(const RobotState& state,
         trajectory_ = std::move(new_traj);
     }
 
+    long long iter_us = elapsed_us(t_iter);
+
     // Return first node of best trajectory as joint targets (Eq. 13 analogue).
     for (int j = 0; j < NUM_JOINTS; ++j) {
         q_des_out[j]  = best_trajectory_[j];
@@ -528,7 +570,24 @@ void MPPILocomotion::update(const RobotState& state,
     }
 
     last_compute_ms_ = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - t_start).count();
+        Clock::now() - t_start).count();
+
+    if (lat_log_.is_open()) {
+        const long long n_rollouts = (long long)task_.n_iterations * task_.n_samples;
+        const double avg_hill_ms   = lat_hill_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
+        const double avg_mjstep_ms = lat_mjstep_us_.load(std::memory_order_relaxed) * 1e-3 / n_rollouts;
+        const double avg_cost_ms   = lat_cost_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
+
+        lat_log_ << ++lat_call_count_  << ","
+                 << last_compute_ms_   << ","
+                 << pred_us  * 1e-3    << ","
+                 << ws_us    * 1e-3    << ","
+                 << iter_us  * 1e-3    << ","
+                 << avg_hill_ms        << ","
+                 << avg_mjstep_ms      << ","
+                 << avg_cost_ms        << "\n";
+        lat_log_.flush();
+    }
 }
 
 // ============================================================================

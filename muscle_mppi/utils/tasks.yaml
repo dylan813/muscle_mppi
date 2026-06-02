@@ -63,7 +63,7 @@ default_muscle: &default_muscle
 # -----------------------------------------------------------------------
 # Quadruped muscle parameters (12 joints — same values repeated 4× for FR/FL/RR/RL).
 default_muscle_quad: &default_muscle_quad
-  act_bandwidth: 100.0
+  act_bandwidth: 10.0
   peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
   lce_min:     [0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75]
   lce_max:     [1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05]
@@ -114,10 +114,10 @@ walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
   height_target: 0.34
   foot_target:   [0.0, 0.0, 0.0]   # unused (foot_pos weight = 0)
-  n_samples:     30
+  n_samples:     64
   horizon:       45                  # 0.9 s at dt_step = 0.02 s
   substeps:      10
-  n_iterations:  3
+  n_iterations:  5
   n_nodes:       10                  # K = 10 Hermite nodes → Δt_node = 0.1 s
   lambda:        0.1
   beta1:         3.0

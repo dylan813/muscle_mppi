@@ -240,7 +240,7 @@ int main(int argc, const char** argv) {
     std::cout << "MPPI Controller (Hill muscle model) — press Enter to start\n";
     std::cin.get();
 
-    const std::string task      = (argc >= 3) ? argv[2] : "reach";
+    const std::string task      = (argc >= 3) ? argv[2] : "walk";
     const std::string yaml_path = (argc >= 4) ? argv[3] : "../utils/tasks.yaml";
 
     std::cout << "Loading task '" << task << "' from " << yaml_path << "\n";

@@ -3,6 +3,9 @@
 #include "base_mppi.h"
 #include "muscle.h"
 
+#include <atomic>
+#include <fstream>
+
 // Reference-free MPPI with cubic Hermite spline parameterisation.
 //
 // Search space: K position + velocity control nodes per joint (Sec. III-A of the paper).
@@ -19,7 +22,8 @@
 class MPPILocomotion : public BaseMPPI {
 public:
     explicit MPPILocomotion(const std::string& task_name,
-                            const std::string& yaml_path = "../utils/tasks.yaml");
+                            const std::string& yaml_path = "../utils/tasks.yaml",
+                            const std::string& log_dir   = "../../analysis/log");
 
     // Returns the first spline node of the best trajectory as joint targets.
     void update(const RobotState& state,
@@ -92,4 +96,11 @@ private:
     int    foot_body_ids_[4] = {};  // all four feet
     int    n_feet_         = 0;
     double f_nominal_      = 0.0;
+
+    // Latency logging (CSV, one row per update() call)
+    std::ofstream          lat_log_;
+    long long              lat_call_count_ = 0;
+    std::atomic<long long> lat_hill_us_{0};
+    std::atomic<long long> lat_mjstep_us_{0};
+    std::atomic<long long> lat_cost_us_{0};
 };
