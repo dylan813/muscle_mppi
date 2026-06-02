@@ -42,7 +42,17 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.dt            = t["dt"].as<double>();
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
-    load_doubles(t["foot_target"],  cfg.foot_target,  3,          "foot_target");
+    if (t["foot_targets"]) {
+        const YAML::Node& fts = t["foot_targets"];
+        cfg.n_foot_targets = std::min((int)fts.size(), TaskConfig::MAX_FOOT_TARGETS);
+        for (int i = 0; i < cfg.n_foot_targets; ++i)
+            load_doubles(fts[i], cfg.foot_targets[i], 3, "foot_targets");
+        for (int k = 0; k < 3; ++k) cfg.foot_target[k] = cfg.foot_targets[0][k];
+    } else {
+        if (t["foot_target"]) load_doubles(t["foot_target"], cfg.foot_target, 3, "foot_target");
+        cfg.n_foot_targets = 1;
+        for (int k = 0; k < 3; ++k) cfg.foot_targets[0][k] = cfg.foot_target[k];
+    }
     if (t["tau_max"])
         load_doubles(t["tau_max"], cfg.tau_max, NUM_JOINTS, "tau_max");
     else

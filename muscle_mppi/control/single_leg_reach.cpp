@@ -89,6 +89,8 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
     if (foot_body_id_ < 0)
         throw std::runtime_error("Body not found: FL_foot");
 
+    for (int k = 0; k < 3; ++k) active_target_[k] = task_.foot_targets[0][k];
+
     std::filesystem::create_directories(log_dir);
     lat_log_.open(log_dir + "/single_leg_latency.csv", std::ios::out | std::ios::trunc);
     lat_log_ << "call,total_ms,warm_start_ms,run_iterations_ms,final_hill_ms,"
@@ -104,9 +106,9 @@ double SingleLegReach::step_cost(const mjData* d)
     double cost = 0.0;
 
     const double* fp = d->xpos + 3 * foot_body_id_;
-    double dx = fp[0] - task_.foot_target[0];
-    double dy = fp[1] - task_.foot_target[1];
-    double dz = fp[2] - task_.foot_target[2];
+    double dx = fp[0] - active_target_[0];
+    double dy = fp[1] - active_target_[1];
+    double dz = fp[2] - active_target_[2];
     cost += task_.cost.foot_pos * (dx*dx + dy*dy + dz*dz);
 
     for (int j = 0; j < NUM_JOINTS; ++j) {
@@ -120,10 +122,25 @@ double SingleLegReach::step_cost(const mjData* d)
 double SingleLegReach::terminal_cost(const mjData* d)
 {
     const double* fp = d->xpos + 3 * foot_body_id_;
-    double dx = fp[0] - task_.foot_target[0];
-    double dy = fp[1] - task_.foot_target[1];
-    double dz = fp[2] - task_.foot_target[2];
+    double dx = fp[0] - active_target_[0];
+    double dy = fp[1] - active_target_[1];
+    double dz = fp[2] - active_target_[2];
     return task_.cost.terminal * (dx*dx + dy*dy + dz*dz);
+}
+
+void SingleLegReach::maybe_advance_target(double foot_err)
+{
+    if (task_.n_foot_targets <= 1) return;
+    if (foot_err < CONVERGENCE_THRESH)
+        ++hold_count_;
+    else
+        hold_count_ = 0;
+    if (hold_count_ >= HOLD_STEPS) {
+        hold_count_ = 0;
+        target_idx_ = (target_idx_ + 1) % task_.n_foot_targets;
+        for (int k = 0; k < 3; ++k) active_target_[k] = task_.foot_targets[target_idx_][k];
+        std::fill(best_traj_.begin(), best_traj_.end(), 0.5);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -239,6 +256,20 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     long long total_us = elapsed_us(t0);
 
     std::memcpy(rollout_act_, real_act_, 2 * NUM_JOINTS * sizeof(double));
+
+    // Convergence check: advance to next target when foot holds within threshold.
+    // Uses data_[task_.n_samples] — the dedicated scratch slot not touched by rollouts.
+    {
+        mjData* d_check = data_[task_.n_samples];
+        set_mj_state(d_check, state);   // internally calls mj_forward, so xpos is current
+        const double* fp = d_check->xpos + 3 * foot_body_id_;
+        double err = 0.0;
+        for (int k = 0; k < 3; ++k) {
+            double dk = fp[k] - active_target_[k];
+            err += dk * dk;
+        }
+        maybe_advance_target(std::sqrt(err));
+    }
 
     if (lat_log_.is_open()) {
         long long n_rollouts = (long long)task_.n_iterations * task_.n_samples;

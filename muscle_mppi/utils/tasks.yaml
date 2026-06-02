@@ -81,7 +81,10 @@ default_muscle_quad: &default_muscle_quad
 reach:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
   height_target: 0.0
-  foot_target:   [0.5, 0.10, 0.6]
+  foot_targets:
+    - [0.5,  0.1, 0.6 ]
+    - [0.25, 0.1, 0.55]
+    - [0.25, 0.3, 0.6 ]
   n_samples:     64
   horizon:       10
   substeps:      1

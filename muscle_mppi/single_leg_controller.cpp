@@ -59,9 +59,6 @@ public:
         TaskConfig cfg = load_task(task, yaml_path);
         for (int j = 0; j < NUM_JOINTS; ++j)
             kd_fl_[j] = cfg.muscle.kd_sim[j];
-        for (int k = 0; k < 3; ++k)
-            foot_target_[k] = cfg.foot_target[k];
-
         // FK model for live foot position readout (no stepping, kinematics only).
         char err[1000];
         fk_model_ = mj_loadXML(cfg.model_path.c_str(), nullptr, err, sizeof(err));
@@ -192,14 +189,15 @@ private:
                 for (int j = 0; j < NUM_JOINTS; ++j)
                     fk_data_->qpos[fk_qpos_adr_[j]] = snap.q[j];
                 mj_kinematics(fk_model_, fk_data_);
-                const double* fp = fk_data_->xpos + 3 * foot_bid_;
-                double dx = fp[0]-foot_target_[0],
-                       dy = fp[1]-foot_target_[1],
-                       dz = fp[2]-foot_target_[2];
+                const double* fp  = fk_data_->xpos + 3 * foot_bid_;
+                const double* tgt = mppi_.active_target();
+                double dx = fp[0]-tgt[0], dy = fp[1]-tgt[1], dz = fp[2]-tgt[2];
                 std::printf("solve %4d | %.1f ms | cost min=%7.3f mean=%7.3f"
+                            " | target %d [%5.2f %5.2f %5.2f]"
                             " | foot [%6.3f %6.3f %6.3f] | err %.4f m\n",
                             solve_count, solve_sum_ms / solve_count,
                             mppi_.cost_min(), mppi_.cost_mean(),
+                            mppi_.target_idx(), tgt[0], tgt[1], tgt[2],
                             fp[0], fp[1], fp[2],
                             std::sqrt(dx*dx + dy*dy + dz*dz));
             }
@@ -215,7 +213,6 @@ private:
 
     SingleLegReach mppi_;
     double kd_fl_[NUM_JOINTS]      = {};
-    double foot_target_[3]         = {};
     mjModel* fk_model_             = nullptr;
     mjData*  fk_data_              = nullptr;
     int      fk_qpos_adr_[NUM_JOINTS] = {};

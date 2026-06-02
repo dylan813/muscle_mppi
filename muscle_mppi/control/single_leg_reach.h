@@ -29,6 +29,8 @@ public:
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
 
     const MuscleParams& muscle_params() const { return muscle_; }
+    const double* active_target() const { return active_target_; }
+    int target_idx() const { return target_idx_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
@@ -44,9 +46,16 @@ private:
     double rollout_act_[2 * NUM_JOINTS] = {};
     double real_act_[2 * NUM_JOINTS]    = {};
 
-    static constexpr double BASELINE = 0.05;
+    static constexpr double BASELINE           = 0.05;
+    static constexpr double CONVERGENCE_THRESH = 0.001;  // metres (1 mm)
+    static constexpr int    HOLD_STEPS         = 60;    // consecutive solves (~1.9 s at 31 ms/solve)
 
-    int foot_body_id_ = -1;
+    int    foot_body_id_ = -1;
+    double active_target_[3] = {};
+    int    target_idx_        = 0;
+    int    hold_count_        = 0;
+
+    void maybe_advance_target(double foot_err);
 
     // Latency logging (CSV, one row per update() call)
     std::ofstream          lat_log_;

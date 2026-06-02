@@ -44,10 +44,14 @@ struct CostWeights {
 };
 
 struct TaskConfig {
+    static constexpr int MAX_FOOT_TARGETS = 8;
+
     std::string  model_path;
     double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     double       foot_target[3]           = {};
+    double       foot_targets[MAX_FOOT_TARGETS][3] = {};
+    int          n_foot_targets           = 0;
     double       tau_max[NUM_JOINTS]      = {};
     CostWeights  cost;
     MuscleParams muscle;
