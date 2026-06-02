@@ -33,11 +33,7 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    double step_cost(const mjData* d,
-                     const double u[NUM_JOINTS],
-                     const double tau_out[NUM_JOINTS],
-                     const double tau_prev[NUM_JOINTS],
-                     int horizon_step);
+    double step_cost(const mjData* d);
     double terminal_cost(const mjData* d);
 
     MuscleParams muscle_;

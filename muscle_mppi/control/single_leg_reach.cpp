@@ -99,11 +99,7 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
 // Cost
 // -----------------------------------------------------------------------------
 
-double SingleLegReach::step_cost(const mjData* d,
-                                  const double u[NUM_JOINTS],
-                                  const double tau_out[NUM_JOINTS],
-                                  const double tau_prev[NUM_JOINTS],
-                                  int /*horizon_step*/)
+double SingleLegReach::step_cost(const mjData* d)
 {
     double cost = 0.0;
 
@@ -113,28 +109,9 @@ double SingleLegReach::step_cost(const mjData* d,
     double dz = fp[2] - task_.foot_target[2];
     cost += task_.cost.foot_pos * (dx*dx + dy*dy + dz*dz);
 
-    if (task_.cost.joint_vel > 0.0) {
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            double v = d->qvel[act_qvel_adr_[j]];
-            cost += task_.cost.joint_vel * v * v;
-        }
-    }
-
-    if (task_.cost.act_effort > 0.0) {
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            cost += task_.cost.act_effort * u[j] * u[j];
-    }
-
-    if (task_.cost.torque > 0.0) {
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            cost += task_.cost.torque * tau_out[j] * tau_out[j];
-    }
-
-    if (task_.cost.torque_rate > 0.0) {
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            double dr = tau_out[j] - tau_prev[j];
-            cost += task_.cost.torque_rate * dr * dr;
-        }
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        double v = d->qvel[act_qvel_adr_[j]];
+        cost += task_.cost.joint_vel * v * v;
     }
 
     return cost;
@@ -165,7 +142,6 @@ double SingleLegReach::rollout(int s, const RobotState& state)
     std::memcpy(activation, rollout_act_, 2 * NUM_JOINTS * sizeof(double));
 
     double total_cost = 0.0;
-    double tau_prev[NUM_JOINTS] = {};
 
     for (int t = 0; t < task_.horizon; ++t) {
         double u[NUM_JOINTS];
@@ -205,11 +181,10 @@ double SingleLegReach::rollout(int s, const RobotState& state)
         }
 
         auto t_c = Clock::now();
-        total_cost += step_cost(d, u, tau_out, tau_prev, t);
+        total_cost += step_cost(d);
         lat_cost_us_.fetch_add(
             std::chrono::duration_cast<Us>(Clock::now() - t_c).count(),
             std::memory_order_relaxed);
-        std::memcpy(tau_prev, tau_out, NUM_JOINTS * sizeof(double));
     }
 
     auto t_tc = Clock::now();

@@ -92,20 +92,9 @@ reach:
   dt:            0.02
 
   cost:
-    height:        0.0
-    orientation:   0.0
-    posture:       0.0
-    contact_vel:   0.0
-    contact_force: 0.0
     terminal:      500.0
-    act_effort:    0.01
-    vel_cmd:       0.0
-    vel_des:       [0.0, 0.0, 0.0]
     foot_pos:      10.0
-    torque:        0.0001
-    torque_rate:   0.0001
     joint_vel:     0.05
-    base_drift:    0.0
 
   nominal_pose: [0.0, 0.67, -1.3]
 

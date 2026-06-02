@@ -58,20 +58,20 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     if (t["kd_muscle"])     load_doubles(t["kd_muscle"],     cfg.kd_muscle,     NUM_JOINTS, "kd_muscle");
 
     const YAML::Node& c = t["cost"];
-    cfg.cost.height        = c["height"].as<double>();
-    cfg.cost.orientation   = c["orientation"].as<double>();
-    cfg.cost.posture       = c["posture"].as<double>();
-    cfg.cost.contact_vel   = c["contact_vel"].as<double>();
-    cfg.cost.contact_force = c["contact_force"].as<double>();
-    cfg.cost.terminal      = c["terminal"].as<double>();
-    cfg.cost.act_effort    = c["act_effort"].as<double>();
-    cfg.cost.vel_cmd       = c["vel_cmd"].as<double>();
-    load_doubles(c["vel_des"], cfg.cost.vel_des, 3, "vel_des");
-    cfg.cost.foot_pos      = c["foot_pos"].as<double>();
-    cfg.cost.torque        = c["torque"]      ? c["torque"].as<double>()      : 0.0;
-    cfg.cost.torque_rate   = c["torque_rate"] ? c["torque_rate"].as<double>() : 0.0;
-    cfg.cost.joint_vel     = c["joint_vel"]   ? c["joint_vel"].as<double>()   : 0.0;
-    cfg.cost.base_drift    = c["base_drift"]  ? c["base_drift"].as<double>()  : 0.0;
+    cfg.cost.height        = c["height"]        ? c["height"].as<double>()        : 0.0;
+    cfg.cost.orientation   = c["orientation"]   ? c["orientation"].as<double>()   : 0.0;
+    cfg.cost.posture       = c["posture"]       ? c["posture"].as<double>()       : 0.0;
+    cfg.cost.contact_vel   = c["contact_vel"]   ? c["contact_vel"].as<double>()   : 0.0;
+    cfg.cost.contact_force = c["contact_force"] ? c["contact_force"].as<double>() : 0.0;
+    cfg.cost.terminal      = c["terminal"]      ? c["terminal"].as<double>()      : 0.0;
+    cfg.cost.act_effort    = c["act_effort"]    ? c["act_effort"].as<double>()    : 0.0;
+    cfg.cost.vel_cmd       = c["vel_cmd"]       ? c["vel_cmd"].as<double>()       : 0.0;
+    if (c["vel_des"]) load_doubles(c["vel_des"], cfg.cost.vel_des, 3, "vel_des");
+    cfg.cost.foot_pos      = c["foot_pos"]      ? c["foot_pos"].as<double>()      : 0.0;
+    cfg.cost.torque        = c["torque"]        ? c["torque"].as<double>()        : 0.0;
+    cfg.cost.torque_rate   = c["torque_rate"]   ? c["torque_rate"].as<double>()   : 0.0;
+    cfg.cost.joint_vel     = c["joint_vel"]     ? c["joint_vel"].as<double>()     : 0.0;
+    cfg.cost.base_drift    = c["base_drift"]    ? c["base_drift"].as<double>()    : 0.0;
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();
