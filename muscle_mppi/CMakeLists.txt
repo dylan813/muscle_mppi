@@ -40,6 +40,17 @@ target_compile_definitions(single_leg_torque_controller PRIVATE
     NUM_JOINTS=3 JOINT_OFFSET=3 NUM_MUSCLES=3)
 target_link_libraries(single_leg_torque_controller ${TORQUE_LIBS})
 
+# --- Stage-2: net-activation MPPI + Hill model (NUM_JOINTS=3, JOINT_OFFSET=3, NUM_MUSCLES=3) ---
+add_executable(single_leg_net_act_controller
+    single_leg_net_act_controller.cpp
+    control/base_mppi.cpp
+    control/single_leg_net_act.cpp
+    utils/tasks.cpp
+)
+target_compile_definitions(single_leg_net_act_controller PRIVATE
+    NUM_JOINTS=3 JOINT_OFFSET=3 NUM_MUSCLES=3)
+target_link_libraries(single_leg_net_act_controller ${TORQUE_LIBS})
+
 # --- Single-leg reach controller (NUM_JOINTS=3, JOINT_OFFSET=3) ---
 # Sim-only: no unitree_sdk2 DDS dependency.
 set(SINGLE_LEG_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)

@@ -25,6 +25,4 @@ private:
 
     int foot_body_id_ = -1;
 
-    std::vector<double> best_traj_;
-    double best_cost_ = 1e9;
 };

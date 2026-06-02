@@ -38,8 +38,6 @@ private:
     MotionCommand  cmd_;
 
     double  start_pos_[3];
-    std::vector<double> best_traj_;
-    double  best_cost_        = 1e9;
     double  last_compute_ms_  = 20.0;
     double  predicted_activation_[NUM_MUSCLES] = {};
 

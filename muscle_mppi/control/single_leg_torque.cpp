@@ -1,18 +1,18 @@
 #include "single_leg_torque.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstring>
-#include <omp.h>
 #include <stdexcept>
-#include <iostream>
 
 SingleLegTorque::SingleLegTorque(const std::string& task_name,
                                    const std::string& yaml_path)
     : BaseMPPI(load_task(task_name, yaml_path))
 {
-    best_traj_.assign(task_.horizon * NUM_JOINTS, 0.0);
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        action_lo_[j] = -task_.tau_max[j];
+        action_hi_[j] =  task_.tau_max[j];
+    }
 
     foot_body_id_ = mj_name2id(model_, mjOBJ_BODY, "FL_foot");
     if (foot_body_id_ < 0)
@@ -109,70 +109,8 @@ void SingleLegTorque::update(const RobotState& state, double tau_out[NUM_JOINTS]
         return;
     }
 
-    // Warm-start: shift trajectory forward one step, hold tail.
-    for (int t = 0; t < task_.horizon - 1; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            trajectory_[t * NUM_JOINTS + j] = best_traj_[(t + 1) * NUM_JOINTS + j];
-    for (int j = 0; j < NUM_JOINTS; ++j)
-        trajectory_[(task_.horizon - 1) * NUM_JOINTS + j] =
-            best_traj_[(task_.horizon - 1) * NUM_JOINTS + j];
-
-    best_cost_ = 1e9;
-
-    for (int iter = 0; iter < task_.n_iterations; ++iter) {
-        sample_noise(iter, task_.n_iterations);
-
-        #pragma omp parallel for schedule(dynamic)
-        for (int s = 0; s < task_.n_samples; ++s)
-            costs_[s] = rollout(s, state);
-
-        // Track best sample.
-        for (int s = 0; s < task_.n_samples; ++s) {
-            if (costs_[s] < best_cost_) {
-                best_cost_ = costs_[s];
-                for (int t = 0; t < task_.horizon; ++t)
-                    for (int j = 0; j < NUM_JOINTS; ++j) {
-                        int idx = t * NUM_JOINTS + j;
-                        best_traj_[idx] = std::clamp(
-                            trajectory_[idx]
-                                + noise_[s * task_.horizon * NUM_JOINTS + idx],
-                            -task_.tau_max[j], task_.tau_max[j]);
-                    }
-            }
-        }
-
-        // Softmin weights over min-max normalised costs.
-        double cmin = *std::min_element(costs_.begin(), costs_.end());
-        double cmax = *std::max_element(costs_.begin(), costs_.end());
-        double crange = cmax - cmin;
-
-        std::vector<double> weights(task_.n_samples);
-        double wsum = 0.0;
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double s_hat = (crange > 1e-12) ? (costs_[s] - cmin) / crange : 0.0;
-            weights[s] = std::exp(-s_hat / task_.lambda);
-            wsum += weights[s];
-        }
-
-        std::vector<double> new_traj(task_.horizon * NUM_JOINTS, 0.0);
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double w = weights[s] / wsum;
-            for (int t = 0; t < task_.horizon; ++t)
-                for (int j = 0; j < NUM_JOINTS; ++j) {
-                    int idx = t * NUM_JOINTS + j;
-                    new_traj[idx] += w * (trajectory_[idx]
-                        + noise_[s * task_.horizon * NUM_JOINTS + idx]);
-                }
-        }
-        for (int t = 0; t < task_.horizon; ++t)
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                int idx = t * NUM_JOINTS + j;
-                new_traj[idx] = std::clamp(new_traj[idx],
-                                           -task_.tau_max[j], task_.tau_max[j]);
-            }
-
-        trajectory_ = std::move(new_traj);
-    }
+    warm_start(1);
+    run_iterations(state);
 
     for (int j = 0; j < NUM_JOINTS; ++j)
         tau_out[j] = best_traj_[j];

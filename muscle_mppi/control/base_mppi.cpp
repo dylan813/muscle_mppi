@@ -1,6 +1,9 @@
 #include "base_mppi.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <omp.h>
 #include <stdexcept>
 
 static void mujoco_warning_noop(const char*) {}
@@ -38,6 +41,7 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     trajectory_.assign(task_.horizon * NUM_MUSCLES, 0.0);
     noise_.assign(task_.n_samples * task_.horizon * NUM_MUSCLES, 0.0);
     costs_.resize(task_.n_samples);
+    best_traj_.assign(task_.horizon * NUM_MUSCLES, 0.0);
 
     const int N = task_.n_iterations;
     const int H = task_.horizon;
@@ -63,6 +67,77 @@ void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
                 noise_[idx] = task_.noise_sigma[m] * anneal * normal_(rng_);
             }
         }
+}
+
+void BaseMPPI::warm_start(int n_skip)
+{
+    const int H = task_.horizon;
+    for (int t = 0; t < H - n_skip; ++t)
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            trajectory_[t * NUM_MUSCLES + m] = best_traj_[(t + n_skip) * NUM_MUSCLES + m];
+    for (int t = H - n_skip; t < H; ++t)
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            trajectory_[t * NUM_MUSCLES + m] = best_traj_[(H - 1) * NUM_MUSCLES + m];
+}
+
+void BaseMPPI::run_iterations(const RobotState& state)
+{
+    best_cost_ = 1e9;
+    const int N = task_.n_iterations;
+
+    for (int iter = 0; iter < N; ++iter) {
+        sample_noise(iter, N);
+
+        #pragma omp parallel for schedule(dynamic)
+        for (int s = 0; s < task_.n_samples; ++s)
+            costs_[s] = rollout(s, state);
+
+        // Track best sample.
+        for (int s = 0; s < task_.n_samples; ++s) {
+            if (costs_[s] < best_cost_) {
+                best_cost_ = costs_[s];
+                for (int t = 0; t < task_.horizon; ++t)
+                    for (int m = 0; m < NUM_MUSCLES; ++m) {
+                        int idx = t * NUM_MUSCLES + m;
+                        best_traj_[idx] = std::clamp(
+                            trajectory_[idx]
+                                + noise_[s * task_.horizon * NUM_MUSCLES + idx],
+                            action_lo_[m], action_hi_[m]);
+                    }
+            }
+        }
+
+        // Softmin weights over min-max normalised costs.
+        double cmin  = *std::min_element(costs_.begin(), costs_.end());
+        double cmax  = *std::max_element(costs_.begin(), costs_.end());
+        double crange = cmax - cmin;
+
+        std::vector<double> weights(task_.n_samples);
+        double wsum = 0.0;
+        for (int s = 0; s < task_.n_samples; ++s) {
+            double s_hat = (crange > 1e-12) ? (costs_[s] - cmin) / crange : 0.0;
+            weights[s]   = std::exp(-s_hat / task_.lambda);
+            wsum        += weights[s];
+        }
+
+        std::vector<double> new_traj(task_.horizon * NUM_MUSCLES, 0.0);
+        for (int s = 0; s < task_.n_samples; ++s) {
+            double w = weights[s] / wsum;
+            for (int t = 0; t < task_.horizon; ++t)
+                for (int m = 0; m < NUM_MUSCLES; ++m) {
+                    int idx = t * NUM_MUSCLES + m;
+                    new_traj[idx] += w * (trajectory_[idx]
+                        + noise_[s * task_.horizon * NUM_MUSCLES + idx]);
+                }
+        }
+        for (int t = 0; t < task_.horizon; ++t)
+            for (int m = 0; m < NUM_MUSCLES; ++m) {
+                int idx = t * NUM_MUSCLES + m;
+                new_traj[idx] = std::clamp(new_traj[idx], action_lo_[m], action_hi_[m]);
+            }
+
+        trajectory_ = std::move(new_traj);
+    }
 }
 
 void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {

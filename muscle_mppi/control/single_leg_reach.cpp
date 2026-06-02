@@ -1,18 +1,17 @@
 #include "single_leg_reach.h"
 
-#include <cmath>
-#include <cstring>
-#include <algorithm>
 #include <chrono>
-#include <omp.h>
+#include <cstring>
 #include <stdexcept>
-#include <iostream>
 
 SingleLegReach::SingleLegReach(const std::string& task_name, const std::string& yaml_path)
     : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
-    best_traj_.assign(task_.horizon * NUM_MUSCLES, 0.0);
+    for (int m = 0; m < NUM_MUSCLES; ++m) {
+        action_lo_[m] = ACT_MIN;
+        action_hi_[m] = ACT_MAX;
+    }
 
     for (const char* name : {"trunk", "base", "base_link"}) {
         int bid = mj_name2id(model_, mjOBJ_BODY, name);
@@ -232,69 +231,8 @@ void SingleLegReach::update(const RobotState& state, double activations_out[NUM_
     start_pos_[1] = predicted.pos[1];
     start_pos_[2] = predicted.pos[2];
 
-    // Warm-start: shift trajectory forward by n_skip, hold tail at last value.
-    for (int t = 0; t < task_.horizon - n_skip; ++t)
-        for (int m = 0; m < NUM_MUSCLES; ++m)
-            trajectory_[t * NUM_MUSCLES + m] =
-                best_traj_[(t + n_skip) * NUM_MUSCLES + m];
-    for (int t = task_.horizon - n_skip; t < task_.horizon; ++t)
-        for (int m = 0; m < NUM_MUSCLES; ++m)
-            trajectory_[t * NUM_MUSCLES + m] =
-                best_traj_[(task_.horizon - 1) * NUM_MUSCLES + m];
-
-    const int N = task_.n_iterations;
-    best_cost_ = 1e9;
-
-    for (int iter = 0; iter < N; ++iter) {
-        sample_noise(iter, N);
-
-        #pragma omp parallel for schedule(dynamic)
-        for (int s = 0; s < task_.n_samples; ++s)
-            costs_[s] = rollout(s, predicted);
-
-        // Track best sample.
-        for (int s = 0; s < task_.n_samples; ++s) {
-            if (costs_[s] < best_cost_) {
-                best_cost_ = costs_[s];
-                for (int t = 0; t < task_.horizon; ++t)
-                    for (int m = 0; m < NUM_MUSCLES; ++m) {
-                        int idx = t * NUM_MUSCLES + m;
-                        best_traj_[idx] = std::clamp(
-                            trajectory_[idx]
-                                + noise_[s * task_.horizon * NUM_MUSCLES + idx],
-                            ACT_MIN, ACT_MAX);
-                    }
-            }
-        }
-
-        // Softmin weights over min-max normalised costs.
-        double cost_min   = *std::min_element(costs_.begin(), costs_.end());
-        double cost_max   = *std::max_element(costs_.begin(), costs_.end());
-        double cost_range = cost_max - cost_min;
-
-        std::vector<double> weights(task_.n_samples);
-        double weight_sum = 0.0;
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double s_hat  = (cost_range > 1e-12) ? (costs_[s] - cost_min) / cost_range : 0.0;
-            weights[s]    = std::exp(-s_hat / task_.lambda);
-            weight_sum   += weights[s];
-        }
-
-        std::vector<double> new_traj(task_.horizon * NUM_MUSCLES, 0.0);
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double w = weights[s] / weight_sum;
-            for (int t = 0; t < task_.horizon; ++t)
-                for (int m = 0; m < NUM_MUSCLES; ++m) {
-                    int idx = t * NUM_MUSCLES + m;
-                    new_traj[idx] += w * (trajectory_[idx]
-                        + noise_[s * task_.horizon * NUM_MUSCLES + idx]);
-                }
-        }
-        for (auto& v : new_traj)
-            v = std::clamp(v, ACT_MIN, ACT_MAX);
-
-        trajectory_ = std::move(new_traj);
-    }
+    warm_start(n_skip);
+    run_iterations(predicted);
 
     for (int m = 0; m < NUM_MUSCLES; ++m)
         activations_out[m] = best_traj_[m];

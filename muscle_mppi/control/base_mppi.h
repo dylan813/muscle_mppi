@@ -38,8 +38,15 @@ public:
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
-    void   sample_noise(int iter, int n_iters);
-    void   set_mj_state(mjData* d, const RobotState& state);
+    void sample_noise(int iter, int n_iters);
+    void set_mj_state(mjData* d, const RobotState& state);
+
+    // Shift trajectory_ forward by n_skip steps, holding the tail constant.
+    void warm_start(int n_skip);
+
+    // Run task_.n_iterations of: sample → parallel rollouts → best tracking → softmin update.
+    // Subclasses set action_lo_/action_hi_ in their constructor to define per-action clamping.
+    void run_iterations(const RobotState& state);
 
     TaskConfig task_;
 
@@ -50,6 +57,14 @@ protected:
     std::vector<double> noise_;
     std::vector<double> costs_;
     std::vector<double> noise_sched_;
+
+    std::vector<double> best_traj_;
+    double              best_cost_ = 1e9;
+
+    // Per-action clamp bounds. Set by each subclass constructor before the first update().
+    // Activations: [0, 1].  Torques: [-tau_max[j], tau_max[j]].
+    double action_lo_[NUM_MUSCLES] = {};
+    double action_hi_[NUM_MUSCLES] = {};
 
     // Actuator → MuJoCo DOF addresses (built from JOINT_OFFSET — no hardcoded mapping)
     int  act_qpos_adr_[NUM_JOINTS] = {};
