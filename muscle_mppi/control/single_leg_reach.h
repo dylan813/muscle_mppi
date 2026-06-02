@@ -3,6 +3,9 @@
 #include "base_mppi.h"
 #include "muscle.h"
 
+#include <atomic>
+#include <fstream>
+
 static_assert(NUM_MUSCLES == NUM_JOINTS,
     "SingleLegReach requires NUM_MUSCLES == NUM_JOINTS. "
     "Compile with -DNUM_JOINTS=3 -DJOINT_OFFSET=3 -DNUM_MUSCLES=3.");
@@ -19,7 +22,8 @@ static_assert(NUM_MUSCLES == NUM_JOINTS,
 class SingleLegReach : public BaseMPPI {
 public:
     explicit SingleLegReach(const std::string& task_name,
-                             const std::string& yaml_path = "../utils/tasks.yaml");
+                             const std::string& yaml_path = "../utils/tasks.yaml",
+                             const std::string& log_dir   = "../../log");
 
     // Run one MPPI solve and return the Hill-model torque for the best trajectory.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
@@ -47,4 +51,11 @@ private:
     static constexpr double BASELINE = 0.05;
 
     int foot_body_id_ = -1;
+
+    // Latency logging (CSV, one row per update() call)
+    std::ofstream          lat_log_;
+    long long              lat_call_count_ = 0;
+    std::atomic<long long> lat_hill_us_{0};    // hill_net_act_torques inside rollouts
+    std::atomic<long long> lat_mjstep_us_{0};  // mj_step inside rollouts
+    std::atomic<long long> lat_cost_us_{0};    // step_cost + terminal_cost inside rollouts
 };

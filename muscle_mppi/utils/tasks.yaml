@@ -17,8 +17,9 @@
 default_muscle: &default_muscle
 
   # Activation filter bandwidth (Hz). First-order filter: act += bandwidth * dt * (ctrl - act).
-  # 100 Hz → 10 ms time constant, matching biological skeletal muscle. Physiological constant.
-  act_bandwidth: 100.0
+  # alpha = bandwidth * dt = 10 * 0.02 = 0.2, preserving the original 10 ms effective time constant
+  # (was 100 Hz at dt=0.002; scaled down to match dt=0.02 so filter behaviour is unchanged).
+  act_bandwidth: 10.0
 
   # Peak isometric force per joint (N). Maximum force when FL=1, FV=1, act=1.
   # Determined by: peak_force = tau_max / r
@@ -81,14 +82,14 @@ reach:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
   height_target: 0.0
   foot_target:   [0.5, 0.10, 0.6]
-  n_samples:     128
+  n_samples:     64
   horizon:       10
-  substeps:      10
+  substeps:      1
   n_iterations:  5
   lambda:        0.1
   beta1:         3.0
   beta2:         3.0
-  dt:            0.002
+  dt:            0.02
 
   cost:
     height:        0.0

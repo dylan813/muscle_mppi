@@ -1,8 +1,10 @@
 #include "single_leg_reach.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <stdexcept>
 
 // -----------------------------------------------------------------------------
@@ -69,7 +71,8 @@ static void hill_net_act_torques(
 // -----------------------------------------------------------------------------
 
 SingleLegReach::SingleLegReach(const std::string& task_name,
-                                const std::string& yaml_path)
+                                const std::string& yaml_path,
+                                const std::string& log_dir)
     : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
@@ -85,6 +88,11 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
     foot_body_id_ = mj_name2id(model_, mjOBJ_BODY, "FL_foot");
     if (foot_body_id_ < 0)
         throw std::runtime_error("Body not found: FL_foot");
+
+    std::filesystem::create_directories(log_dir);
+    lat_log_.open(log_dir + "/single_leg_latency.csv", std::ios::out | std::ios::trunc);
+    lat_log_ << "call,total_ms,warm_start_ms,run_iterations_ms,final_hill_ms,"
+                "avg_rollout_hill_ms,avg_rollout_mjstep_ms,avg_rollout_cost_ms\n";
 }
 
 // -----------------------------------------------------------------------------
@@ -147,6 +155,9 @@ double SingleLegReach::terminal_cost(const mjData* d)
 
 double SingleLegReach::rollout(int s, const RobotState& state)
 {
+    using Clock = std::chrono::steady_clock;
+    using Us    = std::chrono::microseconds;
+
     mjData* d = data_[s];
     set_mj_state(d, state);
 
@@ -171,24 +182,42 @@ double SingleLegReach::rollout(int s, const RobotState& state)
                 q_cur[j]  = d->qpos[act_qpos_adr_[j]];
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
+
+            auto t_h = Clock::now();
             hill_net_act_torques(u, q_cur, dq_cur, muscle_, task_.dt,
                                  BASELINE, activation, tau_out);
+            lat_hill_us_.fetch_add(
+                std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
+                std::memory_order_relaxed);
 
             for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j)
                 d->ctrl[JOINT_OFFSET + j] = tau_out[j];
 
+            auto t_mj = Clock::now();
             mj_step(model_, d);
+            lat_mjstep_us_.fetch_add(
+                std::chrono::duration_cast<Us>(Clock::now() - t_mj).count(),
+                std::memory_order_relaxed);
 
             if (!std::isfinite(d->qpos[act_qpos_adr_[0]]))
                 return 1e6;
         }
 
+        auto t_c = Clock::now();
         total_cost += step_cost(d, u, tau_out, tau_prev, t);
+        lat_cost_us_.fetch_add(
+            std::chrono::duration_cast<Us>(Clock::now() - t_c).count(),
+            std::memory_order_relaxed);
         std::memcpy(tau_prev, tau_out, NUM_JOINTS * sizeof(double));
     }
 
+    auto t_tc = Clock::now();
     total_cost += terminal_cost(d);
+    lat_cost_us_.fetch_add(
+        std::chrono::duration_cast<Us>(Clock::now() - t_tc).count(),
+        std::memory_order_relaxed);
+
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
@@ -206,13 +235,50 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
         return;
     }
 
+    using Clock = std::chrono::steady_clock;
+    using Us    = std::chrono::microseconds;
+    auto elapsed_us = [](auto t0){ return std::chrono::duration_cast<Us>(Clock::now() - t0).count(); };
+
+    lat_hill_us_.store(0,    std::memory_order_relaxed);
+    lat_mjstep_us_.store(0,  std::memory_order_relaxed);
+    lat_cost_us_.store(0,    std::memory_order_relaxed);
+
+    auto t0 = Clock::now();
+
+    auto t_ws = Clock::now();
     warm_start(1);
+    long long ws_us = elapsed_us(t_ws);
+
+    auto t_ri = Clock::now();
     run_iterations(state);
+    long long ri_us = elapsed_us(t_ri);
 
     double u[NUM_JOINTS];
     for (int j = 0; j < NUM_JOINTS; ++j) u[j] = best_traj_[j];
+
+    auto t_fh = Clock::now();
     hill_net_act_torques(u, state.q, state.dq, muscle_, task_.dt,
                          BASELINE, real_act_, tau_out);
+    long long fh_us = elapsed_us(t_fh);
+
+    long long total_us = elapsed_us(t0);
 
     std::memcpy(rollout_act_, real_act_, 2 * NUM_JOINTS * sizeof(double));
+
+    if (lat_log_.is_open()) {
+        long long n_rollouts = (long long)task_.n_iterations * task_.n_samples;
+        double avg_hill_ms   = lat_hill_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
+        double avg_mjstep_ms = lat_mjstep_us_.load(std::memory_order_relaxed) * 1e-3 / n_rollouts;
+        double avg_cost_ms   = lat_cost_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
+
+        lat_log_ << ++lat_call_count_   << ","
+                 << total_us  * 1e-3    << ","
+                 << ws_us     * 1e-3    << ","
+                 << ri_us     * 1e-3    << ","
+                 << fh_us     * 1e-3    << ","
+                 << avg_hill_ms         << ","
+                 << avg_mjstep_ms       << ","
+                 << avg_cost_ms         << "\n";
+        lat_log_.flush();
+    }
 }
