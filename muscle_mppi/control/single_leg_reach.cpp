@@ -17,21 +17,20 @@
 // passive_force_length) from muscle.h.
 // -----------------------------------------------------------------------------
 static void hill_net_act_torques(
-    const double        u[NUM_JOINTS],           // net activations ∈ [-1, 1]
+    const double        u[NUM_JOINTS],           // net activations ∈ [0, 1]
     const double        q[NUM_JOINTS],
     const double        dq[NUM_JOINTS],
     const MuscleParams& p,
     double              dt,
-    double              baseline,
     double              act_state[2 * NUM_JOINTS],  // in/out, always 6 elements
     double              tau_out[NUM_JOINTS])
 {
     const double alpha = p.act_bandwidth * dt;
 
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        // u[j] ∈ [0, 1]: 0.5 = neutral (both at baseline), 1.0 = full agonist, 0.0 = full antagonist.
-        const double ag_target  = baseline + std::clamp(2.0 * u[j] - 1.0, 0.0, 1.0) * (1.0 - baseline);
-        const double ant_target = baseline + std::clamp(1.0 - 2.0 * u[j], 0.0, 1.0) * (1.0 - baseline);
+        // u[j] ∈ [0, 1]: 0.5 = neutral, 1.0 = full agonist, 0.0 = full antagonist.
+        const double ag_target  = std::clamp(2.0 * u[j] - 1.0, 0.0, 1.0);
+        const double ant_target = std::clamp(1.0 - 2.0 * u[j], 0.0, 1.0);
 
         double& act1 = act_state[2 * j];
         double& act2 = act_state[2 * j + 1];
@@ -178,7 +177,7 @@ double SingleLegReach::rollout(int s, const RobotState& state)
 
             auto t_h = Clock::now();
             hill_net_act_torques(u, q_cur, dq_cur, muscle_, task_.dt,
-                                 BASELINE, activation, tau_out);
+                                 activation, tau_out);
             lat_hill_us_.fetch_add(
                 std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
                 std::memory_order_relaxed);
@@ -223,7 +222,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
         double u[NUM_JOINTS];
         for (int j = 0; j < NUM_JOINTS; ++j) u[j] = best_traj_[j];
         hill_net_act_torques(u, state.q, state.dq, muscle_, task_.dt,
-                             BASELINE, real_act_, tau_out);
+                             real_act_, tau_out);
         return;
     }
 
@@ -250,7 +249,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
 
     auto t_fh = Clock::now();
     hill_net_act_torques(u, state.q, state.dq, muscle_, task_.dt,
-                         BASELINE, real_act_, tau_out);
+                         real_act_, tau_out);
     long long fh_us = elapsed_us(t_fh);
 
     long long total_us = elapsed_us(t0);
