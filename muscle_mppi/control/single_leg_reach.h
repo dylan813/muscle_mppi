@@ -3,47 +3,48 @@
 #include "base_mppi.h"
 #include "muscle.h"
 
+static_assert(NUM_MUSCLES == NUM_JOINTS,
+    "SingleLegReach requires NUM_MUSCLES == NUM_JOINTS. "
+    "Compile with -DNUM_JOINTS=3 -DJOINT_OFFSET=3 -DNUM_MUSCLES=3.");
+
+// Single-leg reach-and-hold controller using net-activation MPPI + Hill muscle model.
+//
+// Action space: u[j] ∈ [-1, 1] per joint (net activation).
+//   u[j] > 0 → agonist dominates, u[j] < 0 → antagonist dominates.
+// The Hill model maps u to antagonistic torque pairs internally; co-contraction
+// is structurally impossible in the action space.
+//
+// Activation filter state (6 elements = 2 per joint) is tracked separately from
+// the MPPI trajectory dimension (3 elements) and carried across update() calls.
 class SingleLegReach : public BaseMPPI {
 public:
     explicit SingleLegReach(const std::string& task_name,
-                            const std::string& yaml_path = "../utils/tasks.yaml");
+                             const std::string& yaml_path = "../utils/tasks.yaml");
 
-    void update(const RobotState& state, double activations_out[NUM_MUSCLES]);
+    // Run one MPPI solve and return the Hill-model torque for the best trajectory.
+    void update(const RobotState& state, double tau_out[NUM_JOINTS]);
 
-    void compute_real_torques(const RobotState& state,
-                              const double activations[NUM_MUSCLES],
-                              double tau_out[NUM_JOINTS]);
-
-    void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
-    const MotionCommand& command() const { return cmd_; }
-
-    const MuscleState&  muscle_state()  const { return muscle_state_; }
     const MuscleParams& muscle_params() const { return muscle_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
 
     double step_cost(const mjData* d,
-                     const double act_cmd[NUM_MUSCLES],
+                     const double u[NUM_JOINTS],
                      const double tau_out[NUM_JOINTS],
                      const double tau_prev[NUM_JOINTS],
                      int horizon_step);
-
     double terminal_cost(const mjData* d);
 
-    RobotState predict_state(const RobotState& state, int n_steps);
+    MuscleParams muscle_;
 
-    MuscleParams   muscle_;
-    MuscleState    muscle_state_;
-    MotionCommand  cmd_;
+    // Activation filter state: [agonist_j0, antagonist_j0, agonist_j1, ...] (6 elements).
+    // rollout_act_ is reset each solve from the synced real state.
+    // real_act_ advances with each update() call to track live execution.
+    double rollout_act_[2 * NUM_JOINTS] = {};
+    double real_act_[2 * NUM_JOINTS]    = {};
 
-    double  start_pos_[3];
-    double  last_compute_ms_  = 20.0;
-    double  predicted_activation_[NUM_MUSCLES] = {};
+    static constexpr double BASELINE = 0.05;
 
-    int base_bid_ = 1;
     int foot_body_id_ = -1;
-
-    static constexpr double ACT_MIN = 0.0;
-    static constexpr double ACT_MAX = 1.0;
 };

@@ -1,7 +1,8 @@
-#include <iostream>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
+#include <iostream>
 #include <mutex>
 #include <thread>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <unitree/idl/go2/LowCmd_.hpp>
 #include <unitree/common/time/time_tool.hpp>
 #include <unitree/common/thread/thread.hpp>
+#include <mujoco/mujoco.h>
 
 #include "control/single_leg_reach.h"
 
@@ -24,11 +26,10 @@ using namespace unitree::robot;
 constexpr double PosStopF = 2.146E+9f;
 constexpr double VelStopF = 16000.0f;
 
-// Joints outside the FL leg are held at nominal with PD during the whole run.
-// Indices are absolute positions in the 12-joint model (FR=0-2, FL=3-5, RR=6-8, RL=9-11).
+// Non-FL legs held at nominal with PD throughout.
 static const double NOMINAL_POSE[12] = {
     0.0, 0.67, -1.3,   // FR
-    0.0, 0.67, -1.3,   // FL  ← controlled by MPPI
+    0.0, 0.67, -1.3,   // FL  ← MPPI-controlled
     0.0, 0.67, -1.3,   // RR
     0.0, 0.67, -1.3,   // RL
 };
@@ -52,8 +53,30 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
 class SingleLegController {
 public:
     explicit SingleLegController(const std::string& task      = "reach",
-                                 const std::string& yaml_path = "../utils/tasks.yaml")
-        : mppi_(task, yaml_path) {}
+                                  const std::string& yaml_path = "../utils/tasks.yaml")
+        : mppi_(task, yaml_path)
+    {
+        TaskConfig cfg = load_task(task, yaml_path);
+        for (int j = 0; j < NUM_JOINTS; ++j)
+            kd_fl_[j] = cfg.muscle.kd_sim[j];
+        for (int k = 0; k < 3; ++k)
+            foot_target_[k] = cfg.foot_target[k];
+
+        // FK model for live foot position readout (no stepping, kinematics only).
+        char err[1000];
+        fk_model_ = mj_loadXML(cfg.model_path.c_str(), nullptr, err, sizeof(err));
+        fk_data_  = mj_makeData(fk_model_);
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            int jid = fk_model_->actuator_trnid[2 * (JOINT_OFFSET + j)];
+            fk_qpos_adr_[j] = fk_model_->jnt_qposadr[jid];
+        }
+        foot_bid_ = mj_name2id(fk_model_, mjOBJ_BODY, "FL_foot");
+    }
+
+    ~SingleLegController() {
+        mj_deleteData(fk_data_);
+        mj_deleteModel(fk_model_);
+    }
 
     void Init() {
         InitLowCmd();
@@ -68,7 +91,6 @@ public:
             std::bind(&SingleLegController::LowStateHandler, this,
                       std::placeholders::_1), 1);
 
-        // 500 Hz control loop — matches mppi_controller.
         control_thread_ = CreateRecurrentThreadEx(
             "sl_ctrl", UT_CPU_ID_NONE, 2000, &SingleLegController::ControlLoop, this);
 
@@ -94,17 +116,14 @@ private:
     void LowStateHandler(const void* msg) {
         const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
-        // Read all 12 joints so the PD hold on non-FL legs has fresh state.
         for (int i = 0; i < 12; ++i) {
             full_q_[i]  = s->motor_state()[i].q();
             full_dq_[i] = s->motor_state()[i].dq();
         }
-        // Populate RobotState with only the FL joints (JOINT_OFFSET=3, NUM_JOINTS=3).
         for (int j = 0; j < NUM_JOINTS; ++j) {
             state_.q[j]  = full_q_[JOINT_OFFSET + j];
             state_.dq[j] = full_dq_[JOINT_OFFSET + j];
         }
-        // Base is fixed (suspended scene) — no freejoint, no SportModeState needed.
         state_.valid = true;
     }
 
@@ -114,25 +133,21 @@ private:
             std::lock_guard<std::mutex> lk(cmd_mutex_);
             std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
         }
-
-        double q_snap[12], dq_snap[12];
+        double q_snap[12];
         {
             std::lock_guard<std::mutex> lk(state_mutex_);
-            std::copy(full_q_,  full_q_  + 12, q_snap);
-            std::copy(full_dq_, full_dq_ + 12, dq_snap);
+            std::copy(full_q_, full_q_ + 12, q_snap);
         }
 
         for (int i = 0; i < 12; ++i) {
             if (i >= JOINT_OFFSET && i < JOINT_OFFSET + NUM_JOINTS) {
-                // FL joints: pure torque from Hill MPPI (kd already in sim damping).
                 int j = i - JOINT_OFFSET;
                 low_cmd_.motor_cmd()[i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[i].kp()  = 0.0;
                 low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = KD_HOLD;
+                low_cmd_.motor_cmd()[i].kd()  = kd_fl_[j];
                 low_cmd_.motor_cmd()[i].tau() = mppi_ready_.load() ? tau_cmd[j] : 0.0;
             } else {
-                // Other legs: PD hold at nominal.
                 low_cmd_.motor_cmd()[i].q()   = NOMINAL_POSE[i];
                 low_cmd_.motor_cmd()[i].kp()  = KP_HOLD;
                 low_cmd_.motor_cmd()[i].dq()  = 0.0;
@@ -148,62 +163,63 @@ private:
     }
 
     void MPPILoop() {
-        std::cout << "Single-leg MPPI started. Waiting for robot state...\n";
+        std::cout << "Waiting for robot state...\n";
         while (true) {
-            {
-                std::lock_guard<std::mutex> lk(state_mutex_);
-                if (state_.valid) break;
-            }
+            { std::lock_guard<std::mutex> lk(state_mutex_); if (state_.valid) break; }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        std::cout << "State received. Running MPPI.\n";
+        std::cout << "State received — running SingleLegReach MPPI.\n\n";
 
-        int solve_count = 0;
+        int    solve_count  = 0;
         double solve_sum_ms = 0.0;
 
         while (true) {
             RobotState snap;
-            {
-                std::lock_guard<std::mutex> lk(state_mutex_);
-                snap = state_;
-            }
+            { std::lock_guard<std::mutex> lk(state_mutex_); snap = state_; }
 
             auto t0 = std::chrono::steady_clock::now();
-
-            double activations[NUM_MUSCLES] = {};
-            mppi_.update(snap, activations);
-
-            double tau_cmd[NUM_JOINTS] = {};
-            mppi_.compute_real_torques(snap, activations, tau_cmd);
-
+            double tau[NUM_JOINTS] = {};
+            mppi_.update(snap, tau);
             double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 
-            {
-                std::lock_guard<std::mutex> lk(cmd_mutex_);
-                std::copy(tau_cmd, tau_cmd + NUM_JOINTS, cached_tau_);
-            }
+            { std::lock_guard<std::mutex> lk(cmd_mutex_);
+              std::copy(tau, tau + NUM_JOINTS, cached_tau_); }
 
             solve_sum_ms += ms;
             ++solve_count;
             if (solve_count % 20 == 0) {
-                std::printf("solve %4d | %.1f ms avg | cost min=%.4f mean=%.4f\n",
+                for (int j = 0; j < NUM_JOINTS; ++j)
+                    fk_data_->qpos[fk_qpos_adr_[j]] = snap.q[j];
+                mj_kinematics(fk_model_, fk_data_);
+                const double* fp = fk_data_->xpos + 3 * foot_bid_;
+                double dx = fp[0]-foot_target_[0],
+                       dy = fp[1]-foot_target_[1],
+                       dz = fp[2]-foot_target_[2];
+                std::printf("solve %4d | %.1f ms | cost min=%7.3f mean=%7.3f"
+                            " | foot [%6.3f %6.3f %6.3f] | err %.4f m\n",
                             solve_count, solve_sum_ms / solve_count,
-                            mppi_.cost_min(), mppi_.cost_mean());
+                            mppi_.cost_min(), mppi_.cost_mean(),
+                            fp[0], fp[1], fp[2],
+                            std::sqrt(dx*dx + dy*dy + dz*dz));
             }
 
-            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES) {
-                std::cout << "MPPI warm — handing over Hill torques to FL leg.\n";
+            if (!mppi_ready_.load() && solve_count >= 10) {
+                std::cout << "Warm — handing over Hill torques to FL leg.\n";
                 mppi_ready_.store(true);
             }
         }
     }
 
-    static constexpr int CONVERGENCE_SOLVES = 10;
-
     std::atomic<bool> mppi_ready_{false};
 
     SingleLegReach mppi_;
+    double kd_fl_[NUM_JOINTS]      = {};
+    double foot_target_[3]         = {};
+    mjModel* fk_model_             = nullptr;
+    mjData*  fk_data_              = nullptr;
+    int      fk_qpos_adr_[NUM_JOINTS] = {};
+    int      foot_bid_             = -1;
 
     std::mutex state_mutex_;
     RobotState state_{};
@@ -214,9 +230,8 @@ private:
     double cached_tau_[NUM_JOINTS] = {};
 
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
-
-    ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_>        lowcmd_publisher_;
-    ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_>     lowstate_subscriber_;
+    ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_>    lowcmd_publisher_;
+    ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> lowstate_subscriber_;
 
     ThreadPtr   control_thread_;
     std::thread mppi_thread_;
@@ -233,8 +248,8 @@ int main(int argc, const char** argv)
     const std::string yaml_path = (argc >= 4) ? argv[3] : "../utils/tasks.yaml";
 
     std::cout << "Single-leg reach controller\n"
-              << "  task:      " << task << "\n"
-              << "  yaml:      " << yaml_path << "\n"
+              << "  task: " << task << "\n"
+              << "  yaml: " << yaml_path << "\n"
               << "Press Enter to start.\n";
     std::cin.get();
 
