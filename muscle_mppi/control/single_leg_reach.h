@@ -23,7 +23,7 @@ class SingleLegReach : public BaseMPPI {
 public:
     explicit SingleLegReach(const std::string& task_name,
                              const std::string& yaml_path = "../utils/tasks.yaml",
-                             const std::string& log_dir   = "../../log");
+                             const std::string& log_dir   = "../../analysis/log");
 
     // Run one MPPI solve and return the Hill-model torque for the best trajectory.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
