@@ -35,6 +35,10 @@ struct CostWeights {
     double vel_cmd       = 0.0;
     double vel_des[3]    = {};
     double foot_pos      = 0.0;
+    double torque        = 0.0;
+    double torque_rate   = 0.0;
+    double joint_vel     = 0.0;
+    double base_drift    = 0.0;
 };
 
 struct TaskConfig {

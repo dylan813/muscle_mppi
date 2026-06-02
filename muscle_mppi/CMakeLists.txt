@@ -28,12 +28,13 @@ target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
 # No compile definitions needed — tasks.h defaults to NUM_JOINTS=12, JOINT_OFFSET=0.
 
 # --- Single-leg reach controller (NUM_JOINTS=3, JOINT_OFFSET=3) ---
-# Uncomment when ready to build single_leg_reach.
-# add_executable(single_leg_controller
-#     single_leg_controller.cpp      # top-level entry point (mirrors mppi_controller.cpp)
-#     control/base_mppi.cpp
-#     control/single_leg_reach.cpp
-#     utils/tasks.cpp
-# )
-# target_compile_definitions(single_leg_controller PRIVATE NUM_JOINTS=3 JOINT_OFFSET=3)
-# target_link_libraries(single_leg_controller ${COMMON_LIBS})
+# Sim-only: no unitree_sdk2 DDS dependency.
+set(SINGLE_LEG_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
+add_executable(single_leg_controller
+    single_leg_controller.cpp
+    control/base_mppi.cpp
+    control/single_leg_reach.cpp
+    utils/tasks.cpp
+)
+target_compile_definitions(single_leg_controller PRIVATE NUM_JOINTS=3 JOINT_OFFSET=3)
+target_link_libraries(single_leg_controller ${SINGLE_LEG_LIBS})

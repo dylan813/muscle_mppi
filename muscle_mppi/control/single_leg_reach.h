@@ -25,6 +25,8 @@ private:
 
     double step_cost(const mjData* d,
                      const double act_cmd[NUM_MUSCLES],
+                     const double tau_out[NUM_JOINTS],
+                     const double tau_prev[NUM_JOINTS],
                      int horizon_step);
 
     double terminal_cost(const mjData* d);

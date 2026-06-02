@@ -100,6 +100,10 @@ reach:
     vel_cmd:       0.0
     vel_des:       [0.0, 0.0, 0.0]
     foot_pos:      10.0
+    torque:        0.0001
+    torque_rate:   0.0001
+    joint_vel:     0.05
+    base_drift:    0.0
 
   nominal_pose: [0.0, 0.67, -1.3]
 

@@ -34,60 +34,68 @@ SingleLegReach::SingleLegReach(const std::string& task_name, const std::string& 
 
 double SingleLegReach::step_cost(const mjData* d,
                                   const double act_cmd[NUM_MUSCLES],
+                                  const double tau_out[NUM_JOINTS],
+                                  const double tau_prev[NUM_JOINTS],
                                   int horizon_step)
 {
-    // Available state at each rollout step:
-    //
-    //   Foot position (world frame):
-    //     const double* fp = d->xpos + 3 * foot_body_id_;   // fp[0]=x, fp[1]=y, fp[2]=z
-    //
-    //   Joint positions (FL: hip, thigh, calf):
-    //     d->qpos[act_qpos_adr_[j]]   for j in 0..NUM_JOINTS-1
-    //
-    //   Joint velocities:
-    //     d->qvel[act_qvel_adr_[j]]
-    //
-    //   Foot velocity (body frame):
-    //     mjtNum vel6[6];
-    //     mj_objectVelocity(model_, d, mjOBJ_BODY, foot_body_id_, vel6, 0);
-    //     // vel6[3..5] = linear velocity
-    //
-    //   Contact forces on foot:
-    //     d->cfrc_ext[6*foot_body_id_ + 3]  // fx
-    //     d->cfrc_ext[6*foot_body_id_ + 4]  // fy
-    //     d->cfrc_ext[6*foot_body_id_ + 5]  // fz
-    //
-    //   Muscle activations (current, after filter):
-    //     act_cmd[m]   — commanded this step (before filter)
-    //
-    //   Target foot position:
-    //     task_.foot_target[0..2]
-    //
-    //   Nominal joint pose:
-    //     task_.nominal_pose[j]
-    //
-    //   Cost weights:
-    //     task_.cost.*   (see tasks.h CostWeights)
-    //
-    //   horizon_step: current step index in [0, task_.horizon)
-
     double cost = 0.0;
 
-    // TODO: define step cost
+    // Foot position tracking error (dominant term)
+    const double* fp = d->xpos + 3 * foot_body_id_;
+    {
+        double dx = fp[0] - task_.foot_target[0];
+        double dy = fp[1] - task_.foot_target[1];
+        double dz = fp[2] - task_.foot_target[2];
+        cost += task_.cost.foot_pos * (dx*dx + dy*dy + dz*dz);
+    }
+
+    // Joint velocity penalty
+    if (task_.cost.joint_vel > 0.0) {
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            double v = d->qvel[act_qvel_adr_[j]];
+            cost += task_.cost.joint_vel * v * v;
+        }
+    }
+
+    // Activation effort penalty
+    if (task_.cost.act_effort > 0.0) {
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            cost += task_.cost.act_effort * act_cmd[m] * act_cmd[m];
+    }
+
+    // Torque magnitude penalty
+    if (task_.cost.torque > 0.0) {
+        for (int j = 0; j < NUM_JOINTS; ++j)
+            cost += task_.cost.torque * tau_out[j] * tau_out[j];
+    }
+
+    // Torque-rate smoothness penalty
+    if (task_.cost.torque_rate > 0.0) {
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            double dr = tau_out[j] - tau_prev[j];
+            cost += task_.cost.torque_rate * dr * dr;
+        }
+    }
+
+    // Base drift penalty (keep base near its start position)
+    if (task_.cost.base_drift > 0.0) {
+        const double* bp = d->xpos + 3 * base_bid_;
+        double dx = bp[0] - start_pos_[0];
+        double dy = bp[1] - start_pos_[1];
+        double dz = bp[2] - start_pos_[2];
+        cost += task_.cost.base_drift * (dx*dx + dy*dy + dz*dz);
+    }
 
     return cost;
 }
 
 double SingleLegReach::terminal_cost(const mjData* d)
 {
-    // Called once at the end of each rollout (after the final horizon step).
-    // Typically a heavier penalty on the primary goal metric.
-
-    double cost = 0.0;
-
-    // TODO: define terminal cost
-
-    return cost;
+    const double* fp = d->xpos + 3 * foot_body_id_;
+    double dx = fp[0] - task_.foot_target[0];
+    double dy = fp[1] - task_.foot_target[1];
+    double dz = fp[2] - task_.foot_target[2];
+    return task_.cost.terminal * (dx*dx + dy*dy + dz*dz);
 }
 
 // -----------------------------------------------------------------------------
@@ -103,6 +111,7 @@ double SingleLegReach::rollout(int s, const RobotState& state)
     std::memcpy(activation, predicted_activation_, NUM_MUSCLES * sizeof(double));
 
     double total_cost = 0.0;
+    double tau_prev[NUM_JOINTS] = {};
 
     for (int t = 0; t < task_.horizon; ++t) {
         double act_cmd[NUM_MUSCLES];
@@ -128,11 +137,20 @@ double SingleLegReach::rollout(int s, const RobotState& state)
 
             mj_step(model_, d);
 
-            if (!std::isfinite(d->qpos[2]) || d->qpos[2] < -1.0)
-                return 1e6;
+            // For floating-base robots, bail out if the base has fallen below -1 m.
+            // For fixed-base scenes (no freejoint), qpos[2] is a joint angle, not height —
+            // skip the height check and only catch NaN/Inf divergence.
+            if (has_freejoint_) {
+                if (!std::isfinite(d->qpos[2]) || d->qpos[2] < -1.0)
+                    return 1e6;
+            } else {
+                if (!std::isfinite(d->qpos[act_qpos_adr_[0]]))
+                    return 1e6;
+            }
         }
 
-        total_cost += step_cost(d, act_cmd, t);
+        total_cost += step_cost(d, act_cmd, tau_out, tau_prev, t);
+        std::memcpy(tau_prev, tau_out, NUM_JOINTS * sizeof(double));
     }
 
     total_cost += terminal_cost(d);
