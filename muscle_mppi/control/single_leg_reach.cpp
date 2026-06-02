@@ -27,8 +27,9 @@ static void hill_net_act_torques(
     const double alpha = p.act_bandwidth * dt;
 
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        const double ag_target  = baseline + std::clamp( u[j], 0.0, 1.0) * (1.0 - baseline);
-        const double ant_target = baseline + std::clamp(-u[j], 0.0, 1.0) * (1.0 - baseline);
+        // u[j] ∈ [0, 1]: 0.5 = neutral (both at baseline), 1.0 = full agonist, 0.0 = full antagonist.
+        const double ag_target  = baseline + std::clamp(2.0 * u[j] - 1.0, 0.0, 1.0) * (1.0 - baseline);
+        const double ant_target = baseline + std::clamp(1.0 - 2.0 * u[j], 0.0, 1.0) * (1.0 - baseline);
 
         double& act1 = act_state[2 * j];
         double& act2 = act_state[2 * j + 1];
@@ -74,9 +75,12 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
     muscle_ = task_.muscle;
 
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        action_lo_[j] = -1.0;
-        action_hi_[j] =  1.0;
+        action_lo_[j] = 0.0;
+        action_hi_[j] = 1.0;
     }
+
+    // Neutral activation (0.5 = both muscles at baseline, zero net torque).
+    std::fill(best_traj_.begin(), best_traj_.end(), 0.5);
 
     foot_body_id_ = mj_name2id(model_, mjOBJ_BODY, "FL_foot");
     if (foot_body_id_ < 0)
