@@ -80,7 +80,7 @@ default_muscle_quad: &default_muscle_quad
 reach:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
   height_target: 0.0
-  foot_target:   [0.25, 0.10, 0.49]
+  foot_target:   [0.25, 0.10, 0.5]
   n_samples:     128
   horizon:       10
   substeps:      10
@@ -110,8 +110,6 @@ reach:
 
   # Noise in net-activation space u ∈ [-1, 1].
   noise_sigma:  [0.25, 0.25, 0.25]
-
-  muscle: *default_muscle
 
   muscle: *default_muscle
 
