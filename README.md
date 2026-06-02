@@ -50,6 +50,7 @@ cd muscle_mppi/unitree_mujoco/simulate/build
 ./unitree_mujoco -r go2 -s scene.xml
 ```
 
+Or, run scene_suspended for single leg task
 ```bash
 cd muscle_mppi/unitree_mujoco/simulate/build
 ./unitree_mujoco -r go2 -s scene_suspended.xml
@@ -68,10 +69,10 @@ cd muscle_mppi/muscle_mppi/build
 ./muscle_mppi_controller
 ```
 
-Or, run reference-free MPPI controller
+Or, run single leg task with scene_suspended
 ```bash
-cd muscle_mppi/ref_free_mppi/build
-./ref_free_mppi_controller
+cd muscle_mppi/muscle_mppi/build
+./single_leg_controller
 ```
 
 <!-- record headless
