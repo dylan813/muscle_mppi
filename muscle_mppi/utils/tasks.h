@@ -9,7 +9,9 @@
 static constexpr int NUM_JOINTS   = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 static constexpr int JOINT_OFFSET = 0;    // actuators start at index 0
 #endif
-static constexpr int NUM_MUSCLES  = 2 * NUM_JOINTS;  // antagonistic pair per joint
+#ifndef NUM_MUSCLES
+static constexpr int NUM_MUSCLES  = 2 * NUM_JOINTS;
+#endif  // antagonistic pair per joint
 
 struct MuscleParams {
     double act_bandwidth = 100.0;              // activation filter bandwidth (Hz)
@@ -46,6 +48,7 @@ struct TaskConfig {
     double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     double       foot_target[3]           = {};
+    double       tau_max[NUM_JOINTS]      = {};
     CostWeights  cost;
     MuscleParams muscle;
     int          n_samples    = 16;

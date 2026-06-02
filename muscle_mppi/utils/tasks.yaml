@@ -79,7 +79,7 @@ reach:
   height_target: 0.0
   # FL foot target in world frame (x, y, z). Base is fixed at z=0.8.
   # FL hip is at (0.193, 0.142, 0.8). Max leg reach ~0.64m.
-  foot_target:  [0.30, 0.25, 0.40]
+  foot_target:  [0.25, 0.10, 0.4]
   n_samples:    64
   horizon:      25
   substeps:     10
@@ -111,6 +111,49 @@ reach:
   noise_sigma:  [0.05, 0.05, 0.08, 0.08, 0.08, 0.08]
 
   muscle: *default_muscle
+
+# -----------------------------------------------------------------------
+# Stage-1 validation: MPPI directly in joint-torque space.
+# NUM_MUSCLES=3 (one slot per joint), no Hill model, no activation lag.
+# Use this to verify the cost and MPPI hyperparameters before adding muscles.
+reach_torque:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
+  height_target: 0.0
+  foot_target:   [0.25, 0.10, 0.49]
+  n_samples:     128
+  horizon:       10
+  substeps:      10
+  n_iterations:  5
+  lambda:        0.1
+  beta1:         3.0
+  beta2:         3.0
+  dt:            0.002
+
+  # Joint torque limits (Nm) — from Go2 motor spec.
+  tau_max: [23.7, 23.7, 45.43]
+
+  cost:
+    height:        0.0
+    orientation:   0.0
+    posture:       0.0
+    contact_vel:   0.0
+    contact_force: 0.0
+    terminal:      500.0   # heavy: 500 vs step-total 10×10×err² = 100err²
+    act_effort:    0.0001  # torque economy (tau in Nm, so tau²~100 → 0.01 per joint)
+    vel_cmd:       0.0
+    vel_des:       [0.0, 0.0, 0.0]
+    foot_pos:      10.0
+    torque:        0.0
+    torque_rate:   0.0
+    joint_vel:     0.05
+    base_drift:    0.0
+
+  nominal_pose: [0.0, 0.67, -1.3]
+
+  # Noise in torque space (Nm) — ~25% of tau_max for exploration.
+  noise_sigma:  [6.0, 6.0, 12.0]
+
+  muscle: *default_muscle   # required by loader; unused by torque controller
 
 # -----------------------------------------------------------------------
 # Locomotion task — spline-parameterised MPPI with muscle inverse tracking.

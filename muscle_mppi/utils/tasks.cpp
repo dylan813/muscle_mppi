@@ -41,8 +41,12 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.beta2         = t["beta2"].as<double>();
     cfg.dt            = t["dt"].as<double>();
 
-    load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS,  "nominal_pose");
-    load_doubles(t["foot_target"],  cfg.foot_target,  3,           "foot_target");
+    load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
+    load_doubles(t["foot_target"],  cfg.foot_target,  3,          "foot_target");
+    if (t["tau_max"])
+        load_doubles(t["tau_max"], cfg.tau_max, NUM_JOINTS, "tau_max");
+    else
+        for (int j = 0; j < NUM_JOINTS; ++j) cfg.tau_max[j] = 1e6;
     if (t["noise_sigma"])
         load_doubles(t["noise_sigma"], cfg.noise_sigma, NUM_MUSCLES, "noise_sigma");
 
