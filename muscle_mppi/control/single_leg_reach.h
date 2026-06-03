@@ -67,4 +67,7 @@ private:
     std::atomic<long long> lat_hill_us_{0};
     std::atomic<long long> lat_mjstep_us_{0};
     std::atomic<long long> lat_cost_us_{0};
+
+    std::ofstream act_log_;
+    long long     act_call_count_ = 0;
 };

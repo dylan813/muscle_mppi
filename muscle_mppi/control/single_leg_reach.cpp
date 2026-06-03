@@ -51,6 +51,14 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
     lat_log_.open(log_dir + "/single_leg_latency.csv", std::ios::out | std::ios::trunc);
     lat_log_ << "call,total_ms,warm_start_ms,run_iterations_ms,final_hill_ms,"
                 "avg_rollout_hill_ms,avg_rollout_mjstep_ms,avg_rollout_cost_ms\n";
+
+    act_log_.open(log_dir + "/single_leg_activations.csv", std::ios::out | std::ios::trunc);
+    act_log_ << "call,best_cost";
+    for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << ",cmd_m" << m;
+    for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << ",act_m" << m;
+    for (int j = 0; j < NUM_JOINTS;  ++j) act_log_ << ",tau_j" << j;
+    for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << ",samp_mean_m" << m << ",samp_std_m" << m;
+    act_log_ << "\n";
 }
 
 // -----------------------------------------------------------------------------
@@ -201,6 +209,23 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     run_iterations(state);
     long long ri_us = elapsed_us(t_ri);
 
+    // Compute t=0 sample distribution from the last iteration's noise + current mean.
+    double samp_mean[NUM_MUSCLES] = {};
+    double samp_sq[NUM_MUSCLES]   = {};
+    for (int s = 0; s < task_.n_samples; ++s) {
+        for (int m = 0; m < NUM_MUSCLES; ++m) {
+            double v = std::clamp(trajectory_[m] + noise_[s * task_.horizon * NUM_MUSCLES + m],
+                                  action_lo_[m], action_hi_[m]);
+            samp_mean[m] += v;
+            samp_sq[m]   += v * v;
+        }
+    }
+    for (int m = 0; m < NUM_MUSCLES; ++m) {
+        samp_mean[m] /= task_.n_samples;
+        samp_sq[m]    = std::sqrt(std::max(0.0, samp_sq[m] / task_.n_samples
+                                                - samp_mean[m] * samp_mean[m]));
+    }
+
     double act_cmd[NUM_MUSCLES];
     for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
 
@@ -223,6 +248,17 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
             err += dk * dk;
         }
         maybe_advance_target(std::sqrt(err));
+    }
+
+    if (act_log_.is_open()) {
+        act_log_ << ++act_call_count_ << "," << best_cost_;
+        for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << "," << act_cmd[m];
+        for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << "," << real_act_[m];
+        for (int j = 0; j < NUM_JOINTS;  ++j) act_log_ << "," << tau_out[j];
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            act_log_ << "," << samp_mean[m] << "," << samp_sq[m];
+        act_log_ << "\n";
+        act_log_.flush();
     }
 
     if (lat_log_.is_open()) {
