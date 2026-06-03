@@ -97,7 +97,7 @@ reach:
     foot_pos:      10.0
     joint_vel:     0.05
 
-  nominal_pose: [0.0, 0.67, -1.3]
+  nominal_pose: [0.00571868, 0.608813, -1.21763]
 
   # Noise per muscle (NUM_MUSCLES=6): agonist and antagonist per joint.
   noise_sigma:  [0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
@@ -127,7 +127,7 @@ walk:
     vel_des:       [0.5, 0.0, 0.0]
 
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
-  nominal_pose: [0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3]
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763]
 
   # Per-joint activation noise (applied independently to both muscles of each pair).
   noise_sigma_act: [0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05]
