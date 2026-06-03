@@ -3,9 +3,6 @@
 #include "base_mppi.h"
 #include "muscle.h"
 
-#include <atomic>
-#include <fstream>
-
 struct CostWeights {
     double height        = 0.0;
     double orientation   = 0.0;
@@ -28,8 +25,7 @@ struct CostWeights {
 class MPPILocomotion : public BaseMPPI {
 public:
     explicit MPPILocomotion(const std::string& task_name,
-                            const std::string& yaml_path = "../utils/tasks.yaml",
-                            const std::string& log_dir   = "../../analysis/log");
+                            const std::string& yaml_path = "../utils/tasks.yaml");
 
     // Run one MPPI solve; returns Hill-model torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
@@ -57,7 +53,7 @@ private:
 
     // real_act_ tracks the activation state at the most recently issued command.
     // predicted_activation_ is propagated through latency compensation and seeds rollouts.
-    double real_act_[NUM_MUSCLES]          = {};
+    double real_act_[NUM_MUSCLES]            = {};
     double predicted_activation_[NUM_MUSCLES] = {};
 
     double start_pos_[2] = {};
@@ -65,11 +61,4 @@ private:
     int    base_bid_         = 1;
     int    foot_body_ids_[4] = {};
     int    n_feet_           = 0;
-
-    // Latency logging (CSV, one row per update() call)
-    std::ofstream          lat_log_;
-    long long              lat_call_count_ = 0;
-    std::atomic<long long> lat_hill_us_{0};
-    std::atomic<long long> lat_mjstep_us_{0};
-    std::atomic<long long> lat_cost_us_{0};
 };

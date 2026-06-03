@@ -4,18 +4,15 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
-#include <filesystem>
 #include <omp.h>
 #include <stdexcept>
-#include <iostream>
 #include <yaml-cpp/yaml.h>
 
 // ============================================================================
 // Constructor
 // ============================================================================
 
-MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& yaml_path,
-                                const std::string& log_dir)
+MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& yaml_path)
     : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
@@ -59,10 +56,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
     }
 
-    std::filesystem::create_directories(log_dir);
-    lat_log_.open(log_dir + "/walk_latency.csv", std::ios::out | std::ios::trunc);
-    lat_log_ << "call,total_ms,predict_ms,warmstart_ms,iterations_ms,"
-                "avg_hill_ms,avg_mjstep_ms,avg_cost_ms\n";
 }
 
 // ============================================================================
@@ -91,9 +84,6 @@ void MPPILocomotion::sample_activation_noise(int iter)
 
 double MPPILocomotion::rollout(int s, const RobotState& state)
 {
-    using Clock = std::chrono::steady_clock;
-    using Us    = std::chrono::microseconds;
-
     mjData* d = data_[s];
     set_mj_state(d, state);
 
@@ -119,37 +109,21 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 dq_cur[j] = d->qvel[act_qvel_adr_[j]];
             }
 
-            auto t_h = Clock::now();
             hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
-            lat_hill_us_.fetch_add(
-                std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
-                std::memory_order_relaxed);
 
             for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
 
-            auto t_mj = Clock::now();
             mj_step(model_, d);
-            lat_mjstep_us_.fetch_add(
-                std::chrono::duration_cast<Us>(Clock::now() - t_mj).count(),
-                std::memory_order_relaxed);
 
             if (!std::isfinite(d->qpos[2]) || d->qpos[2] < -1.0)
                 return 1e6;
         }
 
-        auto t_c = Clock::now();
         total_cost += step_cost(d);
-        lat_cost_us_.fetch_add(
-            std::chrono::duration_cast<Us>(Clock::now() - t_c).count(),
-            std::memory_order_relaxed);
     }
 
-    auto t_tc = Clock::now();
     total_cost += terminal_cost(d);
-    lat_cost_us_.fetch_add(
-        std::chrono::duration_cast<Us>(Clock::now() - t_tc).count(),
-        std::memory_order_relaxed);
 
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
@@ -266,12 +240,7 @@ RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
 
 void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
 {
-    auto t_start = std::chrono::steady_clock::now();
-    using Clock = std::chrono::steady_clock;
-    using Us    = std::chrono::microseconds;
-    auto elapsed_us = [](auto t0) {
-        return std::chrono::duration_cast<Us>(Clock::now() - t0).count();
-    };
+    const auto t_start = std::chrono::steady_clock::now();
 
     if (!state.valid) {
         double act_cmd[NUM_MUSCLES] = {};
@@ -279,24 +248,17 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         return;
     }
 
-    lat_hill_us_.store(0,   std::memory_order_relaxed);
-    lat_mjstep_us_.store(0, std::memory_order_relaxed);
-    lat_cost_us_.store(0,   std::memory_order_relaxed);
-
     const double dt_step = task_.substeps * task_.dt;
     const int n_skip = std::clamp(
         static_cast<int>(std::round(last_compute_ms_ * 1e-3 / dt_step)),
         1, task_.horizon / 2);
 
-    auto t_pred = Clock::now();
     RobotState predicted = predict_state(state, n_skip);
-    long long pred_us = elapsed_us(t_pred);
 
     start_pos_[0] = predicted.pos[0];
     start_pos_[1] = predicted.pos[1];
 
     // Warm-start: shift best_traj_ forward by n_skip steps.
-    auto t_ws = Clock::now();
     const int skip   = std::min(n_skip, task_.horizon - 1);
     const int stride = task_.horizon * NUM_MUSCLES;
     std::vector<double> shifted(stride);
@@ -307,12 +269,10 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         for (int m = 0; m < NUM_MUSCLES; ++m)
             shifted[t * NUM_MUSCLES + m] = best_traj_[(task_.horizon - 1) * NUM_MUSCLES + m];
     trajectory_ = shifted;
-    long long ws_us = elapsed_us(t_ws);
 
     const int N = task_.n_iterations;
     best_cost_ = 1e9;
 
-    auto t_iter = Clock::now();
     for (int iter = 0; iter < N; ++iter) {
         sample_activation_noise(iter);
 
@@ -360,7 +320,6 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
         trajectory_ = std::move(new_traj);
     }
-    long long iter_us = elapsed_us(t_iter);
 
     // Output: execute step 0 of best trajectory from predicted state.
     double act_cmd[NUM_MUSCLES];
@@ -370,23 +329,6 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     std::memcpy(real_act_, predicted_activation_, NUM_MUSCLES * sizeof(double));
 
     last_compute_ms_ = std::chrono::duration<double, std::milli>(
-        Clock::now() - t_start).count();
-
-    if (lat_log_.is_open()) {
-        const long long n_rollouts = (long long)task_.n_iterations * task_.n_samples;
-        const double avg_hill_ms   = lat_hill_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
-        const double avg_mjstep_ms = lat_mjstep_us_.load(std::memory_order_relaxed) * 1e-3 / n_rollouts;
-        const double avg_cost_ms   = lat_cost_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
-
-        lat_log_ << ++lat_call_count_  << ","
-                 << last_compute_ms_   << ","
-                 << pred_us  * 1e-3    << ","
-                 << ws_us    * 1e-3    << ","
-                 << iter_us  * 1e-3    << ","
-                 << avg_hill_ms        << ","
-                 << avg_mjstep_ms      << ","
-                 << avg_cost_ms        << "\n";
-        lat_log_.flush();
-    }
+        std::chrono::steady_clock::now() - t_start).count();
 }
 
