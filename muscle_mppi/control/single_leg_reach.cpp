@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
+#include <yaml-cpp/yaml.h>
 
 // -----------------------------------------------------------------------------
 // Construction
@@ -25,11 +26,26 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
 
     std::fill(best_traj_.begin(), best_traj_.end(), 0.0);
 
+    // Load reach-specific config directly — these don't belong in the shared TaskConfig.
+    {
+        YAML::Node root = YAML::LoadFile(yaml_path);
+        const YAML::Node& t = root[task_name];
+        const YAML::Node& c = t["cost"];
+        cost_foot_pos_  = c["foot_pos"]  ? c["foot_pos"].as<double>()  : 0.0;
+        cost_joint_vel_ = c["joint_vel"] ? c["joint_vel"].as<double>() : 0.0;
+        cost_terminal_  = c["terminal"]  ? c["terminal"].as<double>()  : 0.0;
+        const YAML::Node& fts = t["foot_targets"];
+        n_foot_targets_ = std::min((int)fts.size(), MAX_FOOT_TARGETS);
+        for (int i = 0; i < n_foot_targets_; ++i)
+            for (int k = 0; k < 3; ++k)
+                foot_targets_[i][k] = fts[i][k].as<double>();
+    }
+
     foot_body_id_ = mj_name2id(model_, mjOBJ_BODY, "FL_foot");
     if (foot_body_id_ < 0)
         throw std::runtime_error("Body not found: FL_foot");
 
-    for (int k = 0; k < 3; ++k) active_target_[k] = task_.foot_targets[0][k];
+    for (int k = 0; k < 3; ++k) active_target_[k] = foot_targets_[0][k];
 
     std::filesystem::create_directories(log_dir);
     lat_log_.open(log_dir + "/single_leg_latency.csv", std::ios::out | std::ios::trunc);
@@ -49,11 +65,11 @@ double SingleLegReach::step_cost(const mjData* d)
     double dx = fp[0] - active_target_[0];
     double dy = fp[1] - active_target_[1];
     double dz = fp[2] - active_target_[2];
-    cost += task_.cost.foot_pos * (dx*dx + dy*dy + dz*dz);
+    cost += cost_foot_pos_ * (dx*dx + dy*dy + dz*dz);
 
     for (int j = 0; j < NUM_JOINTS; ++j) {
         double v = d->qvel[act_qvel_adr_[j]];
-        cost += task_.cost.joint_vel * v * v;
+        cost += cost_joint_vel_ * v * v;
     }
 
     return cost;
@@ -65,20 +81,20 @@ double SingleLegReach::terminal_cost(const mjData* d)
     double dx = fp[0] - active_target_[0];
     double dy = fp[1] - active_target_[1];
     double dz = fp[2] - active_target_[2];
-    return task_.cost.terminal * (dx*dx + dy*dy + dz*dz);
+    return cost_terminal_ * (dx*dx + dy*dy + dz*dz);
 }
 
 void SingleLegReach::maybe_advance_target(double foot_err)
 {
-    if (task_.n_foot_targets <= 1) return;
+    if (n_foot_targets_ <= 1) return;
     if (foot_err < CONVERGENCE_THRESH)
         ++hold_count_;
     else
         hold_count_ = 0;
     if (hold_count_ >= HOLD_STEPS) {
         hold_count_ = 0;
-        target_idx_ = (target_idx_ + 1) % task_.n_foot_targets;
-        for (int k = 0; k < 3; ++k) active_target_[k] = task_.foot_targets[target_idx_][k];
+        target_idx_ = (target_idx_ + 1) % n_foot_targets_;
+        for (int k = 0; k < 3; ++k) active_target_[k] = foot_targets_[target_idx_][k];
         std::fill(best_traj_.begin(), best_traj_.end(), 0.0);
     }
 }

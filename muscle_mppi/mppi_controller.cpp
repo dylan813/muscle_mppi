@@ -163,12 +163,8 @@ private:
             }
 
             auto t0 = std::chrono::steady_clock::now();
-            // Spline MPPI returns joint targets; muscle inverse maps them to torques.
-            double q_des[NUM_JOINTS] = {};
-            double dq_des[NUM_JOINTS] = {};
-            mppi_.update(snap, q_des, dq_des);
             double tau_cmd[NUM_JOINTS] = {};
-            mppi_.compute_real_torques(snap, q_des, dq_des, tau_cmd);
+            mppi_.update(snap, tau_cmd);
             double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 

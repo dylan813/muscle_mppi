@@ -46,6 +46,14 @@ private:
 
     static constexpr double CONVERGENCE_THRESH = 0.001;
     static constexpr int    HOLD_STEPS         = 60;
+    static constexpr int    MAX_FOOT_TARGETS   = 8;
+
+    // Reach-specific config loaded directly from yaml.
+    double cost_foot_pos_  = 0.0;
+    double cost_joint_vel_ = 0.0;
+    double cost_terminal_  = 0.0;
+    double foot_targets_[MAX_FOOT_TARGETS][3] = {};
+    int    n_foot_targets_ = 0;
 
     int    foot_body_id_ = -1;
     double active_target_[3] = {};

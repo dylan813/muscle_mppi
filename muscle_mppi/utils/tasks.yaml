@@ -107,13 +107,10 @@ reach:
   muscle: *default_muscle
 
 # -----------------------------------------------------------------------
-# Locomotion task — spline-parameterised MPPI with muscle inverse tracking.
-# Replaces the paper's PD controller with the Hill muscle model.
-# All cost weights follow Table II of the reference-free MPPI paper.
+# Locomotion task
 walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
   height_target: 0.34
-  foot_target:   [0.0, 0.0, 0.0]   # unused (foot_pos weight = 0)
   n_samples:     64
   horizon:       45                  # 0.9 s at dt_step = 0.02 s
   substeps:      10
@@ -130,10 +127,8 @@ walk:
     contact_vel:   0.5
     contact_force: 0.05
     terminal:      2500.0
-    act_effort:    0.0
     vel_cmd:       1.0
     vel_des:       [0.5, 0.0, 0.0]
-    foot_pos:      0.0
 
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
   nominal_pose: [0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3]

@@ -28,7 +28,6 @@ public:
 
 
     double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
-    double cost_max()  const { return *std::max_element(costs_.begin(), costs_.end()); }
     double cost_mean() const {
         double s = 0.0;
         for (auto c : costs_) s += c;
@@ -38,7 +37,7 @@ public:
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
-    void sample_noise(int iter, int n_iters);
+    void sample_noise(int iter);
     void set_mj_state(mjData* d, const RobotState& state);
 
     // Shift trajectory_ forward by n_skip steps, holding the tail constant.
@@ -61,8 +60,7 @@ protected:
     std::vector<double> best_traj_;
     double              best_cost_ = 1e9;
 
-    // Per-action clamp bounds. Set by each subclass constructor before the first update().
-    // Activations: [0, 1].  Torques: [-tau_max[j], tau_max[j]].
+    // Per-muscle clamp bounds used by run_iterations(). Set by subclass constructors.
     double action_lo_[NUM_MUSCLES] = {};
     double action_hi_[NUM_MUSCLES] = {};
 

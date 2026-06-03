@@ -26,34 +26,10 @@ struct MuscleParams {
     double kd_sim[NUM_JOINTS]     = {};        // MuJoCo joint damping (applied to sim dofs)
 };
 
-struct CostWeights {
-    double height        = 0.0;
-    double orientation   = 0.0;
-    double posture       = 0.0;
-    double contact_vel   = 0.0;
-    double contact_force = 0.0;
-    double terminal      = 0.0;
-    double act_effort    = 0.0;
-    double vel_cmd       = 0.0;
-    double vel_des[3]    = {};
-    double foot_pos      = 0.0;
-    double torque        = 0.0;
-    double torque_rate   = 0.0;
-    double joint_vel     = 0.0;
-    double base_drift    = 0.0;
-};
-
 struct TaskConfig {
-    static constexpr int MAX_FOOT_TARGETS = 8;
-
     std::string  model_path;
     double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
-    double       foot_target[3]           = {};
-    double       foot_targets[MAX_FOOT_TARGETS][3] = {};
-    int          n_foot_targets           = 0;
-    double       tau_max[NUM_JOINTS]      = {};
-    CostWeights  cost;
     MuscleParams muscle;
     int          n_samples    = 16;
     int          horizon      = 25;
@@ -70,19 +46,11 @@ struct TaskConfig {
     // Per-joint activation noise (used by MPPILocomotion::sample_activation_noise).
     // Applied to both muscles of each pair independently.
     double noise_sigma_act[NUM_JOINTS] = {};
-
-    int    n_nodes                   = 10;
-    double noise_sigma_q[NUM_JOINTS] = {};
-    double noise_sigma_v[NUM_JOINTS] = {};
-    double kp_muscle[NUM_JOINTS]     = {};
-    double kd_muscle[NUM_JOINTS]     = {};
 };
 
 struct MotionCommand {
-    double vx     = 0.0;
-    double vy     = 0.0;
-    double wz     = 0.0;
-    double height = 0.0;
+    double vx = 0.0;
+    double vy = 0.0;
 };
 
 TaskConfig load_task(const std::string& task_name,

@@ -58,7 +58,7 @@ BaseMPPI::~BaseMPPI() {
     mj_deleteModel(model_);
 }
 
-void BaseMPPI::sample_noise(int iter, int /*n_iters*/) {
+void BaseMPPI::sample_noise(int iter) {
     for (int s = 0; s < task_.n_samples; ++s)
         for (int t = 0; t < task_.horizon; ++t) {
             const double anneal = noise_sched_[iter * task_.horizon + t];
@@ -86,7 +86,7 @@ void BaseMPPI::run_iterations(const RobotState& state)
     const int N = task_.n_iterations;
 
     for (int iter = 0; iter < N; ++iter) {
-        sample_noise(iter, N);
+        sample_noise(iter);
 
         #pragma omp parallel for schedule(dynamic)
         for (int s = 0; s < task_.n_samples; ++s)
