@@ -4,13 +4,9 @@
 #include <algorithm>
 #include "../utils/tasks.h"
 
-// Antagonistic Hill muscle model matching learningwithmuscles/mjmuscle_geometry_free.pyx.
+// Antagonistic Hill muscle model
 // Each joint j is driven by two virtual muscles: agonist (2*j) and antagonist (2*j+1).
-// Activations are in [0, 1]. Net torque emerges from the imbalance between the pair.
-
-struct MuscleState {
-    double activation[NUM_MUSCLES] = {};
-};
+// Activations are in [0, 1]. Both muscles of a pair can be active simultaneously (co-contraction).
 
 // MuJoCo's piecewise-quadratic force-length bump.
 // Returns a value in [0,1] peaked at 1.0 when length==mid, zero outside [A,B].

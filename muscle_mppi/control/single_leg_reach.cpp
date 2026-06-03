@@ -8,64 +8,6 @@
 #include <stdexcept>
 
 // -----------------------------------------------------------------------------
-// Hill model for net-activation parameterisation.
-//
-// hill_compute_torques() in muscle.h requires NUM_MUSCLES == 2*NUM_JOINTS, which
-// is violated when NUM_MUSCLES=3 (one net-activation slot per joint). This
-// function replicates the same physics using a local 6-element activation state,
-// reusing the force-curve helpers (active_force_length, force_vel,
-// passive_force_length) from muscle.h.
-// -----------------------------------------------------------------------------
-static void hill_net_act_torques(
-    const double        u[NUM_JOINTS],           // net activations ∈ [0, 1]
-    const double        q[NUM_JOINTS],
-    const double        dq[NUM_JOINTS],
-    const MuscleParams& p,
-    double              dt,
-    double              act_state[2 * NUM_JOINTS],  // in/out, always 6 elements
-    double              tau_out[NUM_JOINTS])
-{
-    const double alpha = p.act_bandwidth * dt;
-
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        // u[j] ∈ [0, 1]: 0.5 = neutral, 1.0 = full agonist, 0.0 = full antagonist.
-        const double ag_target  = std::clamp(2.0 * u[j] - 1.0, 0.0, 1.0);
-        const double ant_target = std::clamp(1.0 - 2.0 * u[j], 0.0, 1.0);
-
-        double& act1 = act_state[2 * j];
-        double& act2 = act_state[2 * j + 1];
-        act1 = std::clamp(act1 + alpha * (ag_target  - act1), 0.0, 1.0);
-        act2 = std::clamp(act2 + alpha * (ant_target - act2), 0.0, 1.0);
-
-        static constexpr double eps = 1e-6;
-        const double r1 = (p.lce_max[j] - p.lce_min[j] + eps)
-                        / (p.phi_max[j]  - p.phi_min[j]  + eps);
-        const double r2 = -r1;
-
-        const double lce1 = q[j] * r1 + (p.lce_min[j] - r1 * p.phi_min[j]);
-        const double lce2 = q[j] * r2 + (p.lce_min[j] - r2 * p.phi_max[j]);
-
-        const double lmin = p.lce_min[j], lmax = p.lce_max[j];
-        const double FL1 = active_force_length(lce1, lmin, 1.0, lmax)
-                         + 0.15 * active_force_length(lce1, lmin, 0.5*(lmin+0.95), 0.95);
-        const double FL2 = active_force_length(lce2, lmin, 1.0, lmax)
-                         + 0.15 * active_force_length(lce2, lmin, 0.5*(lmin+0.95), 0.95);
-
-        const double c   = p.FVmax[j] - 1.0;
-        const double FV1 = force_vel(r1 * dq[j], c, p.vmax[j], p.FVmax[j]);
-        const double FV2 = force_vel(r2 * dq[j], c, p.vmax[j], p.FVmax[j]);
-
-        const double b_p  = 0.5 * (lmax + 1.0);
-        const double PFL1 = passive_force_length(lce1, p.pFLmax[j], b_p);
-        const double PFL2 = passive_force_length(lce2, p.pFLmax[j], b_p);
-
-        const double F1 = (FL1 * FV1 * act1 + PFL1) * p.peak_force[j];
-        const double F2 = (FL2 * FV2 * act2 + PFL2) * p.peak_force[j];
-        tau_out[j] = -(F1 * r1 + F2 * r2);
-    }
-}
-
-// -----------------------------------------------------------------------------
 // Construction
 // -----------------------------------------------------------------------------
 
@@ -76,13 +18,12 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
 {
     muscle_ = task_.muscle;
 
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        action_lo_[j] = 0.0;
-        action_hi_[j] = 1.0;
+    for (int m = 0; m < NUM_MUSCLES; ++m) {
+        action_lo_[m] = 0.0;
+        action_hi_[m] = 1.0;
     }
 
-    // Neutral activation (0.5 = both muscles at baseline, zero net torque).
-    std::fill(best_traj_.begin(), best_traj_.end(), 0.5);
+    std::fill(best_traj_.begin(), best_traj_.end(), 0.0);
 
     foot_body_id_ = mj_name2id(model_, mjOBJ_BODY, "FL_foot");
     if (foot_body_id_ < 0)
@@ -138,7 +79,7 @@ void SingleLegReach::maybe_advance_target(double foot_err)
         hold_count_ = 0;
         target_idx_ = (target_idx_ + 1) % task_.n_foot_targets;
         for (int k = 0; k < 3; ++k) active_target_[k] = task_.foot_targets[target_idx_][k];
-        std::fill(best_traj_.begin(), best_traj_.end(), 0.5);
+        std::fill(best_traj_.begin(), best_traj_.end(), 0.0);
     }
 }
 
@@ -154,17 +95,17 @@ double SingleLegReach::rollout(int s, const RobotState& state)
     mjData* d = data_[s];
     set_mj_state(d, state);
 
-    double activation[2 * NUM_JOINTS];
-    std::memcpy(activation, rollout_act_, 2 * NUM_JOINTS * sizeof(double));
+    double activation[NUM_MUSCLES];
+    std::memcpy(activation, rollout_act_, NUM_MUSCLES * sizeof(double));
 
     double total_cost = 0.0;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        double u[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            double noisy = trajectory_[t * NUM_JOINTS + j]
-                         + noise_[s * task_.horizon * NUM_JOINTS + t * NUM_JOINTS + j];
-            u[j] = std::clamp(noisy, -1.0, 1.0);
+        double act_cmd[NUM_MUSCLES];
+        for (int m = 0; m < NUM_MUSCLES; ++m) {
+            double noisy = trajectory_[t * NUM_MUSCLES + m]
+                         + noise_[s * task_.horizon * NUM_MUSCLES + t * NUM_MUSCLES + m];
+            act_cmd[m] = std::clamp(noisy, 0.0, 1.0);
         }
 
         double tau_out[NUM_JOINTS];
@@ -176,7 +117,7 @@ double SingleLegReach::rollout(int s, const RobotState& state)
             }
 
             auto t_h = Clock::now();
-            hill_net_act_torques(u, q_cur, dq_cur, muscle_, task_.dt,
+            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt,
                                  activation, tau_out);
             lat_hill_us_.fetch_add(
                 std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
@@ -219,9 +160,9 @@ double SingleLegReach::rollout(int s, const RobotState& state)
 void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
 {
     if (!state.valid) {
-        double u[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j) u[j] = best_traj_[j];
-        hill_net_act_torques(u, state.q, state.dq, muscle_, task_.dt,
+        double act_cmd[NUM_MUSCLES];
+        for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
+        hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt,
                              real_act_, tau_out);
         return;
     }
@@ -230,9 +171,9 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     using Us    = std::chrono::microseconds;
     auto elapsed_us = [](auto t0){ return std::chrono::duration_cast<Us>(Clock::now() - t0).count(); };
 
-    lat_hill_us_.store(0,    std::memory_order_relaxed);
-    lat_mjstep_us_.store(0,  std::memory_order_relaxed);
-    lat_cost_us_.store(0,    std::memory_order_relaxed);
+    lat_hill_us_.store(0,   std::memory_order_relaxed);
+    lat_mjstep_us_.store(0, std::memory_order_relaxed);
+    lat_cost_us_.store(0,   std::memory_order_relaxed);
 
     auto t0 = Clock::now();
 
@@ -244,23 +185,21 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     run_iterations(state);
     long long ri_us = elapsed_us(t_ri);
 
-    double u[NUM_JOINTS];
-    for (int j = 0; j < NUM_JOINTS; ++j) u[j] = best_traj_[j];
+    double act_cmd[NUM_MUSCLES];
+    for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
 
     auto t_fh = Clock::now();
-    hill_net_act_torques(u, state.q, state.dq, muscle_, task_.dt,
+    hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt,
                          real_act_, tau_out);
     long long fh_us = elapsed_us(t_fh);
 
     long long total_us = elapsed_us(t0);
 
-    std::memcpy(rollout_act_, real_act_, 2 * NUM_JOINTS * sizeof(double));
+    std::memcpy(rollout_act_, real_act_, NUM_MUSCLES * sizeof(double));
 
-    // Convergence check: advance to next target when foot holds within threshold.
-    // Uses data_[task_.n_samples] — the dedicated scratch slot not touched by rollouts.
     {
         mjData* d_check = data_[task_.n_samples];
-        set_mj_state(d_check, state);   // internally calls mj_forward, so xpos is current
+        set_mj_state(d_check, state);
         const double* fp = d_check->xpos + 3 * foot_body_id_;
         double err = 0.0;
         for (int k = 0; k < 3; ++k) {

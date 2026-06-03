@@ -26,9 +26,8 @@ add_executable(muscle_mppi_controller
 )
 target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
 
-# --- Single-leg reach controller (net-activation + Hill model) ---
-# NUM_MUSCLES=3: one net-activation slot per joint (not per muscle pair).
-# The Hill model expansion to 6-element antagonistic pairs is handled internally.
+# --- Single-leg reach controller (direct per-muscle, 2 per joint) ---
+# NUM_MUSCLES=6: independent agonist/antagonist command per joint,
 add_executable(single_leg_controller
     single_leg_controller.cpp
     control/base_mppi.cpp
@@ -36,5 +35,5 @@ add_executable(single_leg_controller
     utils/tasks.cpp
 )
 target_compile_definitions(single_leg_controller PRIVATE
-    NUM_JOINTS=3 JOINT_OFFSET=3 NUM_MUSCLES=3)
+    NUM_JOINTS=3 JOINT_OFFSET=3 NUM_MUSCLES=6)
 target_link_libraries(single_leg_controller ${COMMON_LIBS})

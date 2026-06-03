@@ -59,8 +59,9 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
         for (int j = 0; j < NUM_JOINTS; ++j) cfg.tau_max[j] = 1e6;
     if (t["noise_sigma"])
         load_doubles(t["noise_sigma"], cfg.noise_sigma, NUM_MUSCLES, "noise_sigma");
+    if (t["noise_sigma_act"])
+        load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
 
-    // Spline parameterisation fields (optional — only used by MPPILocomotion).
     cfg.n_nodes = t["n_nodes"] ? t["n_nodes"].as<int>() : 10;
     if (t["noise_sigma_q"]) load_doubles(t["noise_sigma_q"], cfg.noise_sigma_q, NUM_JOINTS, "noise_sigma_q");
     if (t["noise_sigma_v"]) load_doubles(t["noise_sigma_v"], cfg.noise_sigma_v, NUM_JOINTS, "noise_sigma_v");

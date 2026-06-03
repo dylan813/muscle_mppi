@@ -64,15 +64,18 @@ struct TaskConfig {
     double       beta2        = 3.0;
     double       dt           = 0.002;
 
-    // --- direct activation noise (used by SingleLegReach / BaseMPPI::sample_noise) ---
+    // Per-muscle activation noise (used by SingleLegReach / BaseMPPI::sample_noise).
     double noise_sigma[NUM_MUSCLES] = {};
 
-    // --- spline parameterisation (used by MPPILocomotion) ---
-    int    n_nodes                   = 10;    // K spline control points
-    double noise_sigma_q[NUM_JOINTS] = {};    // per-joint position noise (rad)
-    double noise_sigma_v[NUM_JOINTS] = {};    // per-joint velocity noise (rad/s)
-    double kp_muscle[NUM_JOINTS]     = {};    // impedance stiffness (N·m/rad)
-    double kd_muscle[NUM_JOINTS]     = {};    // impedance damping  (N·m·s/rad)
+    // Per-joint activation noise (used by MPPILocomotion::sample_activation_noise).
+    // Applied to both muscles of each pair independently.
+    double noise_sigma_act[NUM_JOINTS] = {};
+
+    int    n_nodes                   = 10;
+    double noise_sigma_q[NUM_JOINTS] = {};
+    double noise_sigma_v[NUM_JOINTS] = {};
+    double kp_muscle[NUM_JOINTS]     = {};
+    double kd_muscle[NUM_JOINTS]     = {};
 };
 
 struct MotionCommand {

@@ -63,7 +63,7 @@ default_muscle: &default_muscle
 # -----------------------------------------------------------------------
 # Quadruped muscle parameters (12 joints — same values repeated 4× for FR/FL/RR/RL).
 default_muscle_quad: &default_muscle_quad
-  act_bandwidth: 10.0
+  act_bandwidth: 100.0
   peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
   lce_min:     [0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75]
   lce_max:     [1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05]
@@ -77,7 +77,7 @@ default_muscle_quad: &default_muscle_quad
 # -----------------------------------------------------------------------
 # FL foot target: world frame (x, y, z). Base fixed at z≈0.8.
 # FL hip at (0.193, 0.142, 0.8). Max leg reach ~0.64m.
-# Action space: u[j] ∈ [0, 1] net activation per joint (NUM_MUSCLES=3).
+# Action space: act[m] ∈ [0, 1] per muscle (NUM_MUSCLES=6, two per joint).
 reach:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
   height_target: 0.0
@@ -101,8 +101,8 @@ reach:
 
   nominal_pose: [0.0, 0.67, -1.3]
 
-  # Noise in net-activation space u ∈ [0, 1].
-  noise_sigma:  [0.02, 0.02, 0.02]
+  # Noise per muscle (NUM_MUSCLES=6): agonist and antagonist per joint.
+  noise_sigma:  [0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
 
   muscle: *default_muscle
 
@@ -118,7 +118,6 @@ walk:
   horizon:       45                  # 0.9 s at dt_step = 0.02 s
   substeps:      10
   n_iterations:  5
-  n_nodes:       10                  # K = 10 Hermite nodes → Δt_node = 0.1 s
   lambda:        0.1
   beta1:         3.0
   beta2:         3.0
@@ -139,9 +138,7 @@ walk:
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
   nominal_pose: [0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3,  0.0, 0.67, -1.3]
 
-  noise_sigma_q: [0.15, 0.20, 0.20,  0.15, 0.20, 0.20,  0.15, 0.20, 0.20,  0.15, 0.20, 0.20]
-  noise_sigma_v: [0.50, 0.70, 0.70,  0.50, 0.70, 0.70,  0.50, 0.70, 0.70,  0.50, 0.70, 0.70]
-  kp_muscle:     [40.0, 80.0, 80.0,  40.0, 80.0, 80.0,  40.0, 80.0, 80.0,  40.0, 80.0, 80.0]
-  kd_muscle:     [2.0,  3.5,  3.5,   2.0,  3.5,  3.5,   2.0,  3.5,  3.5,   2.0,  3.5,  3.5]
+  # Per-joint activation noise (applied independently to both muscles of each pair).
+  noise_sigma_act: [0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05]
 
   muscle: *default_muscle_quad
