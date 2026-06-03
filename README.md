@@ -85,7 +85,7 @@ DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/v
 # Unit Tests
 
 ```bash
-cd muscle_mppi/log
+cd muscle_mppi/unit_tests
 python3 plot_force_length.py
 python3 plot_force_velocity.py
 ```
