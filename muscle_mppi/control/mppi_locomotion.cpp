@@ -17,7 +17,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 {
     muscle_ = task_.muscle;
 
-    // BaseMPPI already initializes trajectory_, best_traj_, noise_, costs_, noise_sched_
+    // BaseMPPI already initializes trajectory_, best_traj_, noise_, costs_
     // to the correct sizes (horizon × NUM_MUSCLES). Only action bounds need setting here.
     for (int m = 0; m < NUM_MUSCLES; ++m) {
         action_lo_[m] = 0.0;
@@ -67,9 +67,8 @@ void MPPILocomotion::sample_activation_noise(int iter)
     const int stride = task_.horizon * NUM_MUSCLES;
     for (int s = 0; s < task_.n_samples; ++s) {
         for (int t = 0; t < task_.horizon; ++t) {
-            const double anneal = noise_sched_[iter * task_.horizon + t];
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double sigma = task_.noise_sigma_act[j] * anneal;
+                const double sigma = task_.noise_sigma_act[j];
                 // Same sigma for both muscles of the pair; sampled independently.
                 noise_[s * stride + t * NUM_MUSCLES + 2*j]   = sigma * normal_(rng_);
                 noise_[s * stride + t * NUM_MUSCLES + 2*j+1] = sigma * normal_(rng_);

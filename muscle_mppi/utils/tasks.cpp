@@ -37,8 +37,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.substeps      = t["substeps"].as<int>();
     cfg.n_iterations  = t["n_iterations"].as<int>();
     cfg.lambda        = t["lambda"].as<double>();
-    cfg.beta1         = t["beta1"].as<double>();
-    cfg.beta2         = t["beta2"].as<double>();
     cfg.dt            = t["dt"].as<double>();
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");

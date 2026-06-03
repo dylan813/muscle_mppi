@@ -43,14 +43,6 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     costs_.resize(task_.n_samples);
     best_traj_.assign(task_.horizon * NUM_MUSCLES, 0.0);
 
-    const int N = task_.n_iterations;
-    const int H = task_.horizon;
-    noise_sched_.resize(N * H);
-    for (int i = 0; i < N; ++i)
-        for (int t = 0; t < H; ++t)
-            noise_sched_[i * H + t] = std::exp(
-                -0.5 * (static_cast<double>(i) / (task_.beta1 * N)
-                      + static_cast<double>(H - t) / (task_.beta2 * H)));
 }
 
 BaseMPPI::~BaseMPPI() {
@@ -61,10 +53,9 @@ BaseMPPI::~BaseMPPI() {
 void BaseMPPI::sample_noise(int iter) {
     for (int s = 0; s < task_.n_samples; ++s)
         for (int t = 0; t < task_.horizon; ++t) {
-            const double anneal = noise_sched_[iter * task_.horizon + t];
             for (int m = 0; m < NUM_MUSCLES; ++m) {
                 int idx = s * task_.horizon * NUM_MUSCLES + t * NUM_MUSCLES + m;
-                noise_[idx] = task_.noise_sigma[m] * anneal * normal_(rng_);
+                noise_[idx] = task_.noise_sigma[m] * normal_(rng_);
             }
         }
 }

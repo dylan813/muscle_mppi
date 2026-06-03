@@ -55,10 +55,9 @@ protected:
     std::vector<double> trajectory_;
     std::vector<double> noise_;
     std::vector<double> costs_;
-    std::vector<double> noise_sched_;
 
     std::vector<double> best_traj_;
-    double              best_cost_ = 1e9;
+    double              best_cost_  = 1e9;
 
     // Per-muscle clamp bounds used by run_iterations(). Set by subclass constructors.
     double action_lo_[NUM_MUSCLES] = {};

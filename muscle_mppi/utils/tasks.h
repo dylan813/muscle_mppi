@@ -36,8 +36,6 @@ struct TaskConfig {
     int          substeps     = 10;
     int          n_iterations = 3;
     double       lambda       = 0.1;
-    double       beta1        = 3.0;
-    double       beta2        = 3.0;
     double       dt           = 0.002;
 
     // Per-muscle activation noise (used by SingleLegReach / BaseMPPI::sample_noise).
