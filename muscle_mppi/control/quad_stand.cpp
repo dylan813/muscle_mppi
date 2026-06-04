@@ -1,6 +1,7 @@
 #include "quad_stand.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <omp.h>
@@ -30,16 +31,6 @@ QuadStand::QuadStand(const std::string& task_name, const std::string& yaml_path)
     if (base_bid_ < 0)
         throw std::runtime_error("QuadStand: no base body found in model");
 
-    // Find feet.
-    const char* foot_names[] = {"FL_foot", "FR_foot", "RL_foot", "RR_foot"};
-    n_feet_ = 0;
-    for (int i = 0; i < 4; ++i) {
-        int bid = mj_name2id(model_, mjOBJ_BODY, foot_names[i]);
-        if (bid >= 0) foot_body_ids_[n_feet_++] = bid;
-    }
-    if (n_feet_ == 0)
-        throw std::runtime_error("QuadStand: no foot bodies found in model");
-
     // Load cost weights; all default to 0 if absent.
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
@@ -47,7 +38,6 @@ QuadStand::QuadStand(const std::string& task_name, const std::string& yaml_path)
         cost_.height      = c["height"]      ? c["height"].as<double>()      : 0.0;
         cost_.orientation = c["orientation"] ? c["orientation"].as<double>() : 0.0;
         cost_.posture     = c["posture"]     ? c["posture"].as<double>()     : 0.0;
-        cost_.joint_vel   = c["joint_vel"]   ? c["joint_vel"].as<double>()   : 0.0;
         cost_.terminal    = c["terminal"]    ? c["terminal"].as<double>()    : 0.0;
     }
 }
@@ -91,7 +81,7 @@ double QuadStand::rollout(int s, const RobotState& state)
 
             mj_step(model_, d);
 
-            if (!std::isfinite(d->qpos[2]) || d->qpos[2] < -1.0)
+            if (!std::isfinite(d->qpos[2]) || d->qpos[2] < 0.05)
                 return 1e6;
         }
 
@@ -103,17 +93,39 @@ double QuadStand::rollout(int s, const RobotState& state)
 }
 
 // ============================================================================
-// Cost — stubs, fill in to define the standing objective
+// Cost
 // ============================================================================
 
-double QuadStand::step_cost(const mjData* /*d*/)
+double QuadStand::step_cost(const mjData* d)
 {
-    return 0.0;
+    double cost = 0.0;
+
+    cost += cost_.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
+
+    const double qw    = d->qpos[3];
+    const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
+    cost += cost_.orientation * angle * angle;
+
+    if (cost_.posture > 0.0) {
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
+            cost += cost_.posture * dq * dq;
+        }
+    }
+
+    return cost;
 }
 
-double QuadStand::terminal_cost(const mjData* /*d*/)
+double QuadStand::terminal_cost(const mjData* d)
 {
-    return 0.0;
+    // Reward trajectories that end near the standing configuration.
+    // Mirrors walk's terminal cost structure: "be at the target by end of horizon."
+    double cost = 0.0;
+    cost += std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
+    const double qw    = d->qpos[3];
+    const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
+    cost += angle * angle;
+    return cost_.terminal * cost;
 }
 
 // ============================================================================
@@ -127,6 +139,19 @@ void QuadStand::update(const RobotState& state, double tau_out[NUM_JOINTS])
         hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
         return;
     }
+
+    const auto t_start = std::chrono::steady_clock::now();
+
+    // Advance real_act_ for time elapsed since last solve.
+    // ControlLoop re-sends best_traj_[0] each cycle, so replay that command.
+    const double dt_step = task_.substeps * task_.dt;
+    const int n_skip = std::clamp(
+        static_cast<int>(std::round(last_compute_ms_ * 1e-3 / dt_step)),
+        1, task_.horizon / 2);
+    for (int t = 0; t < n_skip - 1; ++t)
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            real_act_[m] += muscle_.act_bandwidth * task_.dt
+                           * (best_traj_[m] - real_act_[m]);
 
     std::memcpy(rollout_act_, real_act_, NUM_MUSCLES * sizeof(double));
 
@@ -185,4 +210,7 @@ void QuadStand::update(const RobotState& state, double tau_out[NUM_JOINTS])
     double act_cmd[NUM_MUSCLES];
     for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
     hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
+
+    last_compute_ms_ = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t_start).count();
 }

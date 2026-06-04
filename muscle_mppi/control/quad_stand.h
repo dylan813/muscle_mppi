@@ -7,17 +7,9 @@ struct StandCostWeights {
     double height      = 0.0;
     double orientation = 0.0;
     double posture     = 0.0;
-    double joint_vel   = 0.0;
-    double terminal    = 0.0;
+    double terminal    = 0.0;   // height error + tilt² at end of horizon
 };
 
-// Quadruped standing task with per-joint activation noise (same sigma for
-// both muscles of each antagonistic pair). Action space is NUM_MUSCLES wide
-// (agonist/antagonist interleaved per joint), but noise is drawn per joint
-// via sample_activation_noise — matching the walk task convention.
-//
-// step_cost / terminal_cost are stubs returning 0; fill them in to define
-// the standing objective.
 class QuadStand : public BaseMPPI {
 public:
     explicit QuadStand(const std::string& task_name,
@@ -43,7 +35,7 @@ private:
     double rollout_act_[NUM_MUSCLES] = {};
     double real_act_[NUM_MUSCLES]    = {};
 
-    int base_bid_         = -1;
-    int foot_body_ids_[4] = {};
-    int n_feet_           = 0;
+    double last_compute_ms_ = 20.0;
+
+    int base_bid_ = -1;
 };

@@ -115,24 +115,22 @@ stand:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
   height_target: 0.34
   n_samples:     64
-  horizon:       20
+  horizon:       50
   substeps:      10
   n_iterations:  5
   lambda:        0.1
   dt:            0.002
 
-  # Cost weights — all zero until you define the standing objective.
   cost:
     height:        0.0
     orientation:   0.0
     posture:       0.0
-    joint_vel:     0.0
-    terminal:      0.0
+    terminal:      0.0   # height error + tilt² at end of horizon
 
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 
-  # Per-joint activation noise (applied independently to agonist and antagonist).
-  noise_sigma_act: [0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05]
+  # Per-muscle noise (NUM_MUSCLES=24). Same sigma for agonist and antagonist of each joint.
+  noise_sigma: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05,  0.05, 0.05, 0.05, 0.05, 0.05, 0.05,  0.05, 0.05, 0.05, 0.05, 0.05, 0.05,  0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
 
   muscle: *default_muscle_quad
 

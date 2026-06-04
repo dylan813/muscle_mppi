@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <unistd.h>
@@ -14,6 +15,7 @@
 #include <unitree/idl/go2/SportModeState_.hpp>
 #include <unitree/common/time/time_tool.hpp>
 #include <unitree/common/thread/thread.hpp>
+#include <mujoco/mujoco.h>
 
 #include "control/quad_stand.h"
 
@@ -50,6 +52,32 @@ public:
         TaskConfig cfg = load_task(task, yaml_path);
         for (int j = 0; j < NUM_JOINTS; ++j)
             kd_[j] = cfg.muscle.kd_sim[j];
+
+        // FK model — used to estimate base height from joint angles when
+        // SportModeState is unavailable (e.g. robot in low-level control mode).
+        char err[1000];
+        fk_model_ = mj_loadXML(cfg.model_path.c_str(), nullptr, err, sizeof(err));
+        if (!fk_model_)
+            throw std::runtime_error("FK model load failed: " + std::string(err));
+        fk_data_ = mj_makeData(fk_model_);
+
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            int jid = fk_model_->actuator_trnid[2 * (JOINT_OFFSET + j)];
+            fk_qpos_adr_[j] = fk_model_->jnt_qposadr[jid];
+        }
+
+        // Foot bodies for height estimate: base z - lowest foot z = height above ground.
+        const char* foot_names[] = {"FL_foot", "FR_foot", "RL_foot", "RR_foot"};
+        fk_n_feet_ = 0;
+        for (int i = 0; i < 4; ++i) {
+            int bid = mj_name2id(fk_model_, mjOBJ_BODY, foot_names[i]);
+            if (bid >= 0) fk_foot_ids_[fk_n_feet_++] = bid;
+        }
+    }
+
+    ~QuadStandController() {
+        mj_deleteData(fk_data_);
+        mj_deleteModel(fk_model_);
     }
 
     void Init() {
@@ -96,6 +124,7 @@ private:
     void LowStateHandler(const void* msg) {
         const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
+
         for (int i = 0; i < NUM_JOINTS; ++i) {
             state_.q[i]  = s->motor_state()[JOINT_OFFSET + i].q();
             state_.dq[i] = s->motor_state()[JOINT_OFFSET + i].dq();
@@ -107,6 +136,24 @@ private:
         state_.gyro[0] = s->imu_state().gyroscope()[0];
         state_.gyro[1] = s->imu_state().gyroscope()[1];
         state_.gyro[2] = s->imu_state().gyroscope()[2];
+
+        // Estimate base height from FK when SportMode isn't publishing.
+        // Place base at origin, compute foot positions, height = -lowest foot z.
+        if (!sport_valid_ && fk_n_feet_ > 0) {
+            fk_data_->qpos[0] = 0.0; fk_data_->qpos[1] = 0.0; fk_data_->qpos[2] = 0.0;
+            fk_data_->qpos[3] = 1.0; fk_data_->qpos[4] = 0.0;
+            fk_data_->qpos[5] = 0.0; fk_data_->qpos[6] = 0.0;
+            for (int j = 0; j < NUM_JOINTS; ++j)
+                fk_data_->qpos[fk_qpos_adr_[j]] = state_.q[j];
+            mj_kinematics(fk_model_, fk_data_);
+
+            double min_foot_z = std::numeric_limits<double>::infinity();
+            for (int i = 0; i < fk_n_feet_; ++i)
+                min_foot_z = std::min(min_foot_z, fk_data_->xpos[fk_foot_ids_[i] * 3 + 2]);
+            state_.pos[2] = -min_foot_z;
+        }
+
+        state_.valid = true;
     }
 
     void SportModeHandler(const void* msg) {
@@ -118,6 +165,7 @@ private:
         state_.vel[0] = s->velocity()[0];
         state_.vel[1] = s->velocity()[1];
         state_.vel[2] = s->velocity()[2];
+        sport_valid_  = true;
         state_.valid  = true;
     }
 
@@ -196,6 +244,14 @@ private:
     static constexpr int CONVERGENCE_SOLVES = 20;
 
     double kd_[NUM_JOINTS] = {};
+
+    // FK model for base height estimation without SportModeState.
+    mjModel* fk_model_             = nullptr;
+    mjData*  fk_data_              = nullptr;
+    int      fk_qpos_adr_[NUM_JOINTS] = {};
+    int      fk_foot_ids_[4]       = {};
+    int      fk_n_feet_            = 0;
+    bool     sport_valid_          = false;
 
     std::atomic<bool> mppi_ready_{false};
 
