@@ -38,11 +38,8 @@ struct TaskConfig {
     double       lambda       = 0.1;
     double       dt           = 0.002;
 
-    // Per-muscle activation noise (used by SingleLegReach / BaseMPPI::sample_noise).
-    double noise_sigma[NUM_MUSCLES] = {};
-
-    // Per-joint activation noise (used by MPPILocomotion::sample_activation_noise).
-    // Applied to both muscles of each pair independently.
+    // Per-joint noise sigma. Both muscles of each antagonistic pair receive the
+    // same draw, scaled by this value. Used by BaseMPPI::sample_noise().
     double noise_sigma_act[NUM_JOINTS] = {};
 };
 

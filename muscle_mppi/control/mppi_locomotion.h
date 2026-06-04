@@ -43,8 +43,6 @@ private:
 
     RobotState predict_state(const RobotState& state, int n_steps);
 
-    void sample_activation_noise(int iter);
-
     MuscleParams   muscle_;
     CostWeights    cost_;
     MotionCommand  cmd_;

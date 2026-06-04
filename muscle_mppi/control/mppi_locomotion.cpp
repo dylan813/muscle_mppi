@@ -59,25 +59,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 }
 
 // ============================================================================
-// Activation noise sampling
-// ============================================================================
-
-void MPPILocomotion::sample_activation_noise(int iter)
-{
-    const int stride = task_.horizon * NUM_MUSCLES;
-    for (int s = 0; s < task_.n_samples; ++s) {
-        for (int t = 0; t < task_.horizon; ++t) {
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double sigma = task_.noise_sigma_act[j];
-                // Same sigma for both muscles of the pair; sampled independently.
-                noise_[s * stride + t * NUM_MUSCLES + 2*j]   = sigma * normal_(rng_);
-                noise_[s * stride + t * NUM_MUSCLES + 2*j+1] = sigma * normal_(rng_);
-            }
-        }
-    }
-}
-
-// ============================================================================
 // Rollout
 // ============================================================================
 
@@ -273,7 +254,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     best_cost_ = 1e9;
 
     for (int iter = 0; iter < N; ++iter) {
-        sample_activation_noise(iter);
+        sample_noise(iter);
 
         #pragma omp parallel for schedule(dynamic)
         for (int s = 0; s < task_.n_samples; ++s)

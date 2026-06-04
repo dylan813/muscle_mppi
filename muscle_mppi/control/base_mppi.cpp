@@ -52,12 +52,13 @@ BaseMPPI::~BaseMPPI() {
 
 void BaseMPPI::sample_noise(int iter) {
     for (int s = 0; s < task_.n_samples; ++s)
-        for (int t = 0; t < task_.horizon; ++t) {
-            for (int m = 0; m < NUM_MUSCLES; ++m) {
-                int idx = s * task_.horizon * NUM_MUSCLES + t * NUM_MUSCLES + m;
-                noise_[idx] = task_.noise_sigma[m] * normal_(rng_);
+        for (int t = 0; t < task_.horizon; ++t)
+            for (int j = 0; j < NUM_JOINTS; ++j) {
+                const double sigma = task_.noise_sigma_act[j];
+                int base = s * task_.horizon * NUM_MUSCLES + t * NUM_MUSCLES + 2 * j;
+                noise_[base]     = sigma * normal_(rng_);
+                noise_[base + 1] = sigma * normal_(rng_);
             }
-        }
 }
 
 void BaseMPPI::warm_start(int n_skip)

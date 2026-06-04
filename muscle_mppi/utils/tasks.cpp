@@ -40,8 +40,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.dt            = t["dt"].as<double>();
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
-    if (t["noise_sigma"])
-        load_doubles(t["noise_sigma"], cfg.noise_sigma, NUM_MUSCLES, "noise_sigma");
     if (t["noise_sigma_act"])
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
 

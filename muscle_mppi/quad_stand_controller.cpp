@@ -1,0 +1,241 @@
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <mutex>
+#include <thread>
+#include <unistd.h>
+
+#include <unitree/robot/channel/channel_publisher.hpp>
+#include <unitree/robot/channel/channel_subscriber.hpp>
+#include <unitree/idl/go2/LowState_.hpp>
+#include <unitree/idl/go2/LowCmd_.hpp>
+#include <unitree/idl/go2/SportModeState_.hpp>
+#include <unitree/common/time/time_tool.hpp>
+#include <unitree/common/thread/thread.hpp>
+
+#include "control/quad_stand.h"
+
+using namespace unitree::common;
+using namespace unitree::robot;
+
+#define TOPIC_LOWCMD    "rt/lowcmd"
+#define TOPIC_LOWSTATE  "rt/lowstate"
+#define TOPIC_SPORTMODE "rt/sportmodestate"
+
+constexpr double PosStopF = 2.146E+9f;
+constexpr double VelStopF = 16000.0f;
+
+uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
+    uint32_t xbit, data, CRC32 = 0xFFFFFFFF;
+    const uint32_t poly = 0x04c11db7;
+    for (uint32_t i = 0; i < len; ++i) {
+        xbit = 1u << 31; data = ptr[i];
+        for (int b = 0; b < 32; ++b) {
+            if (CRC32 & 0x80000000) { CRC32 <<= 1; CRC32 ^= poly; } else CRC32 <<= 1;
+            if (data & xbit) CRC32 ^= poly;
+            xbit >>= 1;
+        }
+    }
+    return CRC32;
+}
+
+class QuadStandController {
+public:
+    explicit QuadStandController(const std::string& task      = "stand",
+                                 const std::string& yaml_path = "../utils/tasks.yaml")
+        : mppi_(task, yaml_path)
+    {
+        TaskConfig cfg = load_task(task, yaml_path);
+        for (int j = 0; j < NUM_JOINTS; ++j)
+            kd_[j] = cfg.muscle.kd_sim[j];
+    }
+
+    void Init() {
+        InitLowCmd();
+
+        lowcmd_publisher_.reset(
+            new ChannelPublisher<unitree_go::msg::dds_::LowCmd_>(TOPIC_LOWCMD));
+        lowcmd_publisher_->InitChannel();
+
+        lowstate_subscriber_.reset(
+            new ChannelSubscriber<unitree_go::msg::dds_::LowState_>(TOPIC_LOWSTATE));
+        lowstate_subscriber_->InitChannel(
+            std::bind(&QuadStandController::LowStateHandler, this,
+                      std::placeholders::_1), 1);
+
+        sportmode_subscriber_.reset(
+            new ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_SPORTMODE));
+        sportmode_subscriber_->InitChannel(
+            std::bind(&QuadStandController::SportModeHandler, this,
+                      std::placeholders::_1), 1);
+
+        control_thread_ = CreateRecurrentThreadEx(
+            "qs_ctrl", UT_CPU_ID_NONE, 20000, &QuadStandController::ControlLoop, this);
+
+        mppi_thread_ = std::thread(&QuadStandController::MPPILoop, this);
+    }
+
+private:
+    void InitLowCmd() {
+        low_cmd_.head()[0]    = 0xFE;
+        low_cmd_.head()[1]    = 0xEF;
+        low_cmd_.level_flag() = 0xFF;
+        low_cmd_.gpio()       = 0;
+        for (int i = 0; i < 20; ++i) {
+            low_cmd_.motor_cmd()[i].mode() = 0x01;
+            low_cmd_.motor_cmd()[i].q()    = PosStopF;
+            low_cmd_.motor_cmd()[i].kp()   = 0.0;
+            low_cmd_.motor_cmd()[i].dq()   = VelStopF;
+            low_cmd_.motor_cmd()[i].kd()   = 0.0;
+            low_cmd_.motor_cmd()[i].tau()  = 0.0;
+        }
+    }
+
+    void LowStateHandler(const void* msg) {
+        const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
+        std::lock_guard<std::mutex> lk(state_mutex_);
+        for (int i = 0; i < NUM_JOINTS; ++i) {
+            state_.q[i]  = s->motor_state()[JOINT_OFFSET + i].q();
+            state_.dq[i] = s->motor_state()[JOINT_OFFSET + i].dq();
+        }
+        state_.quat[0] = s->imu_state().quaternion()[0];
+        state_.quat[1] = s->imu_state().quaternion()[1];
+        state_.quat[2] = s->imu_state().quaternion()[2];
+        state_.quat[3] = s->imu_state().quaternion()[3];
+        state_.gyro[0] = s->imu_state().gyroscope()[0];
+        state_.gyro[1] = s->imu_state().gyroscope()[1];
+        state_.gyro[2] = s->imu_state().gyroscope()[2];
+    }
+
+    void SportModeHandler(const void* msg) {
+        const auto* s = static_cast<const unitree_go::msg::dds_::SportModeState_*>(msg);
+        std::lock_guard<std::mutex> lk(state_mutex_);
+        state_.pos[0] = s->position()[0];
+        state_.pos[1] = s->position()[1];
+        state_.pos[2] = s->position()[2];
+        state_.vel[0] = s->velocity()[0];
+        state_.vel[1] = s->velocity()[1];
+        state_.vel[2] = s->velocity()[2];
+        state_.valid  = true;
+    }
+
+    void ControlLoop() {
+        if (!mppi_ready_.load()) {
+            for (int i = 0; i < NUM_JOINTS; ++i) {
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
+            }
+        } else {
+            double tau_cmd[NUM_JOINTS];
+            {
+                std::lock_guard<std::mutex> lk(cmd_mutex_);
+                std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
+            }
+            for (int i = 0; i < NUM_JOINTS; ++i) {
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = kd_[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = tau_cmd[i];
+            }
+        }
+
+        low_cmd_.crc() = crc32_core(
+            reinterpret_cast<uint32_t*>(&low_cmd_),
+            (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
+        lowcmd_publisher_->Write(low_cmd_);
+    }
+
+    void MPPILoop() {
+        std::cout << "QuadStand MPPI started.\n";
+
+        int    solve_count  = 0;
+        double solve_sum_ms = 0.0;
+
+        while (true) {
+            RobotState snap;
+            {
+                std::lock_guard<std::mutex> lk(state_mutex_);
+                snap = state_;
+            }
+            if (!snap.valid) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            auto t0 = std::chrono::steady_clock::now();
+            double tau_cmd[NUM_JOINTS] = {};
+            mppi_.update(snap, tau_cmd);
+            double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+
+            {
+                std::lock_guard<std::mutex> lk(cmd_mutex_);
+                std::copy(tau_cmd, tau_cmd + NUM_JOINTS, cached_tau_);
+            }
+
+            solve_sum_ms += ms;
+            ++solve_count;
+            if (solve_count % 20 == 0)
+                std::cout << "QuadStand MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
+
+            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES) {
+                std::cout << "MPPI converged after " << solve_count
+                          << " solves (avg " << solve_sum_ms / solve_count
+                          << " ms) — handing over to Hill torques\n";
+                mppi_ready_.store(true);
+            }
+        }
+    }
+
+    static constexpr int CONVERGENCE_SOLVES = 20;
+
+    double kd_[NUM_JOINTS] = {};
+
+    std::atomic<bool> mppi_ready_{false};
+
+    QuadStand mppi_;
+
+    std::mutex state_mutex_;
+    RobotState state_{};
+
+    std::mutex cmd_mutex_;
+    double     cached_tau_[NUM_JOINTS] = {};
+
+    unitree_go::msg::dds_::LowCmd_ low_cmd_{};
+
+    ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_>          lowcmd_publisher_;
+    ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_>       lowstate_subscriber_;
+    ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> sportmode_subscriber_;
+
+    ThreadPtr   control_thread_;
+    std::thread mppi_thread_;
+};
+
+int main(int argc, const char** argv)
+{
+    if (argc < 2)
+        ChannelFactory::Instance()->Init(1, "lo");
+    else
+        ChannelFactory::Instance()->Init(1, argv[1]);
+
+    const std::string task      = (argc >= 3) ? argv[2] : "stand";
+    const std::string yaml_path = (argc >= 4) ? argv[3] : "../utils/tasks.yaml";
+
+    std::cout << "QuadStand Controller (Hill muscle model)\n"
+              << "  task: " << task << "\n"
+              << "  yaml: " << yaml_path << "\n"
+              << "Press Enter to start.\n";
+    std::cin.get();
+
+    QuadStandController controller(task, yaml_path);
+    controller.Init();
+
+    while (true) sleep(10);
+    return 0;
+}
