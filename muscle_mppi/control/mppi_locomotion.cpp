@@ -129,24 +129,40 @@ double MPPILocomotion::step_cost(const mjData* d)
         }
     }
 
-    if (w.contact_vel > 0.0 || w.contact_force > 0.0) {
+    // contact_vel: iterate over all active contacts, penalize velocity at each contact point.
+    // This matches the paper's "vc contact velocities" — any body touching anything, not just feet.
+    if (w.contact_vel > 0.0) {
+        for (int ci = 0; ci < d->ncon; ++ci) {
+            const mjContact& con = d->contact[ci];
+            const int bid1 = model_->geom_bodyid[con.geom1];
+            const int bid2 = model_->geom_bodyid[con.geom2];
+            // penalize the non-world body (worldbody = 0)
+            const int bid = (bid1 != 0) ? bid1 : bid2;
+            if (bid == 0) continue;
+
+            mjtNum vel6[6];
+            mj_objectVelocity(model_, d, mjOBJ_BODY, bid, vel6, 0);
+            // vel6[0..2] = angular, vel6[3..5] = linear at body origin; correct to contact point
+            const double dx = con.pos[0] - d->xpos[3*bid + 0];
+            const double dy = con.pos[1] - d->xpos[3*bid + 1];
+            const double dz = con.pos[2] - d->xpos[3*bid + 2];
+            const double vx = vel6[3] + vel6[1]*dz - vel6[2]*dy;
+            const double vy = vel6[4] + vel6[2]*dx - vel6[0]*dz;
+            const double vz = vel6[5] + vel6[0]*dy - vel6[1]*dx;
+            cost += w.contact_vel * (std::abs(vx) + std::abs(vy) + std::abs(vz));
+        }
+    }
+
+    // contact_force: per-foot aggregate force vs. reference (Eq. 17: ||fc - f0||_1)
+    if (w.contact_force > 0.0) {
         for (int fi = 0; fi < n_feet_; ++fi) {
             const int bid = foot_body_ids_[fi];
-            if (w.contact_vel > 0.0) {
-                mjtNum vel6[6];
-                mj_objectVelocity(model_, d, mjOBJ_BODY, bid, vel6, 0);
-                // L1 norm over the 3 linear velocity components (Eq. 17: ||vc||_1)
-                cost += w.contact_vel * (std::abs(vel6[3]) + std::abs(vel6[4]) + std::abs(vel6[5]));
-            }
-            if (w.contact_force > 0.0) {
-                const double fx = d->cfrc_ext[6*bid + 3];
-                const double fy = d->cfrc_ext[6*bid + 4];
-                const double fz = d->cfrc_ext[6*bid + 5];
-                // Subtract reference forces f0 (Eq. 17: ||fc - f0||_1)
-                cost += w.contact_force * (std::abs(fx - f0_[fi][0])
-                                         + std::abs(fy - f0_[fi][1])
-                                         + std::abs(fz - f0_[fi][2]));
-            }
+            const double fx = d->cfrc_ext[6*bid + 3];
+            const double fy = d->cfrc_ext[6*bid + 4];
+            const double fz = d->cfrc_ext[6*bid + 5];
+            cost += w.contact_force * (std::abs(fx - f0_[fi][0])
+                                     + std::abs(fy - f0_[fi][1])
+                                     + std::abs(fz - f0_[fi][2]));
         }
     }
 
