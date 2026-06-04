@@ -149,13 +149,12 @@ walk:
   dt:            0.002
 
   cost:
-    height:        100.0
-    orientation:   10.0
-    posture:       0.0
-    contact_vel:   0.5
-    contact_force: 0.05
-    terminal:      2500.0
-    vel_cmd:       1.0
+    height:        100.0     # wh   (paper Table II: 1e2)
+    orientation:   10.0      # worient (paper: 10)
+    posture:       0.0       # wq   (paper: 0.0)
+    contact_vel:   0.5       # wc,vel (paper: 0.5)
+    contact_force: 0.05      # wc,force (paper: 5e-2)
+    terminal:      2500.0    # wH   (paper: 2.5e3)
     vel_des:       [0.5, 0.0, 0.0]
 
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)

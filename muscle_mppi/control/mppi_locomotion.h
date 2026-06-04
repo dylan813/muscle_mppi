@@ -10,7 +10,6 @@ struct CostWeights {
     double contact_vel   = 0.0;
     double contact_force = 0.0;
     double terminal      = 0.0;
-    double vel_cmd       = 0.0;
 };
 
 // Reference-free MPPI with direct per-muscle activation (co-contraction capable).
@@ -59,4 +58,8 @@ private:
     int    base_bid_         = 1;
     int    foot_body_ids_[4] = {};
     int    n_feet_           = 0;
+
+    // Reference contact forces f0, captured from the first predicted state (Eq. 17).
+    double f0_[4][3]    = {};
+    bool   f0_captured_ = false;
 };

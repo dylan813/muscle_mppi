@@ -49,7 +49,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         cost_.contact_vel   = c["contact_vel"]   ? c["contact_vel"].as<double>()   : 0.0;
         cost_.contact_force = c["contact_force"] ? c["contact_force"].as<double>() : 0.0;
         cost_.terminal      = c["terminal"]      ? c["terminal"].as<double>()      : 0.0;
-        cost_.vel_cmd       = c["vel_cmd"]       ? c["vel_cmd"].as<double>()       : 0.0;
         if (c["vel_des"]) {
             cmd_.vx = c["vel_des"][0].as<double>();
             cmd_.vy = c["vel_des"][1].as<double>();
@@ -136,22 +135,19 @@ double MPPILocomotion::step_cost(const mjData* d)
             if (w.contact_vel > 0.0) {
                 mjtNum vel6[6];
                 mj_objectVelocity(model_, d, mjOBJ_BODY, bid, vel6, 0);
-                const double speed = std::sqrt(vel6[3]*vel6[3] + vel6[4]*vel6[4] + vel6[5]*vel6[5]);
-                cost += w.contact_vel * speed;
+                // L1 norm over the 3 linear velocity components (Eq. 17: ||vc||_1)
+                cost += w.contact_vel * (std::abs(vel6[3]) + std::abs(vel6[4]) + std::abs(vel6[5]));
             }
             if (w.contact_force > 0.0) {
                 const double fx = d->cfrc_ext[6*bid + 3];
                 const double fy = d->cfrc_ext[6*bid + 4];
                 const double fz = d->cfrc_ext[6*bid + 5];
-                cost += w.contact_force * (std::abs(fx) + std::abs(fy) + std::abs(fz));
+                // Subtract reference forces f0 (Eq. 17: ||fc - f0||_1)
+                cost += w.contact_force * (std::abs(fx - f0_[fi][0])
+                                         + std::abs(fy - f0_[fi][1])
+                                         + std::abs(fz - f0_[fi][2]));
             }
         }
-    }
-
-    if (w.vel_cmd > 0.0) {
-        const double dvx = d->qvel[0] - cmd_.vx;
-        const double dvy = d->qvel[1] - cmd_.vy;
-        cost += w.vel_cmd * (dvx*dvx + dvy*dvy);
     }
 
     return cost;
@@ -237,6 +233,18 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
 
     start_pos_[0] = predicted.pos[0];
     start_pos_[1] = predicted.pos[1];
+
+    // Capture f0 once from the first predicted state as the reference contact forces.
+    if (!f0_captured_) {
+        const mjData* dp = data_[task_.n_samples];
+        for (int fi = 0; fi < n_feet_; ++fi) {
+            const int bid = foot_body_ids_[fi];
+            f0_[fi][0] = dp->cfrc_ext[6*bid + 3];
+            f0_[fi][1] = dp->cfrc_ext[6*bid + 4];
+            f0_[fi][2] = dp->cfrc_ext[6*bid + 5];
+        }
+        f0_captured_ = true;
+    }
 
     // Warm-start: shift best_traj_ forward by n_skip steps.
     const int skip   = std::min(n_skip, task_.horizon - 1);
