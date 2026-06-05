@@ -50,8 +50,10 @@ public:
         : mppi_(task, yaml_path)
     {
         TaskConfig cfg = load_task(task, yaml_path);
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            kd_[j] = cfg.muscle.kd_sim[j];
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            kd_[j]        = cfg.muscle.kd_sim[j];
+            stand_pos_[j] = cfg.nominal_pose[j];
+        }
 
         // FK model — used to estimate base height from joint angles when
         // SportModeState is unavailable (e.g. robot in low-level control mode).
@@ -171,12 +173,19 @@ private:
 
     void ControlLoop() {
         if (!mppi_ready_.load()) {
+            running_time_ += 0.02;
+            const double phase = std::tanh(running_time_ / 1.2);
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = phase * stand_pos_[i]
+                                                              + (1.0 - phase) * stand_down_pos_[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = phase * 50.0 + (1.0 - phase) * 20.0;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
+            }
+            if (!stand_up_complete_.load() && running_time_ >= 4.0) {
+                stand_up_complete_.store(true);
+                std::cout << "Stand-up complete — waiting for MPPI convergence.\n";
             }
         } else {
             double tau_cmd[NUM_JOINTS];
@@ -204,6 +213,8 @@ private:
 
         int    solve_count  = 0;
         double solve_sum_ms = 0.0;
+        double peak_dq_     = 0.0;   // rolling peak since last print
+        double peak_gyro_   = 0.0;
 
         while (true) {
             RobotState snap;
@@ -211,10 +222,18 @@ private:
                 std::lock_guard<std::mutex> lk(state_mutex_);
                 snap = state_;
             }
-            if (!snap.valid) {
+            if (!snap.valid || !stand_up_complete_.load()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
+
+            // Track peak motion regardless of print cadence.
+            for (int j = 0; j < NUM_JOINTS; ++j)
+                peak_dq_ = std::max(peak_dq_, std::abs(snap.dq[j]));
+            const double gyro_mag = std::sqrt(snap.gyro[0]*snap.gyro[0]
+                                            + snap.gyro[1]*snap.gyro[1]
+                                            + snap.gyro[2]*snap.gyro[2]);
+            peak_gyro_ = std::max(peak_gyro_, gyro_mag);
 
             auto t0 = std::chrono::steady_clock::now();
             double tau_cmd[NUM_JOINTS] = {};
@@ -229,21 +248,57 @@ private:
 
             solve_sum_ms += ms;
             ++solve_count;
-            if (solve_count % 20 == 0)
-                std::cout << "QuadStand MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
 
-            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES) {
-                std::cout << "MPPI converged after " << solve_count
-                          << " solves (avg " << solve_sum_ms / solve_count
-                          << " ms) — handing over to Hill torques\n";
+            if (solve_count % 5 == 0) {
+                const double qw       = snap.quat[0];
+                const double tilt_deg = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0))
+                                        * 180.0 / M_PI;
+
+                std::printf("solve %4d | %5.1f ms | cost min=%8.2f traj=%8.2f mean=%8.2f"
+                            " | h=%5.3f m | tilt=%4.1f deg\n",
+                            solve_count, solve_sum_ms / solve_count,
+                            mppi_.best_cost(), mppi_.trajectory_cost(), mppi_.cost_mean(),
+                            snap.pos[2], tilt_deg);
+
+                peak_dq_   = 0.0;
+                peak_gyro_ = 0.0;
+            }
+
+            // Reset solve count when stand-up completes so warm-start solves
+            // from the actual standing state before handover.
+            if (!stand_phase_done_ && stand_up_complete_.load()) {
+                stand_phase_done_ = true;
+                solve_count       = 0;
+                solve_sum_ms      = 0.0;
+                std::cout << "Standing — warming MPPI from standing state.\n";
+            }
+
+            if (!mppi_ready_.load() && stand_phase_done_
+                    && solve_count >= CONVERGENCE_SOLVES) {
+                std::cout << "MPPI warm — handing over to Hill torques after "
+                          << solve_count << " solves (avg "
+                          << solve_sum_ms / solve_count << " ms)\n";
                 mppi_ready_.store(true);
             }
         }
     }
 
-    static constexpr int CONVERGENCE_SOLVES = 20;
+    static constexpr int CONVERGENCE_SOLVES = 40;
 
-    double kd_[NUM_JOINTS] = {};
+    double kd_[NUM_JOINTS]        = {};
+    double stand_pos_[NUM_JOINTS] = {};
+
+    // Resting pose from stand_go2.cpp — start of the tanh stand-up interpolation.
+    const double stand_down_pos_[NUM_JOINTS] = {
+         0.0473455,  1.22187, -2.44375,
+        -0.0473455,  1.22187, -2.44375,
+         0.0473455,  1.22187, -2.44375,
+        -0.0473455,  1.22187, -2.44375,
+    };
+
+    double              running_time_     = 0.0;
+    std::atomic<bool>   stand_up_complete_{false};
+    bool                stand_phase_done_ = false;
 
     // FK model for base height estimation without SportModeState.
     mjModel* fk_model_             = nullptr;

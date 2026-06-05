@@ -51,11 +51,15 @@ BaseMPPI::~BaseMPPI() {
 }
 
 void BaseMPPI::sample_noise(int iter) {
+    const double t = (task_.n_iterations > 1)
+        ? static_cast<double>(iter) / (task_.n_iterations - 1) : 0.0;
+
     for (int s = 0; s < task_.n_samples; ++s)
-        for (int t = 0; t < task_.horizon; ++t)
+        for (int ti = 0; ti < task_.horizon; ++ti)
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double sigma = task_.noise_sigma_act[j];
-                int base = s * task_.horizon * NUM_MUSCLES + t * NUM_MUSCLES + 2 * j;
+                const double sigma = (1.0 - t) * task_.noise_sigma_act[j]
+                                   +        t  * task_.noise_sigma_final[j];
+                int base = s * task_.horizon * NUM_MUSCLES + ti * NUM_MUSCLES + 2 * j;
                 noise_[base]     = sigma * normal_(rng_);
                 noise_[base + 1] = sigma * normal_(rng_);
             }
@@ -100,14 +104,21 @@ void BaseMPPI::run_iterations(const RobotState& state)
         }
 
         // Softmin weights over min-max normalised costs.
-        double cmin  = *std::min_element(costs_.begin(), costs_.end());
-        double cmax  = *std::max_element(costs_.begin(), costs_.end());
+        // Exclude fall-penalty outliers (≥1e5) from cmax so one falling sample
+        // doesn't collapse all non-falling weights to near-uniform.
+        static constexpr double kFallThreshold = 1e5;
+        double cmin = *std::min_element(costs_.begin(), costs_.end());
+        double cmax = cmin;
+        for (int s = 0; s < task_.n_samples; ++s)
+            if (costs_[s] < kFallThreshold)
+                cmax = std::max(cmax, costs_[s]);
         double crange = cmax - cmin;
 
         std::vector<double> weights(task_.n_samples);
         double wsum = 0.0;
         for (int s = 0; s < task_.n_samples; ++s) {
-            double s_hat = (crange > 1e-12) ? (costs_[s] - cmin) / crange : 0.0;
+            double s_hat = (crange > 1e-12)
+                ? std::min((costs_[s] - cmin) / crange, 1.0) : 0.0;
             weights[s]   = std::exp(-s_hat / task_.lambda);
             wsum        += weights[s];
         }

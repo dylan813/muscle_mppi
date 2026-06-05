@@ -42,6 +42,10 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     if (t["noise_sigma_act"])
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
+    if (t["noise_sigma_final"])
+        load_doubles(t["noise_sigma_final"], cfg.noise_sigma_final, NUM_JOINTS, "noise_sigma_final");
+    else
+        std::copy(cfg.noise_sigma_act, cfg.noise_sigma_act + NUM_JOINTS, cfg.noise_sigma_final);
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();

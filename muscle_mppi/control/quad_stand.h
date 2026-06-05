@@ -7,7 +7,7 @@ struct StandCostWeights {
     double height      = 0.0;
     double orientation = 0.0;
     double posture     = 0.0;
-    double terminal    = 0.0;   // height error + tilt² at end of horizon
+    double terminal    = 0.0;   // L1 positional drift from start (vel_des=0, mirrors walk)
 };
 
 class QuadStand : public BaseMPPI {
@@ -19,7 +19,8 @@ public:
 
     const MuscleParams&    muscle_params() const { return muscle_; }
     const StandCostWeights& cost_weights() const { return cost_; }
-    double best_cost() const { return best_cost_; }
+    double best_cost()       const { return best_cost_; }
+    double trajectory_cost() const { return trajectory_cost_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
@@ -34,6 +35,9 @@ private:
     // parallel rollouts start from the same activation state.
     double rollout_act_[NUM_MUSCLES] = {};
     double real_act_[NUM_MUSCLES]    = {};
+
+    double start_pos_[2] = {};   // x,y at solve start — terminal cost anchor
+    double trajectory_cost_ = 1e9;
 
     double last_compute_ms_ = 20.0;
 
