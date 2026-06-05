@@ -214,11 +214,11 @@ void QuadStand::update(const RobotState& state, double tau_out[NUM_JOINTS])
         trajectory_ = std::move(new_traj);
 
         // Per-iteration diagnostic: trajectory mean and best cost so far.
-        double traj_mean = 0.0;
-        for (auto v : trajectory_) traj_mean += v;
-        traj_mean /= static_cast<double>(trajectory_.size());
-        std::printf("  iter %2d | best_cost=%8.2f | traj_mean=%.4f\n",
-                    iter, best_cost_, traj_mean);
+        // double traj_mean = 0.0;
+        // for (auto v : trajectory_) traj_mean += v;
+        // traj_mean /= static_cast<double>(trajectory_.size());
+        // std::printf("  iter %2d | best_cost=%8.2f | traj_mean=%.4f\n",
+        //             iter, best_cost_, traj_mean);
     }
 
     // Evaluate the refined trajectory_ without noise — true convergence signal.
