@@ -222,6 +222,8 @@ void QuadStand::update(const RobotState& state, double tau_out[NUM_JOINTS])
     }
 
     // Evaluate the refined trajectory_ without noise — true convergence signal.
+    // Also accumulates per-term cost breakdown for diagnostics.
+    struct { double height, orientation, posture, terminal; } breakdown{};
     trajectory_cost_ = [&]() -> double {
         mjData* d = data_[task_.n_samples];
         set_mj_state(d, state);
@@ -246,11 +248,30 @@ void QuadStand::update(const RobotState& state, double tau_out[NUM_JOINTS])
                 if (!std::isfinite(d->qpos[2]) || d->qpos[2] < 0.05)
                     return 1e6;
             }
-            total_cost += step_cost(d);
+            const double h_cost = cost_.height *
+                std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
+            const double qw = d->qpos[3];
+            const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
+            const double o_cost = cost_.orientation * angle * angle;
+            double p_cost = 0.0;
+            if (cost_.posture > 0.0)
+                for (int j = 0; j < NUM_JOINTS; ++j) {
+                    double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
+                    p_cost += cost_.posture * dq * dq;
+                }
+            breakdown.height      += h_cost;
+            breakdown.orientation += o_cost;
+            breakdown.posture     += p_cost;
+            total_cost += h_cost + o_cost + p_cost;
         }
-        total_cost += terminal_cost(d);
+        const double t_cost = terminal_cost(d);
+        breakdown.terminal = t_cost;
+        total_cost += t_cost;
         return std::isfinite(total_cost) ? total_cost : 1e6;
     }();
+    std::printf("  cost breakdown | h=%6.1f  orient=%6.1f  posture=%6.1f  terminal=%6.1f\n",
+                breakdown.height, breakdown.orientation,
+                breakdown.posture, breakdown.terminal);
 
     double act_cmd[NUM_MUSCLES];
     for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
