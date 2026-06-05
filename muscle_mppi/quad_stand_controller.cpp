@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <unistd.h>
 
@@ -43,6 +44,21 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
     return CRC32;
 }
 
+
+// ── Co-contraction line constants (nominal pose, per joint type) ──────────────
+// Interleaved layout: muscles [m1,m2] per joint, joint order hip/thigh/calf per leg.
+// FL1/FL2 at nominal pose (lce1=[0.901,0.878,1.000], lce2=[0.899,0.922,0.800]):
+//   hip:   FL1=0.758 FL2=0.752 → slope=1.008
+//   thigh: FL1=0.652 FL2=0.828 → slope=0.787
+//   calf:  FL1=1.000 FL2=0.154 → slope=6.494
+// Co-contraction line: act1 = base1 + α,  act2 = base2 + slope*α
+// Net torque is invariant to α; only joint stiffness changes.
+static constexpr double FL_RATIO[3]  = {1.008, 0.787, 6.494}; // FL1/FL2 per joint type
+// Sampling range [−neg, +pos] around the YAML gravity_act_ anchor (α=0).
+// Negative α reduces co-contraction; positive adds it.
+static constexpr double ALPHA_NEG[3] = {0.10,  0.10,  0.00};  // hip thigh calf
+static constexpr double ALPHA_POS[3] = {0.30,  0.40,  0.04};
+
 class QuadStandController {
 public:
     explicit QuadStandController(const std::string& task      = "stand",
@@ -54,6 +70,9 @@ public:
             kd_[j]        = cfg.muscle.kd_sim[j];
             stand_pos_[j] = cfg.nominal_pose[j];
         }
+        dt_            = cfg.dt;
+        muscle_params_ = cfg.muscle;
+        std::memcpy(gravity_act_, cfg.gravity_act, NUM_MUSCLES * sizeof(double));
 
         // FK model — used to estimate base height from joint angles when
         // SportModeState is unavailable (e.g. robot in low-level control mode).
@@ -104,7 +123,8 @@ public:
         control_thread_ = CreateRecurrentThreadEx(
             "qs_ctrl", UT_CPU_ID_NONE, 20000, &QuadStandController::ControlLoop, this);
 
-        mppi_thread_ = std::thread(&QuadStandController::MPPILoop, this);
+        // [VERIFY] MPPI disabled — using fixed gravity-compensation activations.
+        // mppi_thread_ = std::thread(&QuadStandController::MPPILoop, this);
     }
 
 private:
@@ -172,7 +192,8 @@ private:
     }
 
     void ControlLoop() {
-        if (!mppi_ready_.load()) {
+        if (!stand_up_complete_.load()) {
+            // Phase 1: kp/kd stand-up (identical to stand_go2.py).
             running_time_ += 0.02;
             const double phase = std::tanh(running_time_ / 1.2);
             for (int i = 0; i < NUM_JOINTS; ++i) {
@@ -183,16 +204,36 @@ private:
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
             }
-            if (!stand_up_complete_.load() && running_time_ >= 4.0) {
+            if (running_time_ >= 4.0) {
+                // Start from YAML gravity_act_ (α=0 on the co-contraction line).
+                std::memcpy(sampled_act_,      gravity_act_, NUM_MUSCLES * sizeof(double));
+                std::memcpy(fixed_activation_, gravity_act_, NUM_MUSCLES * sizeof(double));
+                last_sample_time_ = std::chrono::steady_clock::now();
                 stand_up_complete_.store(true);
-                std::cout << "Stand-up complete — waiting for MPPI convergence.\n";
+                print_sample(0.0, 0.0, 0.0, /*initial=*/true);
             }
         } else {
-            double tau_cmd[NUM_JOINTS];
-            {
-                std::lock_guard<std::mutex> lk(cmd_mutex_);
-                std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
+            // Phase 2: Hill torques from sampled co-contraction activations.
+            // Every 5 s, resample α along the co-contraction line and log the change.
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration<double>(now - last_sample_time_).count() >= 5.0) {
+                resample_cocontraction();
+                std::memcpy(fixed_activation_, sampled_act_, NUM_MUSCLES * sizeof(double));
+                last_sample_time_ = now;
             }
+
+            double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
+            {
+                std::lock_guard<std::mutex> lk(state_mutex_);
+                for (int j = 0; j < NUM_JOINTS; ++j) {
+                    q_cur[j]  = state_.q[j];
+                    dq_cur[j] = state_.dq[j];
+                }
+            }
+            double tau_cmd[NUM_JOINTS];
+            hill_compute_torques(sampled_act_, q_cur, dq_cur,
+                                 muscle_params_, dt_, fixed_activation_, tau_cmd);
+
             for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;
@@ -208,6 +249,58 @@ private:
         lowcmd_publisher_->Write(low_cmd_);
     }
 
+    // Print activation table (called at stand-up and on each resample).
+    void print_sample(double a_hip, double a_thigh, double a_calf, bool initial = false) {
+        if (initial)
+            std::printf("\n── Stand-up complete — initial activations (YAML anchor, α=0) ──\n");
+        else
+            std::printf("\n── Co-contraction resample  α=[hip %.3f  thigh %.3f  calf %.3f] ──\n",
+                        a_hip, a_thigh, a_calf);
+
+        // Compute implied static torques at the nominal pose (dq=0, FV=1).
+        double act_copy[NUM_MUSCLES], tau_nom[NUM_JOINTS], dq_z[NUM_JOINTS] = {};
+        std::memcpy(act_copy, sampled_act_, NUM_MUSCLES * sizeof(double));
+        hill_compute_torques(sampled_act_, stand_pos_, dq_z,
+                             muscle_params_, dt_, act_copy, tau_nom);
+
+        std::printf("  %-4s  hip[m1,m2]      thigh[m1,m2]    calf[m1,m2]"
+                    "     τ_hip   τ_thigh  τ_calf\n", "leg");
+        const char* lnames[] = {"FR", "FL", "RR", "RL"};
+        for (int leg = 0; leg < 4; ++leg) {
+            const int b = leg * 6;
+            std::printf("  %-4s  [%.3f, %.3f]  [%.3f, %.3f]  [%.3f, %.3f]"
+                        "   %+.3f  %+.3f  %+.3f\n",
+                        lnames[leg],
+                        sampled_act_[b],   sampled_act_[b+1],
+                        sampled_act_[b+2], sampled_act_[b+3],
+                        sampled_act_[b+4], sampled_act_[b+5],
+                        tau_nom[leg*3], tau_nom[leg*3+1], tau_nom[leg*3+2]);
+        }
+        std::fflush(stdout);
+    }
+
+    // Sample α per joint type from [−ALPHA_NEG, +ALPHA_POS] around the YAML anchor.
+    // act1_new = gravity_act1 + α,  act2_new = gravity_act2 + FL_RATIO*α
+    // Net torque at nominal pose is invariant; joint stiffness scales with |act1+act2|.
+    void resample_cocontraction() {
+        double alpha[3];
+        for (int jt = 0; jt < 3; ++jt) {
+            std::uniform_real_distribution<double> dist(-ALPHA_NEG[jt], ALPHA_POS[jt]);
+            alpha[jt] = dist(rng_);
+        }
+        for (int leg = 0; leg < 4; ++leg) {
+            for (int jt = 0; jt < 3; ++jt) {
+                const int idx = leg * 6 + jt * 2;
+                sampled_act_[idx]     = std::clamp(gravity_act_[idx]     + alpha[jt],
+                                                   0.0, 1.0);
+                sampled_act_[idx + 1] = std::clamp(gravity_act_[idx + 1] + FL_RATIO[jt]*alpha[jt],
+                                                   0.0, 1.0);
+            }
+        }
+        print_sample(alpha[0], alpha[1], alpha[2]);
+    }
+
+    /* [VERIFY] MPPILoop disabled — robot holds pose via fixed Hill activations.
     void MPPILoop() {
         std::cout << "QuadStand MPPI started.\n";
 
@@ -282,11 +375,25 @@ private:
             }
         }
     }
+    [VERIFY] end of commented-out MPPILoop */
 
-    static constexpr int CONVERGENCE_SOLVES = 40;
+    // static constexpr int CONVERGENCE_SOLVES = 40;  // [VERIFY] unused
 
     double kd_[NUM_JOINTS]        = {};
     double stand_pos_[NUM_JOINTS] = {};
+
+    // Gravity-compensation activations loaded from tasks.yaml → stand.gravity_act.
+    double gravity_act_[NUM_MUSCLES] = {};
+    // Current sampled activations (updated every 5 s by resample_cocontraction).
+    double sampled_act_[NUM_MUSCLES] = {};
+    // Running Hill filter state (pre-warmed to sampled_act_ on each resample).
+    double fixed_activation_[NUM_MUSCLES] = {};
+    MuscleParams muscle_params_;
+    double       dt_ = 0.002;
+
+    // Co-contraction sampling state.
+    std::mt19937 rng_{std::random_device{}()};
+    std::chrono::steady_clock::time_point last_sample_time_;
 
     // Resting pose from stand_go2.cpp — start of the tanh stand-up interpolation.
     const double stand_down_pos_[NUM_JOINTS] = {
@@ -298,7 +405,7 @@ private:
 
     double              running_time_     = 0.0;
     std::atomic<bool>   stand_up_complete_{false};
-    bool                stand_phase_done_ = false;
+    // bool             stand_phase_done_ = false;  // [VERIFY] unused
 
     // FK model for base height estimation without SportModeState.
     mjModel* fk_model_             = nullptr;
@@ -308,15 +415,15 @@ private:
     int      fk_n_feet_            = 0;
     bool     sport_valid_          = false;
 
-    std::atomic<bool> mppi_ready_{false};
+    // std::atomic<bool> mppi_ready_{false};  // [VERIFY] unused
 
     QuadStand mppi_;
 
     std::mutex state_mutex_;
     RobotState state_{};
 
-    std::mutex cmd_mutex_;
-    double     cached_tau_[NUM_JOINTS] = {};
+    // std::mutex cmd_mutex_;          // [VERIFY] unused
+    // double     cached_tau_[NUM_JOINTS] = {};  // [VERIFY] unused
 
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
 
@@ -325,7 +432,7 @@ private:
     ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> sportmode_subscriber_;
 
     ThreadPtr   control_thread_;
-    std::thread mppi_thread_;
+    // std::thread mppi_thread_;  // [VERIFY] unused
 };
 
 int main(int argc, const char** argv)

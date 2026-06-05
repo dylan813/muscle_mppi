@@ -46,6 +46,10 @@ struct TaskConfig {
     // in YAML it defaults to noise_sigma_act (no annealing).
     double noise_sigma_act[NUM_JOINTS]   = {};
     double noise_sigma_final[NUM_JOINTS] = {};
+
+    // Fixed activations for gravity-compensation verification (quad_stand_controller).
+    // Interleaved [m1, m2] per joint. Optional — defaults to zeros if absent from YAML.
+    double gravity_act[NUM_MUSCLES] = {};
 };
 
 struct MotionCommand {

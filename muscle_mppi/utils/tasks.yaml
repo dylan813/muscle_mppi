@@ -135,6 +135,15 @@ stand:
   noise_sigma_act:   [0.5, 0.5, 0.5,  0.5, 0.5, 0.5,  0.5, 0.5, 0.5,  0.5, 0.5, 0.5]
   noise_sigma_final: [0.1, 0.1, 0.1,  0.1, 0.1, 0.1,  0.1, 0.1, 0.1,  0.1, 0.1, 0.1]
 
+  # Fixed gravity-compensation activations for verification mode (no MPPI).
+  # Layout: interleaved [m1, m2] per joint across all 12 joints:
+  #   FR(hip,thigh,calf)  FL(hip,thigh,calf)  RR(hip,thigh,calf)  RL(hip,thigh,calf)
+  # Tune here and re-run without rebuilding.
+  gravity_act: [0.0, 0.0,  0.1, 0.15,  0.0, 0.670,
+                0.0, 0.0,  0.1, 0.15,  0.0, 0.670,
+                0.0, 0.0,  0.1, 0.15,  0.0, 0.670,
+                0.0, 0.0,  0.1, 0.15,  0.0, 0.670]
+
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------

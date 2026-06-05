@@ -47,6 +47,9 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     else
         std::copy(cfg.noise_sigma_act, cfg.noise_sigma_act + NUM_JOINTS, cfg.noise_sigma_final);
 
+    if (t["gravity_act"])
+        load_doubles(t["gravity_act"], cfg.gravity_act, NUM_MUSCLES, "gravity_act");
+
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();
     load_doubles(m["peak_force"], cfg.muscle.peak_force, NUM_JOINTS, "peak_force");
