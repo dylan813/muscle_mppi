@@ -110,24 +110,36 @@ def joint_stiffness(q, a1, a2, j, eps=1e-4):
     """Numerical muscle stiffness K = -dtau/dq at dq=0 (N·m/rad)."""
     return -(net_torque(q + eps, 0.0, a1, a2, j) - net_torque(q - eps, 0.0, a1, a2, j)) / (2.0 * eps)
 
-# ── required joint torques — contact-aware standing on ground ─────────────────
-# The robot's feet are constrained to the floor. At static equilibrium:
-#   qfrc_actuator = qfrc_bias - qfrc_constraint
-# qfrc_bias alone (floating) only captures distal-segment gravity (~0.3 N·m).
-# qfrc_constraint carries the contact forces projected to joint DOFs, which load
-# the calf joints significantly when supporting the full body weight.
+# ── required joint torques — simulate stand_go2.cpp PD stand-up ──────────────
+# A single mj_forward at nominal_pose gives wrong contact forces (no dynamic
+# contact buildup). Instead, replicate the stand_go2.cpp stand-up procedure so
+# contact forces develop naturally, then read equilibrium torques at steady state.
 model = mujoco.MjModel.from_xml_path(MODEL_PATH)
 data  = mujoco.MjData(model)
 
+# ctrl[] order is FR→FL→RR→RL (tasks.yaml / actuator order), but the model's
+# joint body-tree order is FL→FR→RL→RR.  Use model.actuator_trnid to get the
+# correct qpos/qvel address for each actuator rather than assuming 7+i.
+_jid     = [model.actuator_trnid[i, 0] for i in range(12)]
+_qa_adr  = [model.jnt_qposadr[j] for j in _jid]   # qpos index per actuator
+_dof_adr = [model.jnt_dofadr[j]  for j in _jid]   # qvel/qfrc index per actuator
+
+_yaml_nominal  = list(stand["nominal_pose"])        # save YAML values for comparison
+stand_up_pos   = list(_yaml_nominal)
+stand_down_pos = [ 0.0473455,  1.22187, -2.44375,
+                  -0.0473455,  1.22187, -2.44375,
+                   0.0473455,  1.22187, -2.44375,
+                  -0.0473455,  1.22187, -2.44375]
+
+# Place robot at stand_down_pos, feet flush with ground plane.
 data.qpos[:] = 0.0
-data.qpos[2] = 0.39
+data.qpos[2] = 0.5
 data.qpos[3] = 1.0
 for i in range(12):
-    data.qpos[7 + i] = nominal_pose[i]
+    data.qpos[_qa_adr[i]] = stand_down_pos[i]
 data.qvel[:] = 0.0
 mujoco.mj_forward(model, data)
 
-# Lower body so the lowest foot is flush with z=0 (ground plane).
 _foot_bids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, n)
               for n in ('FR_foot', 'FL_foot', 'RR_foot', 'RL_foot')]
 _foot_bids = [b for b in _foot_bids if b >= 0]
@@ -135,17 +147,44 @@ if _foot_bids:
     data.qpos[2] -= min(data.xpos[b, 2] for b in _foot_bids)
     mujoco.mj_forward(model, data)
 
-print(f"Body height: {data.qpos[2]:.4f} m  |  Active contacts: {data.ncon}")
+# Phase 1 (0-3 s): tanh stand-up, kp 20→50, kd=3.5  — identical to stand_go2.cpp.
+# Phase 2 (3-5 s): hold at stand_up_pos with kp=50 to settle to equilibrium.
+dt_sim  = 0.002
+kd_pd   = 3.5
+n_steps = int(5.0 / dt_sim)
+t       = 0.0
 
-tau_grav_all = (data.qfrc_bias[6:18] - data.qfrc_constraint[6:18]).copy()
+for _ in range(n_steps):
+    t += dt_sim
+    if t < 3.0:
+        phase = np.tanh(t / 1.2)
+        kp    = phase * 50.0 + (1.0 - phase) * 20.0
+    else:
+        phase = 1.0
+        kp    = 50.0
+    for i in range(12):
+        q_des = phase * stand_up_pos[i] + (1.0 - phase) * stand_down_pos[i]
+        data.ctrl[i] = kp * (q_des - data.qpos[_qa_adr[i]]) + kd_pd * (-data.qvel[_dof_adr[i]])
+    mujoco.mj_step(model, data)
+
+print(f"Steady-state body height: {data.qpos[2]:.4f} m  |  "
+      f"Max |dq|: {np.max(np.abs(data.qvel[6:18])):.5f} rad/s  |  "
+      f"Contacts: {data.ncon}")
+
+# Equilibrium torques in tasks.yaml / ctrl order (FR→FL→RR→RL).
+tau_grav_all = np.array([data.qfrc_bias[_dof_adr[i]] - data.qfrc_constraint[_dof_adr[i]]
+                         for i in range(12)])
+
+# Actual standing pose in tasks.yaml / ctrl order.
+nominal_pose = [data.qpos[_qa_adr[i]] for i in range(12)]
 
 _labels = ["FR_hip","FR_thigh","FR_calf",
            "FL_hip","FL_thigh","FL_calf",
            "RR_hip","RR_thigh","RR_calf",
            "RL_hip","RL_thigh","RL_calf"]
-print("Required joint torques at nominal standing pose (N·m):")
-for lbl, tg in zip(_labels, tau_grav_all):
-    print(f"  {lbl:12s}: {tg:+.4f}")
+print("Steady-state joint torques (N·m)  |  sim pose vs tasks.yaml nominal_pose (Δ rad):")
+for lbl, tg, qs, qn in zip(_labels, tau_grav_all, nominal_pose, _yaml_nominal):
+    print(f"  {lbl:12s}: tau={tg:+.4f}  sim={qs:+.5f}  yaml={qn:+.5f}  Δ={qs-qn:+.5f}")
 
 tau_grav = tau_grav_all[:3]   # FR leg is representative
 

@@ -139,10 +139,10 @@ stand:
   # Layout: interleaved [m1, m2] per joint across all 12 joints:
   #   FR(hip,thigh,calf)  FL(hip,thigh,calf)  RR(hip,thigh,calf)  RL(hip,thigh,calf)
   # Derived by plot_stiffness_cocontraction.py — lies on the constraint line FL1*a1-FL2*a2=C.
-  gravity_act: [0.5599, 0.4438,  0.6601, 0.2678,  0.0133, 0.9136,
-                0.4438, 0.5599,  0.6601, 0.2678,  0.0133, 0.9135,
-                0.5757, 0.4278,  0.6460, 0.2790,  0.0204, 0.8677,
-                0.4278, 0.5757,  0.6460, 0.2790,  0.0204, 0.8677]
+  gravity_act: [0.4901, 0.5118,  0.5, 0.4774,  0.0779, 0.6914,
+                0.5118, 0.4901,  0.5, 0.4774,  0.0779, 0.6914,
+                0.4804, 0.5314,  0.5, 0.4881,  0.0794, 0.7467,
+                0.5314, 0.4804,  0.5, 0.4881,  0.0794, 0.7467]
 
   muscle: *default_muscle_quad
 
