@@ -135,14 +135,14 @@ stand:
   noise_sigma_act:   [0.5, 0.5, 0.5,  0.5, 0.5, 0.5,  0.5, 0.5, 0.5,  0.5, 0.5, 0.5]
   noise_sigma_final: [0.1, 0.1, 0.1,  0.1, 0.1, 0.1,  0.1, 0.1, 0.1,  0.1, 0.1, 0.1]
 
-  # Fixed gravity-compensation activations for verification mode (no MPPI).
+  # Constraint-line anchor activations (midpoint of valid torque-balance segment).
   # Layout: interleaved [m1, m2] per joint across all 12 joints:
   #   FR(hip,thigh,calf)  FL(hip,thigh,calf)  RR(hip,thigh,calf)  RL(hip,thigh,calf)
-  # Tune here and re-run without rebuilding.
-  gravity_act: [0.0, 0.0,  0.1, 0.15,  0.0, 0.670,
-                0.0, 0.0,  0.1, 0.15,  0.0, 0.670,
-                0.0, 0.0,  0.1, 0.15,  0.0, 0.670,
-                0.0, 0.0,  0.1, 0.15,  0.0, 0.670]
+  # Derived by plot_stiffness_cocontraction.py — lies on the constraint line FL1*a1-FL2*a2=C.
+  gravity_act: [0.5599, 0.4438,  0.6601, 0.2678,  0.0133, 0.9136,
+                0.4438, 0.5599,  0.6601, 0.2678,  0.0133, 0.9135,
+                0.5757, 0.4278,  0.6460, 0.2790,  0.0204, 0.8677,
+                0.4278, 0.5757,  0.6460, 0.2790,  0.0204, 0.8677]
 
   muscle: *default_muscle_quad
 

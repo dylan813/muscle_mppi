@@ -5,7 +5,6 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
-#include <random>
 #include <thread>
 #include <unistd.h>
 
@@ -45,19 +44,6 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
 }
 
 
-// ── Co-contraction line constants (nominal pose, per joint type) ──────────────
-// Interleaved layout: muscles [m1,m2] per joint, joint order hip/thigh/calf per leg.
-// FL1/FL2 at nominal pose (lce1=[0.901,0.878,1.000], lce2=[0.899,0.922,0.800]):
-//   hip:   FL1=0.758 FL2=0.752 → slope=1.008
-//   thigh: FL1=0.652 FL2=0.828 → slope=0.787
-//   calf:  FL1=1.000 FL2=0.154 → slope=6.494
-// Co-contraction line: act1 = base1 + α,  act2 = base2 + slope*α
-// Net torque is invariant to α; only joint stiffness changes.
-static constexpr double FL_RATIO[3]  = {1.008, 0.787, 6.494}; // FL1/FL2 per joint type
-// Sampling range [−neg, +pos] around the YAML gravity_act_ anchor (α=0).
-// Negative α reduces co-contraction; positive adds it.
-static constexpr double ALPHA_NEG[3] = {0.10,  0.10,  0.00};  // hip thigh calf
-static constexpr double ALPHA_POS[3] = {0.30,  0.40,  0.04};
 
 class QuadStandController {
 public:
@@ -208,20 +194,10 @@ private:
                 // Start from YAML gravity_act_ (α=0 on the co-contraction line).
                 std::memcpy(sampled_act_,      gravity_act_, NUM_MUSCLES * sizeof(double));
                 std::memcpy(fixed_activation_, gravity_act_, NUM_MUSCLES * sizeof(double));
-                last_sample_time_ = std::chrono::steady_clock::now();
                 stand_up_complete_.store(true);
-                print_sample(0.0, 0.0, 0.0, /*initial=*/true);
+                print_sample();
             }
         } else {
-            // Phase 2: Hill torques from sampled co-contraction activations.
-            // Every 5 s, resample α along the co-contraction line and log the change.
-            auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration<double>(now - last_sample_time_).count() >= 5.0) {
-                resample_cocontraction();
-                std::memcpy(fixed_activation_, sampled_act_, NUM_MUSCLES * sizeof(double));
-                last_sample_time_ = now;
-            }
-
             double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
             {
                 std::lock_guard<std::mutex> lk(state_mutex_);
@@ -249,13 +225,8 @@ private:
         lowcmd_publisher_->Write(low_cmd_);
     }
 
-    // Print activation table (called at stand-up and on each resample).
-    void print_sample(double a_hip, double a_thigh, double a_calf, bool initial = false) {
-        if (initial)
-            std::printf("\n── Stand-up complete — initial activations (YAML anchor, α=0) ──\n");
-        else
-            std::printf("\n── Co-contraction resample  α=[hip %.3f  thigh %.3f  calf %.3f] ──\n",
-                        a_hip, a_thigh, a_calf);
+    void print_sample() {
+        std::printf("\n── Stand-up complete — activations (YAML gravity_act) ──\n");
 
         // Compute implied static torques at the nominal pose (dq=0, FV=1).
         double act_copy[NUM_MUSCLES], tau_nom[NUM_JOINTS], dq_z[NUM_JOINTS] = {};
@@ -279,26 +250,6 @@ private:
         std::fflush(stdout);
     }
 
-    // Sample α per joint type from [−ALPHA_NEG, +ALPHA_POS] around the YAML anchor.
-    // act1_new = gravity_act1 + α,  act2_new = gravity_act2 + FL_RATIO*α
-    // Net torque at nominal pose is invariant; joint stiffness scales with |act1+act2|.
-    void resample_cocontraction() {
-        double alpha[3];
-        for (int jt = 0; jt < 3; ++jt) {
-            std::uniform_real_distribution<double> dist(-ALPHA_NEG[jt], ALPHA_POS[jt]);
-            alpha[jt] = dist(rng_);
-        }
-        for (int leg = 0; leg < 4; ++leg) {
-            for (int jt = 0; jt < 3; ++jt) {
-                const int idx = leg * 6 + jt * 2;
-                sampled_act_[idx]     = std::clamp(gravity_act_[idx]     + alpha[jt],
-                                                   0.0, 1.0);
-                sampled_act_[idx + 1] = std::clamp(gravity_act_[idx + 1] + FL_RATIO[jt]*alpha[jt],
-                                                   0.0, 1.0);
-            }
-        }
-        print_sample(alpha[0], alpha[1], alpha[2]);
-    }
 
     /* [VERIFY] MPPILoop disabled — robot holds pose via fixed Hill activations.
     void MPPILoop() {
@@ -384,16 +335,11 @@ private:
 
     // Gravity-compensation activations loaded from tasks.yaml → stand.gravity_act.
     double gravity_act_[NUM_MUSCLES] = {};
-    // Current sampled activations (updated every 5 s by resample_cocontraction).
-    double sampled_act_[NUM_MUSCLES] = {};
-    // Running Hill filter state (pre-warmed to sampled_act_ on each resample).
+    double sampled_act_[NUM_MUSCLES]      = {};
     double fixed_activation_[NUM_MUSCLES] = {};
     MuscleParams muscle_params_;
     double       dt_ = 0.002;
 
-    // Co-contraction sampling state.
-    std::mt19937 rng_{std::random_device{}()};
-    std::chrono::steady_clock::time_point last_sample_time_;
 
     // Resting pose from stand_go2.cpp — start of the tanh stand-up interpolation.
     const double stand_down_pos_[NUM_JOINTS] = {

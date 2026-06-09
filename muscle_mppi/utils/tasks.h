@@ -50,6 +50,8 @@ struct TaskConfig {
     // Fixed activations for gravity-compensation verification (quad_stand_controller).
     // Interleaved [m1, m2] per joint. Optional — defaults to zeros if absent from YAML.
     double gravity_act[NUM_MUSCLES] = {};
+
+    // Co-contraction sampling parameters (per joint type: hip=0, thigh=1, calf=2).
 };
 
 struct MotionCommand {
