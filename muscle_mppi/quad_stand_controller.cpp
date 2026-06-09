@@ -175,7 +175,7 @@ private:
 
     void ControlLoop() {
         if (!stand_up_complete_.load()) {
-            // Phase 1: kp/kd stand-up (identical to stand_go2.py).
+            // Phase 1: tanh PD stand-up.
             running_time_ += 0.02;
             const double phase = std::tanh(running_time_ / 1.2);
             for (int i = 0; i < NUM_JOINTS; ++i) {
@@ -188,13 +188,22 @@ private:
             }
             if (running_time_ >= 4.0)
                 stand_up_complete_.store(true);
+        } else if (!mppi_ready_.load()) {
+            // Phase 2: hold at stand_pos_ with PD while MPPI warm-starts.
+            for (int i = 0; i < NUM_JOINTS; ++i) {
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = stand_pos_[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 50.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
+            }
         } else {
+            // Phase 3: MPPI Hill torques.
             double tau_cmd[NUM_JOINTS];
             {
                 std::lock_guard<std::mutex> lk(cmd_mutex_);
                 std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
             }
-
             for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;

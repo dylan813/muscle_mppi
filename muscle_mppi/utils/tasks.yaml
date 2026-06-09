@@ -124,8 +124,8 @@ stand:
   cost:
     height:      100.0
     orientation:  10.0
-    posture:       0.3
-    terminal:    500.0
+    posture:      10.0
+    terminal:    50.0
 
   vel_des: [0.0, 0.0, 0.0]
 
