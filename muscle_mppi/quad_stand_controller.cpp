@@ -56,9 +56,6 @@ public:
             kd_[j]        = cfg.muscle.kd_sim[j];
             stand_pos_[j] = cfg.nominal_pose[j];
         }
-        dt_            = cfg.dt;
-        muscle_params_ = cfg.muscle;
-        std::memcpy(gravity_act_, cfg.gravity_act, NUM_MUSCLES * sizeof(double));
 
         // FK model — used to estimate base height from joint angles when
         // SportModeState is unavailable (e.g. robot in low-level control mode).
@@ -109,8 +106,7 @@ public:
         control_thread_ = CreateRecurrentThreadEx(
             "qs_ctrl", UT_CPU_ID_NONE, 20000, &QuadStandController::ControlLoop, this);
 
-        // [VERIFY] MPPI disabled — using fixed gravity-compensation activations.
-        // mppi_thread_ = std::thread(&QuadStandController::MPPILoop, this);
+        mppi_thread_ = std::thread(&QuadStandController::MPPILoop, this);
     }
 
 private:
@@ -190,25 +186,14 @@ private:
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
             }
-            if (running_time_ >= 4.0) {
-                // Start from YAML gravity_act_ (α=0 on the co-contraction line).
-                std::memcpy(sampled_act_,      gravity_act_, NUM_MUSCLES * sizeof(double));
-                std::memcpy(fixed_activation_, gravity_act_, NUM_MUSCLES * sizeof(double));
+            if (running_time_ >= 4.0)
                 stand_up_complete_.store(true);
-                print_sample();
-            }
         } else {
-            double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
-            {
-                std::lock_guard<std::mutex> lk(state_mutex_);
-                for (int j = 0; j < NUM_JOINTS; ++j) {
-                    q_cur[j]  = state_.q[j];
-                    dq_cur[j] = state_.dq[j];
-                }
-            }
             double tau_cmd[NUM_JOINTS];
-            hill_compute_torques(sampled_act_, q_cur, dq_cur,
-                                 muscle_params_, dt_, fixed_activation_, tau_cmd);
+            {
+                std::lock_guard<std::mutex> lk(cmd_mutex_);
+                std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
+            }
 
             for (int i = 0; i < NUM_JOINTS; ++i) {
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
@@ -225,33 +210,6 @@ private:
         lowcmd_publisher_->Write(low_cmd_);
     }
 
-    void print_sample() {
-        std::printf("\n── Stand-up complete — activations (YAML gravity_act) ──\n");
-
-        // Compute implied static torques at the nominal pose (dq=0, FV=1).
-        double act_copy[NUM_MUSCLES], tau_nom[NUM_JOINTS], dq_z[NUM_JOINTS] = {};
-        std::memcpy(act_copy, sampled_act_, NUM_MUSCLES * sizeof(double));
-        hill_compute_torques(sampled_act_, stand_pos_, dq_z,
-                             muscle_params_, dt_, act_copy, tau_nom);
-
-        std::printf("  %-4s  hip[m1,m2]      thigh[m1,m2]    calf[m1,m2]"
-                    "     τ_hip   τ_thigh  τ_calf\n", "leg");
-        const char* lnames[] = {"FR", "FL", "RR", "RL"};
-        for (int leg = 0; leg < 4; ++leg) {
-            const int b = leg * 6;
-            std::printf("  %-4s  [%.3f, %.3f]  [%.3f, %.3f]  [%.3f, %.3f]"
-                        "   %+.3f  %+.3f  %+.3f\n",
-                        lnames[leg],
-                        sampled_act_[b],   sampled_act_[b+1],
-                        sampled_act_[b+2], sampled_act_[b+3],
-                        sampled_act_[b+4], sampled_act_[b+5],
-                        tau_nom[leg*3], tau_nom[leg*3+1], tau_nom[leg*3+2]);
-        }
-        std::fflush(stdout);
-    }
-
-
-    /* [VERIFY] MPPILoop disabled — robot holds pose via fixed Hill activations.
     void MPPILoop() {
         std::cout << "QuadStand MPPI started.\n";
 
@@ -319,26 +277,19 @@ private:
 
             if (!mppi_ready_.load() && stand_phase_done_
                     && solve_count >= CONVERGENCE_SOLVES) {
-                std::cout << "MPPI warm — handing over to Hill torques after "
+                std::cout << "MPPI ready — handing control loop to MPPI trajectory after "
                           << solve_count << " solves (avg "
                           << solve_sum_ms / solve_count << " ms)\n";
                 mppi_ready_.store(true);
             }
         }
     }
-    [VERIFY] end of commented-out MPPILoop */
 
-    // static constexpr int CONVERGENCE_SOLVES = 40;  // [VERIFY] unused
+    static constexpr int CONVERGENCE_SOLVES = 40;
 
     double kd_[NUM_JOINTS]        = {};
     double stand_pos_[NUM_JOINTS] = {};
 
-    // Gravity-compensation activations loaded from tasks.yaml → stand.gravity_act.
-    double gravity_act_[NUM_MUSCLES] = {};
-    double sampled_act_[NUM_MUSCLES]      = {};
-    double fixed_activation_[NUM_MUSCLES] = {};
-    MuscleParams muscle_params_;
-    double       dt_ = 0.002;
 
 
     // Resting pose from stand_go2.cpp — start of the tanh stand-up interpolation.
@@ -351,7 +302,7 @@ private:
 
     double              running_time_     = 0.0;
     std::atomic<bool>   stand_up_complete_{false};
-    // bool             stand_phase_done_ = false;  // [VERIFY] unused
+    bool                stand_phase_done_ = false;
 
     // FK model for base height estimation without SportModeState.
     mjModel* fk_model_             = nullptr;
@@ -361,15 +312,15 @@ private:
     int      fk_n_feet_            = 0;
     bool     sport_valid_          = false;
 
-    // std::atomic<bool> mppi_ready_{false};  // [VERIFY] unused
+    std::atomic<bool>   mppi_ready_{false};
 
     QuadStand mppi_;
 
     std::mutex state_mutex_;
     RobotState state_{};
 
-    // std::mutex cmd_mutex_;          // [VERIFY] unused
-    // double     cached_tau_[NUM_JOINTS] = {};  // [VERIFY] unused
+    std::mutex cmd_mutex_;
+    double     cached_tau_[NUM_JOINTS] = {};
 
     unitree_go::msg::dds_::LowCmd_ low_cmd_{};
 
@@ -378,7 +329,7 @@ private:
     ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> sportmode_subscriber_;
 
     ThreadPtr   control_thread_;
-    // std::thread mppi_thread_;  // [VERIFY] unused
+    std::thread mppi_thread_;
 };
 
 int main(int argc, const char** argv)

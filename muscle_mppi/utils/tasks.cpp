@@ -49,6 +49,12 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
 
     if (t["gravity_act"])
         load_doubles(t["gravity_act"], cfg.gravity_act, NUM_MUSCLES, "gravity_act");
+    if (t["posture_bias"])
+        load_doubles(t["posture_bias"], cfg.posture_bias, NUM_JOINTS, "posture_bias");
+    if (t["posture_FL1"])
+        load_doubles(t["posture_FL1"],  cfg.posture_FL1,  NUM_JOINTS, "posture_FL1");
+    if (t["posture_FL2"])
+        load_doubles(t["posture_FL2"],  cfg.posture_FL2,  NUM_JOINTS, "posture_FL2");
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();

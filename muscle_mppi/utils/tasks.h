@@ -47,9 +47,17 @@ struct TaskConfig {
     double noise_sigma_act[NUM_JOINTS]   = {};
     double noise_sigma_final[NUM_JOINTS] = {};
 
-    // Fixed activations for gravity-compensation verification (quad_stand_controller).
+    // Fixed activations for gravity compensation (quad_stand_controller).
     // Interleaved [m1, m2] per joint. Optional — defaults to zeros if absent from YAML.
     double gravity_act[NUM_MUSCLES] = {};
+
+    // Normalized gravity torque at the nominal pose: tau_grav/(-r*peak_force) - (P1-P2).
+    // Posture cost RHS: posture_FL1[j]*a1 - posture_FL2[j]*a2 = posture_bias[j].
+    double posture_bias[NUM_JOINTS] = {};
+
+    // Active force-length values at the nominal standing pose (fixed constraint-line slope).
+    double posture_FL1[NUM_JOINTS] = {};
+    double posture_FL2[NUM_JOINTS] = {};
 
     // Co-contraction sampling parameters (per joint type: hip=0, thigh=1, calf=2).
 };

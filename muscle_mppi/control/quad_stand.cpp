@@ -41,6 +41,10 @@ QuadStand::QuadStand(const std::string& task_name, const std::string& yaml_path)
         cost_.posture     = c["posture"]     ? c["posture"].as<double>()     : 0.0;
         cost_.terminal    = c["terminal"]    ? c["terminal"].as<double>()    : 0.0;
     }
+
+    std::copy(task_.posture_bias, task_.posture_bias + NUM_JOINTS, posture_bias_);
+    std::copy(task_.posture_FL1,  task_.posture_FL1  + NUM_JOINTS, posture_FL1_);
+    std::copy(task_.posture_FL2,  task_.posture_FL2  + NUM_JOINTS, posture_FL2_);
 }
 
 // ============================================================================
@@ -86,7 +90,7 @@ double QuadStand::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        total_cost += step_cost(d);
+        total_cost += step_cost(d, act_cmd);
     }
 
     total_cost += terminal_cost(d);
@@ -97,7 +101,7 @@ double QuadStand::rollout(int s, const RobotState& state)
 // Cost
 // ============================================================================
 
-double QuadStand::step_cost(const mjData* d)
+double QuadStand::step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES])
 {
     double cost = 0.0;
 
@@ -109,8 +113,10 @@ double QuadStand::step_cost(const mjData* d)
 
     if (cost_.posture > 0.0) {
         for (int j = 0; j < NUM_JOINTS; ++j) {
-            double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
-            cost += cost_.posture * dq * dq;
+            const double res = posture_FL1_[j] * act_cmd[2*j]
+                             - posture_FL2_[j] * act_cmd[2*j+1]
+                             - posture_bias_[j];
+            cost += cost_.posture * res * res;
         }
     }
 
@@ -254,11 +260,15 @@ void QuadStand::update(const RobotState& state, double tau_out[NUM_JOINTS])
             const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
             const double o_cost = cost_.orientation * angle * angle;
             double p_cost = 0.0;
-            if (cost_.posture > 0.0)
+            if (cost_.posture > 0.0) {
+                const double* act_t = trajectory_.data() + t * NUM_MUSCLES;
                 for (int j = 0; j < NUM_JOINTS; ++j) {
-                    double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
-                    p_cost += cost_.posture * dq * dq;
+                    const double res = posture_FL1_[j] * act_t[2*j]
+                                     - posture_FL2_[j] * act_t[2*j+1]
+                                     - posture_bias_[j];
+                    p_cost += cost_.posture * res * res;
                 }
+            }
             breakdown.height      += h_cost;
             breakdown.orientation += o_cost;
             breakdown.posture     += p_cost;

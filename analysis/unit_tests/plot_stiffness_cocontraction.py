@@ -257,6 +257,7 @@ for j, (name, color) in enumerate(zip(JOINT_NAMES, COLORS)):
 # are opposite for left (FL/RL) vs right (FR/RR) legs, requiring separate solutions.
 LEG_NAMES = ["FR", "FL", "RR", "RL"]
 new_ga    = [0.0] * 24
+new_gc    = [0.0] * 12   # gravity_C[j]: FL1*a1_anchor - FL2*a2_anchor per joint
 
 print("\n── Constraint-line anchors (per leg) ────────────────────────────────────")
 print(f"  {'Leg':3s}  {'Joint':6s}  {'a1':>7s}  {'a2':>7s}  {'K_anchor':>10s}  {'tau_grav':>9s}")
@@ -288,12 +289,15 @@ for leg in range(4):
         a1_anchor = np.clip((C_lj + FL2_lj * a2_anchor) / FL1_lj, 0.0, 1.0)
         K_anchor  = joint_stiffness(q_nom_lj, a1_anchor, a2_anchor, jt)
 
+        C_lj_val = FL1_lj * a1_anchor - FL2_lj * a2_anchor
+
         idx             = leg * 6 + jt * 2
         new_ga[idx]     = round(float(a1_anchor), 4)
         new_ga[idx + 1] = round(float(a2_anchor), 4)
+        new_gc[leg * 3 + jt] = round(float(C_lj_val), 6)
 
         print(f"  {LEG_NAMES[leg]:3s}  {JOINT_NAMES[jt]:6s}  "
-              f"{a1_anchor:7.4f}  {a2_anchor:7.4f}  {K_anchor:10.2f}  {tau_grav_lj:+9.4f}")
+              f"{a1_anchor:7.4f}  {a2_anchor:7.4f}  {K_anchor:10.2f}  {tau_grav_lj:+9.4f}  C={C_lj_val:+.6f}")
 
 print("\n  ── gravity_act (paste into tasks.yaml stand section) ──────────────")
 for leg in range(4):
@@ -307,6 +311,34 @@ for leg in range(4):
         print(f"               {vals},")
     else:
         print(f"               {vals}]")
+
+print("\n  ── posture_bias (paste into tasks.yaml stand section) ─────────────")
+print(f"  # Normalized gravity torque: tau_grav/(-r*peak_force) - (P1-P2), one per joint")
+lines = []
+for leg in range(4):
+    lines.append(f"{new_gc[leg*3]}, {new_gc[leg*3+1]}, {new_gc[leg*3+2]}")
+print(f"  posture_bias: [{lines[0]},  {lines[1]},")
+print(f"                 {lines[2]},  {lines[3]}]")
+
+# ── per-leg FL1/FL2 at nominal pose ───────────────────────────────────────────
+new_fl1 = [0.0] * 12
+new_fl2 = [0.0] * 12
+
+for leg in range(4):
+    for jt in range(3):
+        q_nom_lj   = nominal_pose[leg * 3 + jt]
+        lce1_lj, lce2_lj = lce_pair(q_nom_lj, jt)
+        new_fl1[leg * 3 + jt] = round(active_fl(lce1_lj, lce_min[jt], lce_max[jt]), 6)
+        new_fl2[leg * 3 + jt] = round(active_fl(lce2_lj, lce_min[jt], lce_max[jt]), 6)
+
+print("\n  ── posture_FL1 / posture_FL2 (paste into tasks.yaml stand section) ──")
+print("  # Active force-length values at the nominal standing pose (fixed slope).")
+fl1_lines = [f"{new_fl1[l*3]}, {new_fl1[l*3+1]}, {new_fl1[l*3+2]}" for l in range(4)]
+fl2_lines = [f"{new_fl2[l*3]}, {new_fl2[l*3+1]}, {new_fl2[l*3+2]}" for l in range(4)]
+print(f"  posture_FL1: [{fl1_lines[0]},  {fl1_lines[1]},")
+print(f"                {fl1_lines[2]},  {fl1_lines[3]}]")
+print(f"  posture_FL2: [{fl2_lines[0]},  {fl2_lines[1]},")
+print(f"                {fl2_lines[2]},  {fl2_lines[3]}]")
 
 
 # ── save figures ──────────────────────────────────────────────────────────────
