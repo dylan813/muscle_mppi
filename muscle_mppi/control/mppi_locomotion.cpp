@@ -58,6 +58,37 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     std::copy(task_.posture_bias, task_.posture_bias + NUM_JOINTS, posture_bias_);
     std::copy(task_.posture_FL1,  task_.posture_FL1  + NUM_JOINTS, posture_FL1_);
     std::copy(task_.posture_FL2,  task_.posture_FL2  + NUM_JOINTS, posture_FL2_);
+
+    // Seed trajectory_, best_traj_, real_act_, predicted_activation_ with the
+    // constraint-line midpoint activations — same role as RTWholeBodyMPPI's sampling_init.
+    // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
+    {
+        bool has_posture = false;
+        for (int j = 0; j < NUM_JOINTS; ++j)
+            if (posture_FL1_[j] > 1e-9) { has_posture = true; break; }
+
+        if (has_posture) {
+            double nominal[NUM_MUSCLES] = {};
+            for (int j = 0; j < NUM_JOINTS; ++j) {
+                const double FL1  = posture_FL1_[j];
+                const double FL2  = posture_FL2_[j];
+                const double bias = posture_bias_[j];
+                const double a2_lo  = (FL2 > 1e-9) ? std::max(0.0, -bias / FL2)        : 0.0;
+                const double a2_hi  = (FL2 > 1e-9) ? std::min(1.0, (FL1 - bias) / FL2) : 1.0;
+                const double a2_mid = 0.5 * (a2_lo + a2_hi);
+                const double a1_mid = std::clamp((bias + FL2 * a2_mid) / FL1, 0.0, 1.0);
+                nominal[2 * j]     = a1_mid;
+                nominal[2 * j + 1] = a2_mid;
+            }
+            for (int t = 0; t < task_.horizon; ++t)
+                for (int m = 0; m < NUM_MUSCLES; ++m) {
+                    trajectory_[t * NUM_MUSCLES + m] = nominal[m];
+                    best_traj_[t * NUM_MUSCLES + m]  = nominal[m];
+                }
+            std::memcpy(real_act_,             nominal, NUM_MUSCLES * sizeof(double));
+            std::memcpy(predicted_activation_, nominal, NUM_MUSCLES * sizeof(double));
+        }
+    }
 }
 
 // ============================================================================
