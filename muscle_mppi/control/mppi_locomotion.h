@@ -37,7 +37,7 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    double step_cost(const mjData* d);
+    double step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES]);
     double terminal_cost(const mjData* d);
 
     RobotState predict_state(const RobotState& state, int n_steps);
@@ -45,6 +45,10 @@ private:
     MuscleParams   muscle_;
     CostWeights    cost_;
     MotionCommand  cmd_;
+
+    double posture_bias_[NUM_JOINTS] = {};
+    double posture_FL1_[NUM_JOINTS]  = {};
+    double posture_FL2_[NUM_JOINTS]  = {};
 
     double last_compute_ms_ = 20.0;
 

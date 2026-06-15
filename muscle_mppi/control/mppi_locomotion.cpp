@@ -55,6 +55,9 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
     }
 
+    std::copy(task_.posture_bias, task_.posture_bias + NUM_JOINTS, posture_bias_);
+    std::copy(task_.posture_FL1,  task_.posture_FL1  + NUM_JOINTS, posture_FL1_);
+    std::copy(task_.posture_FL2,  task_.posture_FL2  + NUM_JOINTS, posture_FL2_);
 }
 
 // ============================================================================
@@ -99,7 +102,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        total_cost += step_cost(d);
+        total_cost += step_cost(d, act_cmd);
     }
 
     total_cost += terminal_cost(d);
@@ -111,7 +114,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 // Cost function
 // ============================================================================
 
-double MPPILocomotion::step_cost(const mjData* d)
+double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES])
 {
     const CostWeights& w = cost_;
     double cost = 0.0;
@@ -124,8 +127,10 @@ double MPPILocomotion::step_cost(const mjData* d)
 
     if (w.posture > 0.0) {
         for (int j = 0; j < NUM_JOINTS; ++j) {
-            double dq = d->qpos[act_qpos_adr_[j]] - task_.nominal_pose[j];
-            cost += w.posture * dq * dq;
+            const double res = posture_FL1_[j] * act_cmd[2*j]
+                             - posture_FL2_[j] * act_cmd[2*j+1]
+                             - posture_bias_[j];
+            cost += w.posture * res * res;
         }
     }
 
