@@ -30,23 +30,11 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         if (bid >= 0) { base_bid_ = bid; break; }
     }
 
-    // Find feet.
-    const char* foot_names[] = {"FL_foot", "FR_foot", "RL_foot", "RR_foot"};
-    n_feet_ = 0;
-    for (int i = 0; i < 4; ++i) {
-        int bid = mj_name2id(model_, mjOBJ_BODY, foot_names[i]);
-        if (bid >= 0) foot_body_ids_[n_feet_++] = bid;
-    }
-    if (n_feet_ == 0)
-        throw std::runtime_error("MPPILocomotion: no foot bodies found in model");
-
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
         const YAML::Node& c = root[task_name]["cost"];
         cost_.height        = c["height"]        ? c["height"].as<double>()        : 0.0;
         cost_.orientation   = c["orientation"]   ? c["orientation"].as<double>()   : 0.0;
-        cost_.contact_vel   = c["contact_vel"]   ? c["contact_vel"].as<double>()   : 0.0;
-        cost_.contact_force = c["contact_force"] ? c["contact_force"].as<double>() : 0.0;
         cost_.vel           = c["vel"]           ? c["vel"].as<double>()           : 0.0;
         if (c["vel_des"]) {
             cmd_.vx = c["vel_des"][0].as<double>();
@@ -167,47 +155,10 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
     }
 
     // contact_vel: iterate over all active contacts, penalize velocity at each contact point.
-    // This matches the paper's "vc contact velocities" — any body touching anything, not just feet.
-    if (w.contact_vel > 0.0) {
-        for (int ci = 0; ci < d->ncon; ++ci) {
-            const mjContact& con = d->contact[ci];
-            const int bid1 = model_->geom_bodyid[con.geom1];
-            const int bid2 = model_->geom_bodyid[con.geom2];
-            // penalize the non-world body (worldbody = 0)
-            const int bid = (bid1 != 0) ? bid1 : bid2;
-            if (bid == 0) continue;
-
-            mjtNum vel6[6];
-            mj_objectVelocity(model_, d, mjOBJ_BODY, bid, vel6, 0);
-            // vel6[0..2] = angular, vel6[3..5] = linear at body origin; correct to contact point
-            const double dx = con.pos[0] - d->xpos[3*bid + 0];
-            const double dy = con.pos[1] - d->xpos[3*bid + 1];
-            const double dz = con.pos[2] - d->xpos[3*bid + 2];
-            const double vx = vel6[3] + vel6[1]*dz - vel6[2]*dy;
-            const double vy = vel6[4] + vel6[2]*dx - vel6[0]*dz;
-            const double vz = vel6[5] + vel6[0]*dy - vel6[1]*dx;
-            cost += w.contact_vel * (std::abs(vx) + std::abs(vy) + std::abs(vz));
-        }
-    }
-
     // gait_ref: L1 deviation of activation commands from the cyclic gait reference.
-    // Weight is 0.0 by default — set cost.gait_ref in tasks.yaml to enable.
     if (w.gait_ref > 0.0) {
         for (int m = 0; m < NUM_MUSCLES; ++m)
             cost += w.gait_ref * std::abs(act_cmd[m] - gait_ref[m]);
-    }
-
-    // contact_force: per-foot aggregate force vs. reference (Eq. 17: ||fc - f0||_1)
-    if (w.contact_force > 0.0) {
-        for (int fi = 0; fi < n_feet_; ++fi) {
-            const int bid = foot_body_ids_[fi];
-            const double fx = d->cfrc_ext[6*bid + 3];
-            const double fy = d->cfrc_ext[6*bid + 4];
-            const double fz = d->cfrc_ext[6*bid + 5];
-            cost += w.contact_force * (std::abs(fx - f0_[fi][0])
-                                     + std::abs(fy - f0_[fi][1])
-                                     + std::abs(fz - f0_[fi][2]));
-        }
     }
 
     return cost;
@@ -281,18 +232,6 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         1, task_.horizon / 2);
 
     RobotState predicted = predict_state(state, n_skip);
-
-    // Capture f0 once from the first predicted state as the reference contact forces.
-    if (!f0_captured_) {
-        const mjData* dp = data_[task_.n_samples];
-        for (int fi = 0; fi < n_feet_; ++fi) {
-            const int bid = foot_body_ids_[fi];
-            f0_[fi][0] = dp->cfrc_ext[6*bid + 3];
-            f0_[fi][1] = dp->cfrc_ext[6*bid + 4];
-            f0_[fi][2] = dp->cfrc_ext[6*bid + 5];
-        }
-        f0_captured_ = true;
-    }
 
     // Warm-start: shift best_traj_ forward by n_skip steps.
     const int skip   = std::min(n_skip, task_.horizon - 1);

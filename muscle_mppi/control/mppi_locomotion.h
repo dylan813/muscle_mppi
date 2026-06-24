@@ -5,12 +5,10 @@
 #include "muscle.h"
 
 struct CostWeights {
-    double height        = 0.0;
-    double orientation   = 0.0;
-    double vel           = 0.0;   // body-frame velocity tracking (per step)
-    double contact_vel   = 0.0;
-    double contact_force = 0.0;
-    double gait_ref      = 0.0;   // activation gait reference (cost only, not prior)
+    double height      = 0.0;
+    double orientation = 0.0;
+    double vel         = 0.0;   // body-frame velocity tracking (per step)
+    double gait_ref    = 0.0;   // activation gait reference (cost only, not prior)
 };
 
 // Reference-free MPPI with direct per-muscle activation (co-contraction capable).
@@ -56,11 +54,5 @@ private:
     double real_act_[NUM_MUSCLES]            = {};
     double predicted_activation_[NUM_MUSCLES] = {};
 
-    int    base_bid_         = 1;
-    int    foot_body_ids_[4] = {};
-    int    n_feet_           = 0;
-
-    // Reference contact forces f0, captured from the first predicted state (Eq. 17).
-    double f0_[4][3]    = {};
-    bool   f0_captured_ = false;
+    int    base_bid_ = 1;
 };

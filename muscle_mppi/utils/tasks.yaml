@@ -166,7 +166,6 @@ walk:
     height:        100.0
     orientation:   10.0
     contact_vel:   0.5
-    contact_force: 0.05
     vel:           10.0      # body-frame velocity tracking (per step)
     vel_des:       [0.5, 0.0, 0.0]
 
