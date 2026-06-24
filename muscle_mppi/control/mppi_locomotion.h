@@ -1,15 +1,16 @@
 #pragma once
 
 #include "base_mppi.h"
+#include "gait_scheduler.h"
 #include "muscle.h"
 
 struct CostWeights {
     double height        = 0.0;
     double orientation   = 0.0;
-    double posture       = 0.0;
     double contact_vel   = 0.0;
     double contact_force = 0.0;
     double terminal      = 0.0;
+    double gait_ref      = 0.0;   // weight for activation gait reference (cost only, not prior)
 };
 
 // Reference-free MPPI with direct per-muscle activation (co-contraction capable).
@@ -37,18 +38,17 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    double step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES]);
+    double step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES],
+                     const double gait_ref[NUM_MUSCLES]);
     double terminal_cost(const mjData* d);
 
     RobotState predict_state(const RobotState& state, int n_steps);
 
     MuscleParams   muscle_;
     CostWeights    cost_;
+    GaitScheduler  gait_sched_;
     MotionCommand  cmd_;
 
-    double posture_bias_[NUM_JOINTS] = {};
-    double posture_FL1_[NUM_JOINTS]  = {};
-    double posture_FL2_[NUM_JOINTS]  = {};
 
     double last_compute_ms_ = 20.0;
 

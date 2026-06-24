@@ -28,6 +28,7 @@ struct MuscleParams {
 
 struct TaskConfig {
     std::string  model_path;
+    std::string  gait_path;   // optional: activation gait TSV for locomotion reference
     double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     MuscleParams muscle;

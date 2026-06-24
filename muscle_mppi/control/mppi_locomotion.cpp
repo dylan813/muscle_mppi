@@ -45,7 +45,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         const YAML::Node& c = root[task_name]["cost"];
         cost_.height        = c["height"]        ? c["height"].as<double>()        : 0.0;
         cost_.orientation   = c["orientation"]   ? c["orientation"].as<double>()   : 0.0;
-        cost_.posture       = c["posture"]       ? c["posture"].as<double>()       : 0.0;
         cost_.contact_vel   = c["contact_vel"]   ? c["contact_vel"].as<double>()   : 0.0;
         cost_.contact_force = c["contact_force"] ? c["contact_force"].as<double>() : 0.0;
         cost_.terminal      = c["terminal"]      ? c["terminal"].as<double>()      : 0.0;
@@ -55,9 +54,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
     }
 
-    std::copy(task_.posture_bias, task_.posture_bias + NUM_JOINTS, posture_bias_);
-    std::copy(task_.posture_FL1,  task_.posture_FL1  + NUM_JOINTS, posture_FL1_);
-    std::copy(task_.posture_FL2,  task_.posture_FL2  + NUM_JOINTS, posture_FL2_);
+    if (!task_.gait_path.empty())
+        gait_sched_.load(task_.gait_path);
 
     // Seed trajectory_, best_traj_, real_act_, predicted_activation_ with the
     // constraint-line midpoint activations — same role as RTWholeBodyMPPI's sampling_init.
@@ -65,14 +63,14 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     {
         bool has_posture = false;
         for (int j = 0; j < NUM_JOINTS; ++j)
-            if (posture_FL1_[j] > 1e-9) { has_posture = true; break; }
+            if (task_.posture_FL1[j] > 1e-9) { has_posture = true; break; }
 
         if (has_posture) {
             double nominal[NUM_MUSCLES] = {};
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double FL1  = posture_FL1_[j];
-                const double FL2  = posture_FL2_[j];
-                const double bias = posture_bias_[j];
+                const double FL1  = task_.posture_FL1[j];
+                const double FL2  = task_.posture_FL2[j];
+                const double bias = task_.posture_bias[j];
                 const double a2_lo  = (FL2 > 1e-9) ? std::max(0.0, -bias / FL2)        : 0.0;
                 const double a2_hi  = (FL2 > 1e-9) ? std::min(1.0, (FL1 - bias) / FL2) : 1.0;
                 const double a2_mid = 0.5 * (a2_lo + a2_hi);
@@ -133,7 +131,9 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
                 return 1e6;
         }
 
-        total_cost += step_cost(d, act_cmd);
+        double gait_ref[NUM_MUSCLES] = {};
+        if (gait_sched_.loaded()) gait_sched_.get_phase(t, gait_ref);
+        total_cost += step_cost(d, act_cmd, gait_ref);
     }
 
     total_cost += terminal_cost(d);
@@ -145,7 +145,8 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 // Cost function
 // ============================================================================
 
-double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES])
+double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES],
+                                  const double gait_ref[NUM_MUSCLES])
 {
     const CostWeights& w = cost_;
     double cost = 0.0;
@@ -155,15 +156,6 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
     const double qw    = d->qpos[3];
     const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
     cost += w.orientation * angle * angle;
-
-    if (w.posture > 0.0) {
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            const double res = posture_FL1_[j] * act_cmd[2*j]
-                             - posture_FL2_[j] * act_cmd[2*j+1]
-                             - posture_bias_[j];
-            cost += w.posture * res * res;
-        }
-    }
 
     // contact_vel: iterate over all active contacts, penalize velocity at each contact point.
     // This matches the paper's "vc contact velocities" — any body touching anything, not just feet.
@@ -187,6 +179,13 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
             const double vz = vel6[5] + vel6[0]*dy - vel6[1]*dx;
             cost += w.contact_vel * (std::abs(vx) + std::abs(vy) + std::abs(vz));
         }
+    }
+
+    // gait_ref: L1 deviation of activation commands from the cyclic gait reference.
+    // Weight is 0.0 by default — set cost.gait_ref in tasks.yaml to enable.
+    if (w.gait_ref > 0.0) {
+        for (int m = 0; m < NUM_MUSCLES; ++m)
+            cost += w.gait_ref * std::abs(act_cmd[m] - gait_ref[m]);
     }
 
     // contact_force: per-foot aggregate force vs. reference (Eq. 17: ||fc - f0||_1)
@@ -367,6 +366,8 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     hill_compute_torques(act_cmd, predicted.q, predicted.dq, muscle_, task_.dt,
                          predicted_activation_, tau_out);
     std::memcpy(real_act_, predicted_activation_, NUM_MUSCLES * sizeof(double));
+
+    gait_sched_.advance();
 
     last_compute_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - t_start).count();

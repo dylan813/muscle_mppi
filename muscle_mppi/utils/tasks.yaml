@@ -153,6 +153,7 @@ stand:
 # Locomotion task
 walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+  gait_path:     "gaits/MED/activation_gait_MED_0_1_10cm.tsv"
   height_target: 0.34
   n_samples:     64
   horizon:       45                  # 0.9 s at dt_step = 0.02 s
@@ -162,12 +163,11 @@ walk:
   dt:            0.002
 
   cost:
-    height:        100.0     # wh   (paper Table II: 1e2)
-    orientation:   10.0      # worient (paper: 10)
-    posture:       0.0       # wq   (paper: 0.0)
-    contact_vel:   0.5       # wc,vel (paper: 0.5)
-    contact_force: 0.05      # wc,force (paper: 5e-2)
-    terminal:      2500.0    # wH   (paper: 2.5e3)
+    height:        100.0
+    orientation:   10.0
+    contact_vel:   0.5
+    contact_force: 0.05      
+    terminal:      2500.0   
     vel_des:       [0.5, 0.0, 0.0]
 
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
