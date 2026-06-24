@@ -47,7 +47,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         cost_.orientation   = c["orientation"]   ? c["orientation"].as<double>()   : 0.0;
         cost_.contact_vel   = c["contact_vel"]   ? c["contact_vel"].as<double>()   : 0.0;
         cost_.contact_force = c["contact_force"] ? c["contact_force"].as<double>() : 0.0;
-        cost_.terminal      = c["terminal"]      ? c["terminal"].as<double>()      : 0.0;
+        cost_.vel           = c["vel"]           ? c["vel"].as<double>()           : 0.0;
         if (c["vel_des"]) {
             cmd_.vx = c["vel_des"][0].as<double>();
             cmd_.vy = c["vel_des"][1].as<double>();
@@ -136,8 +136,6 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         total_cost += step_cost(d, act_cmd, gait_ref);
     }
 
-    total_cost += terminal_cost(d);
-
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
@@ -156,6 +154,17 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
     const double qw    = d->qpos[3];
     const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
     cost += w.orientation * angle * angle;
+
+    if (w.vel > 0.0) {
+        // Project world-frame CoM velocity onto body x and y axes (R^T * v_world).
+        // xmat is row-major: columns are body axes expressed in world frame.
+        const double* xmat = d->xmat + base_bid_ * 9;
+        const double vx_body = d->qvel[0]*xmat[0] + d->qvel[1]*xmat[3] + d->qvel[2]*xmat[6];
+        const double vy_body = d->qvel[0]*xmat[1] + d->qvel[1]*xmat[4] + d->qvel[2]*xmat[7];
+        const double ex = vx_body - cmd_.vx;
+        const double ey = vy_body - cmd_.vy;
+        cost += w.vel * (ex*ex + ey*ey);
+    }
 
     // contact_vel: iterate over all active contacts, penalize velocity at each contact point.
     // This matches the paper's "vc contact velocities" — any body touching anything, not just feet.
@@ -202,15 +211,6 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
     }
 
     return cost;
-}
-
-double MPPILocomotion::terminal_cost(const mjData* d)
-{
-    const double horizon_secs = task_.horizon * task_.substeps * task_.dt;
-    const double px_target = start_pos_[0] + cmd_.vx * horizon_secs;
-    const double py_target = start_pos_[1] + cmd_.vy * horizon_secs;
-    return cost_.terminal * (std::abs(d->qpos[0] - px_target)
-                                 + std::abs(d->qpos[1] - py_target));
 }
 
 // ============================================================================
@@ -281,9 +281,6 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         1, task_.horizon / 2);
 
     RobotState predicted = predict_state(state, n_skip);
-
-    start_pos_[0] = predicted.pos[0];
-    start_pos_[1] = predicted.pos[1];
 
     // Capture f0 once from the first predicted state as the reference contact forces.
     if (!f0_captured_) {

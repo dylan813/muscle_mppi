@@ -7,10 +7,10 @@
 struct CostWeights {
     double height        = 0.0;
     double orientation   = 0.0;
+    double vel           = 0.0;   // body-frame velocity tracking (per step)
     double contact_vel   = 0.0;
     double contact_force = 0.0;
-    double terminal      = 0.0;
-    double gait_ref      = 0.0;   // weight for activation gait reference (cost only, not prior)
+    double gait_ref      = 0.0;   // activation gait reference (cost only, not prior)
 };
 
 // Reference-free MPPI with direct per-muscle activation (co-contraction capable).
@@ -40,7 +40,6 @@ private:
 
     double step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES],
                      const double gait_ref[NUM_MUSCLES]);
-    double terminal_cost(const mjData* d);
 
     RobotState predict_state(const RobotState& state, int n_steps);
 
@@ -56,8 +55,6 @@ private:
     // predicted_activation_ is propagated through latency compensation and seeds rollouts.
     double real_act_[NUM_MUSCLES]            = {};
     double predicted_activation_[NUM_MUSCLES] = {};
-
-    double start_pos_[2] = {};
 
     int    base_bid_         = 1;
     int    foot_body_ids_[4] = {};
