@@ -73,8 +73,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
                     trajectory_[t * NUM_MUSCLES + m] = nominal[m];
                     best_traj_[t * NUM_MUSCLES + m]  = nominal[m];
                 }
-            std::memcpy(real_act_,             nominal, NUM_MUSCLES * sizeof(double));
-            std::memcpy(predicted_activation_, nominal, NUM_MUSCLES * sizeof(double));
+            std::memcpy(real_act_, nominal, NUM_MUSCLES * sizeof(double));
         }
     }
 }
@@ -89,7 +88,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
     set_mj_state(d, state);
 
     double activation[NUM_MUSCLES];
-    std::memcpy(activation, predicted_activation_, NUM_MUSCLES * sizeof(double));
+    std::memcpy(activation, real_act_, NUM_MUSCLES * sizeof(double));
 
     const int stride  = task_.horizon * NUM_MUSCLES;
     double total_cost = 0.0;
@@ -169,54 +168,6 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
 }
 
 // ============================================================================
-// Predict state (latency compensation)
-// ============================================================================
-
-RobotState MPPILocomotion::predict_state(const RobotState& state, int n_steps)
-{
-    mjData* d = data_[task_.n_samples];
-    set_mj_state(d, state);
-
-    double activation[NUM_MUSCLES];
-    std::memcpy(activation, real_act_, NUM_MUSCLES * sizeof(double));
-
-    for (int t = 0; t < n_steps; ++t) {
-        double act_cmd[NUM_MUSCLES];
-        for (int m = 0; m < NUM_MUSCLES; ++m)
-            act_cmd[m] = best_traj_[t * NUM_MUSCLES + m];
-
-        double tau_out[NUM_JOINTS];
-        for (int sub = 0; sub < task_.substeps; ++sub) {
-            double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                q_cur[j]  = d->qpos[act_qpos_adr_[j]];
-                dq_cur[j] = d->qvel[act_qvel_adr_[j]];
-            }
-            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
-            for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
-            for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
-            mj_step(model_, d);
-        }
-    }
-
-    RobotState predicted;
-    if (has_freejoint_) {
-        predicted.pos[0]  = d->qpos[0]; predicted.pos[1]  = d->qpos[1]; predicted.pos[2]  = d->qpos[2];
-        predicted.quat[0] = d->qpos[3]; predicted.quat[1] = d->qpos[4];
-        predicted.quat[2] = d->qpos[5]; predicted.quat[3] = d->qpos[6];
-        predicted.vel[0]  = d->qvel[0]; predicted.vel[1]  = d->qvel[1]; predicted.vel[2]  = d->qvel[2];
-        predicted.gyro[0] = d->qvel[3]; predicted.gyro[1] = d->qvel[4]; predicted.gyro[2] = d->qvel[5];
-    }
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        predicted.q[j]  = d->qpos[act_qpos_adr_[j]];
-        predicted.dq[j] = d->qvel[act_qvel_adr_[j]];
-    }
-    predicted.valid = true;
-    std::memcpy(predicted_activation_, activation, NUM_MUSCLES * sizeof(double));
-    return predicted;
-}
-
-// ============================================================================
 // Main solve
 // ============================================================================
 
@@ -230,23 +181,15 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         return;
     }
 
-    const double dt_step = task_.substeps * task_.dt;
-    const int n_skip = std::clamp(
-        static_cast<int>(std::round(last_compute_ms_ * 1e-3 / dt_step)),
-        1, task_.horizon / 2);
-
-    RobotState predicted = predict_state(state, n_skip);
-
-    // Warm-start: shift weighted-average trajectory_ forward by n_skip steps.
-    const int skip   = std::min(n_skip, task_.horizon - 1);
+    // Warm-start: shift trajectory_ forward by 1 step (mirrors RTWholeBodyMPPI).
     const int stride = task_.horizon * NUM_MUSCLES;
     std::vector<double> shifted(stride);
-    for (int t = 0; t < task_.horizon - skip; ++t)
+    for (int t = 0; t < task_.horizon - 1; ++t)
         for (int m = 0; m < NUM_MUSCLES; ++m)
-            shifted[t * NUM_MUSCLES + m] = trajectory_[(t + skip) * NUM_MUSCLES + m];
-    for (int t = task_.horizon - skip; t < task_.horizon; ++t)
-        for (int m = 0; m < NUM_MUSCLES; ++m)
-            shifted[t * NUM_MUSCLES + m] = trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
+            shifted[t * NUM_MUSCLES + m] = trajectory_[(t + 1) * NUM_MUSCLES + m];
+    for (int m = 0; m < NUM_MUSCLES; ++m)
+        shifted[(task_.horizon - 1) * NUM_MUSCLES + m] =
+            trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
     trajectory_ = shifted;
 
     const int N = task_.n_iterations;
@@ -257,7 +200,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
 
         #pragma omp parallel for schedule(dynamic)
         for (int s = 0; s < task_.n_samples; ++s)
-            costs_[s] = rollout(s, predicted);
+            costs_[s] = rollout(s, state);
 
         // Track best sample.
         for (int s = 0; s < task_.n_samples; ++s) {
@@ -304,9 +247,9 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     static constexpr int LOG_INTERVAL = 50;
     if (++log_counter_ % LOG_INTERVAL == 0) {
         mjData* dl = data_[task_.n_samples];
-        set_mj_state(dl, predicted);
+        set_mj_state(dl, state);
         double act_log[NUM_MUSCLES];
-        std::memcpy(act_log, predicted_activation_, NUM_MUSCLES * sizeof(double));
+        std::memcpy(act_log, real_act_, NUM_MUSCLES * sizeof(double));
 
         double c_height = 0, c_orient = 0, c_vel = 0, c_gait = 0;
 
@@ -354,12 +297,10 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
                     c_height, c_orient, c_vel, c_gait, best_cost_, last_compute_ms_);
     }
 
-    // Output: execute step 0 of best trajectory from predicted state.
+    // Output: execute step 0 of best trajectory from current state.
     double act_cmd[NUM_MUSCLES];
     for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
-    hill_compute_torques(act_cmd, predicted.q, predicted.dq, muscle_, task_.dt,
-                         predicted_activation_, tau_out);
-    std::memcpy(real_act_, predicted_activation_, NUM_MUSCLES * sizeof(double));
+    hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
 
     gait_sched_.advance();
 

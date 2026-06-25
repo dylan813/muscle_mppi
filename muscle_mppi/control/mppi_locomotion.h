@@ -32,6 +32,7 @@ public:
     const MotionCommand& command() const { return cmd_; }
 
     const MuscleParams& muscle_params() const { return muscle_; }
+    const TaskConfig&   task_ref()      const { return task_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
@@ -39,21 +40,17 @@ private:
     double step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES],
                      const double gait_ref[NUM_MUSCLES]);
 
-    RobotState predict_state(const RobotState& state, int n_steps);
-
     MuscleParams   muscle_;
     CostWeights    cost_;
     GaitScheduler  gait_sched_;
     MotionCommand  cmd_;
 
-
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;
 
-    // real_act_ tracks the activation state at the most recently issued command.
-    // predicted_activation_ is propagated through latency compensation and seeds rollouts.
-    double real_act_[NUM_MUSCLES]            = {};
-    double predicted_activation_[NUM_MUSCLES] = {};
+    // Tracks the activation state at the most recently issued command.
+    // Seeds rollouts — updated each update() after hill_compute_torques.
+    double real_act_[NUM_MUSCLES] = {};
 
     int    base_bid_ = 1;
 };

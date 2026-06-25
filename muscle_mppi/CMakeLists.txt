@@ -35,6 +35,15 @@ add_executable(quad_stand_controller
 )
 target_link_libraries(quad_stand_controller ${COMMON_LIBS})
 
+# --- Standalone MuJoCo simulation test (no DDS, no real-time constraint) ---
+add_executable(mppi_sim
+    mppi_sim.cpp
+    control/base_mppi.cpp
+    control/mppi_locomotion.cpp
+    utils/tasks.cpp
+)
+target_link_libraries(mppi_sim ${COMMON_LIBS})
+
 # --- Single-leg reach controller (direct per-muscle, 2 per joint) ---
 # NUM_MUSCLES=6: independent agonist/antagonist command per joint,
 add_executable(single_leg_controller

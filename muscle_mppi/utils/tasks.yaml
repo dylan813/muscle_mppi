@@ -165,7 +165,7 @@ walk:
   beta2:         1.0    # horizon-level noise decay   (larger = slower)
 
   cost:
-    height:        2000.0
+    height:        5000.0
     orientation:   500.0
     vel:           500.0      # body-frame velocity tracking (per step)
     gait_ref:      300.0       # quadratic activation deviation from gait reference
