@@ -1,6 +1,7 @@
 #include "mppi_locomotion.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <chrono>
@@ -36,6 +37,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         cost_.height        = c["height"]        ? c["height"].as<double>()        : 0.0;
         cost_.orientation   = c["orientation"]   ? c["orientation"].as<double>()   : 0.0;
         cost_.vel           = c["vel"]           ? c["vel"].as<double>()           : 0.0;
+        cost_.gait_ref      = c["gait_ref"]      ? c["gait_ref"].as<double>()      : 0.0;
         if (c["vel_des"]) {
             cmd_.vx = c["vel_des"][0].as<double>();
             cmd_.vy = c["vel_des"][1].as<double>();
@@ -296,6 +298,60 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         }
         for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
         trajectory_ = std::move(new_traj);
+    }
+
+    // Cost breakdown logging — runs once per second (every 50 updates at 50 Hz).
+    static constexpr int LOG_INTERVAL = 50;
+    if (++log_counter_ % LOG_INTERVAL == 0) {
+        mjData* dl = data_[task_.n_samples];
+        set_mj_state(dl, predicted);
+        double act_log[NUM_MUSCLES];
+        std::memcpy(act_log, predicted_activation_, NUM_MUSCLES * sizeof(double));
+
+        double c_height = 0, c_orient = 0, c_vel = 0, c_gait = 0;
+
+        for (int t = 0; t < task_.horizon; ++t) {
+            double cmd[NUM_MUSCLES];
+            for (int m = 0; m < NUM_MUSCLES; ++m) cmd[m] = best_traj_[t * NUM_MUSCLES + m];
+
+            for (int sub = 0; sub < task_.substeps; ++sub) {
+                double q_l[NUM_JOINTS], dq_l[NUM_JOINTS];
+                for (int j = 0; j < NUM_JOINTS; ++j) {
+                    q_l[j]  = dl->qpos[act_qpos_adr_[j]];
+                    dq_l[j] = dl->qvel[act_qvel_adr_[j]];
+                }
+                double tau_l[NUM_JOINTS];
+                hill_compute_torques(cmd, q_l, dq_l, muscle_, task_.dt, act_log, tau_l);
+                for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
+                for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[JOINT_OFFSET + j] = tau_l[j];
+                mj_step(model_, dl);
+            }
+
+            c_height += cost_.height * std::abs(dl->xpos[base_bid_*3+2] - height_target_);
+
+            const double qw = dl->qpos[3];
+            const double ang = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
+            c_orient += cost_.orientation * ang * ang;
+
+            if (cost_.vel > 0.0) {
+                const double* xmat = dl->xmat + base_bid_ * 9;
+                const double vx = dl->qvel[0]*xmat[0] + dl->qvel[1]*xmat[3] + dl->qvel[2]*xmat[6];
+                const double vy = dl->qvel[0]*xmat[1] + dl->qvel[1]*xmat[4] + dl->qvel[2]*xmat[7];
+                c_vel += cost_.vel * ((vx - cmd_.vx)*(vx - cmd_.vx) + (vy - cmd_.vy)*(vy - cmd_.vy));
+            }
+
+            if (cost_.gait_ref > 0.0 && gait_sched_.loaded()) {
+                double gref[NUM_MUSCLES] = {};
+                gait_sched_.get_phase(t, gref);
+                for (int m = 0; m < NUM_MUSCLES; ++m) {
+                    const double e = cmd[m] - gref[m];
+                    c_gait += cost_.gait_ref * e * e;
+                }
+            }
+        }
+
+        std::printf("[cost] height=%6.1f  orient=%6.1f  vel=%6.1f  gait=%6.1f  | best=%6.1f  dt=%.1fms\n",
+                    c_height, c_orient, c_vel, c_gait, best_cost_, last_compute_ms_);
     }
 
     // Output: execute step 0 of best trajectory from predicted state.

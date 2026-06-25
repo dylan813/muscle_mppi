@@ -48,6 +48,7 @@ private:
 
 
     double last_compute_ms_ = 20.0;
+    int    log_counter_     = 0;
 
     // real_act_ tracks the activation state at the most recently issued command.
     // predicted_activation_ is propagated through latency compensation and seeds rollouts.

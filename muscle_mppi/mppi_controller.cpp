@@ -116,10 +116,14 @@ private:
 
     void ControlLoop() {
         if (!mppi_ready_.load()) {
-            // Hold all joints at nominal stance with PD until MPPI has converged.
+            // Smooth stand-up: tanh ramp over 3 s, mirrors stand_go2.cpp exactly.
+            running_time_ += 0.02;
+            const double phase = std::tanh(running_time_ / 1.2);
+            const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = stand_pos_[i];
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 50.0;
+                const double q_des = phase * stand_pos_[i] + (1.0 - phase) * stand_down_pos_[i];
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = q_des;
+                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = kp;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
                 low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
@@ -199,13 +203,20 @@ private:
         2.0, 3.5, 3.5,   // RL
     };
 
-    // Nominal standing pose held during MPPI convergence.
+    // Stand-up poses and ramp timer — matches stand_go2.cpp exactly.
+    const double stand_down_pos_[NUM_JOINTS] = {
+         0.0473455,  1.22187, -2.44375,
+        -0.0473455,  1.22187, -2.44375,
+         0.0473455,  1.22187, -2.44375,
+        -0.0473455,  1.22187, -2.44375,
+    };
     const double stand_pos_[NUM_JOINTS] = {
         0.0, 0.67, -1.3,   // FR
         0.0, 0.67, -1.3,   // FL
         0.0, 0.67, -1.3,   // RR
         0.0, 0.67, -1.3,   // RL
     };
+    double running_time_ = 0.0;
 
     std::atomic<bool> mppi_ready_{false};
 
