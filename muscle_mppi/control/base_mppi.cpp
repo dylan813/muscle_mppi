@@ -51,18 +51,26 @@ BaseMPPI::~BaseMPPI() {
 }
 
 void BaseMPPI::sample_noise(int iter) {
-    const double t = (task_.n_iterations > 1)
-        ? static_cast<double>(iter) / (task_.n_iterations - 1) : 0.0;
+    const int    I   = task_.n_iterations;
+    const int    H   = task_.horizon;
+    const double b1  = task_.beta1;
+    const double b2  = task_.beta2;
 
     for (int s = 0; s < task_.n_samples; ++s)
-        for (int ti = 0; ti < task_.horizon; ++ti)
+        for (int ti = 0; ti < H; ++ti) {
+            // Eq. 8: anneal factor — decays with iteration (exploitation) and
+            // grows with horizon step (far-future exploration).
+            const double anneal = std::exp(
+                - static_cast<double>(iter) / (b1 * I)
+                - static_cast<double>(H - ti) / (b2 * H)
+            );
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double sigma = (1.0 - t) * task_.noise_sigma_act[j]
-                                   +        t  * task_.noise_sigma_final[j];
-                int base = s * task_.horizon * NUM_MUSCLES + ti * NUM_MUSCLES + 2 * j;
+                const double sigma = task_.noise_sigma_act[j] * anneal;
+                const int base = s * H * NUM_MUSCLES + ti * NUM_MUSCLES + 2 * j;
                 noise_[base]     = sigma * normal_(rng_);
                 noise_[base + 1] = sigma * normal_(rng_);
             }
+        }
 }
 
 void BaseMPPI::warm_start(int n_skip)

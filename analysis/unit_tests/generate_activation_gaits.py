@@ -40,7 +40,7 @@ import mujoco
 # ── paths ─────────────────────────────────────────────────────────────────────
 _DIR       = os.path.dirname(os.path.abspath(__file__))
 YAML_PATH  = os.path.join(_DIR,  "../../muscle_mppi/utils/tasks.yaml")
-MODEL_PATH = os.path.join(_DIR,  "../../unitree_mujoco/unitree_robots/go2/scene.xml")
+MODEL_PATH = os.path.join(_DIR,  "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml")
 OUT_DIR    = os.path.join(_DIR,  "../../muscle_mppi/gaits")
 GAIT_DIR   = os.path.join(_DIR,  "../../../RTWholeBodyMPPI/legged_mppi/"
                                   "whole_body_mppi/control/gait_scheduler/gaits")

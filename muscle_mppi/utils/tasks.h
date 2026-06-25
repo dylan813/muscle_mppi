@@ -48,6 +48,12 @@ struct TaskConfig {
     double noise_sigma_act[NUM_JOINTS]   = {};
     double noise_sigma_final[NUM_JOINTS] = {};
 
+    // Diffusion-inspired noise annealing (paper Eq. 8).
+    // beta1: iteration-level decay — larger = slower annealing across iterations.
+    // beta2: horizon-level decay  — larger = slower decay toward near-term steps.
+    double beta1 = 1.0;
+    double beta2 = 1.0;
+
     // Fixed activations for gravity compensation (quad_stand_controller).
     // Interleaved [m1, m2] per joint. Optional — defaults to zeros if absent from YAML.
     double gravity_act[NUM_MUSCLES] = {};

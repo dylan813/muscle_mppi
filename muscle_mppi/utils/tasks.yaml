@@ -156,24 +156,26 @@ walk:
   gait_path:     "../gaits/FAST/activation_gait_FAST_0_0_10cm.tsv"
   height_target: 0.34
   n_samples:     32
-  horizon:       45                  # 0.9 s at dt_step = 0.02 s (~two gait cycles)
+  horizon:       45
   substeps:      10
   n_iterations:  3
   lambda:        0.1
   dt:            0.002
+  beta1:         1.0    # iteration-level noise decay (larger = slower)
+  beta2:         1.0    # horizon-level noise decay   (larger = slower)
 
   cost:
     height:        2000.0
     orientation:   500.0
     vel:           500.0      # body-frame velocity tracking (per step)
-    gait_ref:      200.0       # quadratic activation deviation from gait reference
+    gait_ref:      300.0       # quadratic activation deviation from gait reference
     vel_des:       [0.0, 0.0, 0.0]
 
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 
   # Per-joint activation noise (applied independently to both muscles of each pair).
-  noise_sigma_act: [0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05,  0.05, 0.05, 0.05]
+  noise_sigma_act: [0.05, 0.1, 0.1,  0.05, 0.1, 0.1,  0.05, 0.1, 0.1,  0.05, 0.1, 0.1]
 
   posture_bias: [-0.017926, -0.080121, -0.095902,  0.017926, -0.080121, -0.095902,
                  -0.048039, -0.09051,  -0.151635,  0.048039, -0.09051,  -0.151635]
