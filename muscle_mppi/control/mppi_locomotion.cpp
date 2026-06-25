@@ -61,7 +61,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
                 const double bias = task_.posture_bias[j];
                 const double a2_lo  = (FL2 > 1e-9) ? std::max(0.0, -bias / FL2)        : 0.0;
                 const double a2_hi  = (FL2 > 1e-9) ? std::min(1.0, (FL1 - bias) / FL2) : 1.0;
-                const double a2_mid = 0.5 * (a2_lo + a2_hi);
+                const double a2_mid = a2_lo + 0.75 * (a2_hi - a2_lo);
                 const double a1_mid = std::clamp((bias + FL2 * a2_mid) / FL1, 0.0, 1.0);
                 nominal[2 * j]     = a1_mid;
                 nominal[2 * j + 1] = a2_mid;

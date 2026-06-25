@@ -32,7 +32,8 @@ with open(YAML_PATH) as f:
 
 muscle       = cfg["default_muscle_quad"]
 stand        = cfg["stand"]
-nominal_pose = stand["nominal_pose"]   # 12 values: FR(hip,thigh,calf) FL RR RL
+walk         = cfg["walk"]
+nominal_pose = walk["nominal_pose"]    # 12 values: FR(hip,thigh,calf) FL RR RL
 
 lce_min    = muscle["lce_min"][:3]
 lce_max    = muscle["lce_max"][:3]
@@ -124,7 +125,7 @@ _jid     = [model.actuator_trnid[i, 0] for i in range(12)]
 _qa_adr  = [model.jnt_qposadr[j] for j in _jid]   # qpos index per actuator
 _dof_adr = [model.jnt_dofadr[j]  for j in _jid]   # qvel/qfrc index per actuator
 
-_yaml_nominal  = list(stand["nominal_pose"])        # save YAML values for comparison
+_yaml_nominal  = list(walk["nominal_pose"])          # save YAML values for comparison
 stand_up_pos   = list(_yaml_nominal)
 stand_down_pos = [ 0.0473455,  1.22187, -2.44375,
                   -0.0473455,  1.22187, -2.44375,
@@ -285,7 +286,7 @@ for leg in range(4):
         if a2_lo > a2_hi:
             a2_lo, a2_hi = 0.0, 0.0
 
-        a2_anchor = (a2_lo + a2_hi) / 2.0
+        a2_anchor = a2_lo + 0.75 * (a2_hi - a2_lo)
         a1_anchor = np.clip((C_lj + FL2_lj * a2_anchor) / FL1_lj, 0.0, 1.0)
         K_anchor  = joint_stiffness(q_nom_lj, a1_anchor, a2_anchor, jt)
 
