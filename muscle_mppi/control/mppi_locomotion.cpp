@@ -157,8 +157,10 @@ double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCL
     // contact_vel: iterate over all active contacts, penalize velocity at each contact point.
     // gait_ref: L1 deviation of activation commands from the cyclic gait reference.
     if (w.gait_ref > 0.0) {
-        for (int m = 0; m < NUM_MUSCLES; ++m)
-            cost += w.gait_ref * std::abs(act_cmd[m] - gait_ref[m]);
+        for (int m = 0; m < NUM_MUSCLES; ++m) {
+            const double e = act_cmd[m] - gait_ref[m];
+            cost += w.gait_ref * e * e;
+        }
     }
 
     return cost;
