@@ -237,16 +237,16 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
 
     RobotState predicted = predict_state(state, n_skip);
 
-    // Warm-start: shift best_traj_ forward by n_skip steps.
+    // Warm-start: shift weighted-average trajectory_ forward by n_skip steps.
     const int skip   = std::min(n_skip, task_.horizon - 1);
     const int stride = task_.horizon * NUM_MUSCLES;
     std::vector<double> shifted(stride);
     for (int t = 0; t < task_.horizon - skip; ++t)
         for (int m = 0; m < NUM_MUSCLES; ++m)
-            shifted[t * NUM_MUSCLES + m] = best_traj_[(t + skip) * NUM_MUSCLES + m];
+            shifted[t * NUM_MUSCLES + m] = trajectory_[(t + skip) * NUM_MUSCLES + m];
     for (int t = task_.horizon - skip; t < task_.horizon; ++t)
         for (int m = 0; m < NUM_MUSCLES; ++m)
-            shifted[t * NUM_MUSCLES + m] = best_traj_[(task_.horizon - 1) * NUM_MUSCLES + m];
+            shifted[t * NUM_MUSCLES + m] = trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
     trajectory_ = shifted;
 
     const int N = task_.n_iterations;
