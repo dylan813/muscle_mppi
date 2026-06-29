@@ -26,15 +26,6 @@ add_executable(muscle_mppi_controller
 )
 target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
 
-# --- Quadruped standing controller (NUM_JOINTS=12, JOINT_OFFSET=0) ---
-add_executable(quad_stand_controller
-    quad_stand_controller.cpp
-    control/base_mppi.cpp
-    control/quad_stand.cpp
-    utils/tasks.cpp
-)
-target_link_libraries(quad_stand_controller ${COMMON_LIBS})
-
 # --- Standalone MuJoCo simulation test (no DDS, no real-time constraint) ---
 add_executable(mppi_sim
     mppi_sim.cpp

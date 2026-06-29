@@ -51,8 +51,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.beta1 = t["beta1"] ? t["beta1"].as<double>() : 1.0;
     cfg.beta2 = t["beta2"] ? t["beta2"].as<double>() : 1.0;
 
-    if (t["gravity_act"])
-        load_doubles(t["gravity_act"], cfg.gravity_act, NUM_MUSCLES, "gravity_act");
     if (t["posture_bias"])
         load_doubles(t["posture_bias"], cfg.posture_bias, NUM_JOINTS, "posture_bias");
     if (t["posture_FL1"])
