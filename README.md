@@ -1,4 +1,4 @@
-# Muscle-Inspired Torque-Level Control for Wheeled-Quadrupedal Locomotion with Sampling-Based MPC
+# Muscle-Inspired Torque-Level Control for Legged Locomotion with Sampling-Based MPC
 
 # Installation
 
@@ -88,4 +88,10 @@ DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/v
 cd muscle_mppi/unit_tests
 python3 plot_force_length.py
 python3 plot_force_velocity.py
+```
+
+```bash
+cd muscle_mppi/muscle_mppi/build
+./mppi_sim
+/home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/mppi_sim.gif
 ```
