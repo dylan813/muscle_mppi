@@ -54,6 +54,56 @@ static inline double passive_force_length(double length, double max, double b) {
     return 0.25 * max * (1.0 + 3.0 * temp);
 }
 
+// Invert Hill model for one joint: given (q, dq, tau_req), return implied (a1, a2).
+// Mirrors generate_activation_gaits.py::constraint_midpoint() exactly.
+// tau_req = qfrc_bias for that joint (gravity + Coriolis, as used during gait generation).
+// stiffness in [0,1]: 0.5 = minimum co-contraction midpoint, 0.75 = generation default.
+static inline void hill_invert_torque(
+    double q, double dq, double tau_req, int j,
+    const MuscleParams& p, double stiffness,
+    double& a1_out, double& a2_out)
+{
+    static constexpr double eps = 1e-6;
+    const double r1 = (p.lce_max[j] - p.lce_min[j] + eps)
+                    / (p.phi_max[j]  - p.phi_min[j]  + eps);
+
+    const double lce1 = q *   r1 + (p.lce_min[j] - r1 * p.phi_min[j]);
+    const double lce2 = q * (-r1) + (p.lce_min[j] + r1 * p.phi_max[j]);
+
+    const double lmin = p.lce_min[j], lmax = p.lce_max[j];
+    const double FL1 = active_force_length(lce1, lmin, 1.0, lmax)
+                     + 0.15 * active_force_length(lce1, lmin, 0.5*(lmin+0.95), 0.95);
+    const double FL2 = active_force_length(lce2, lmin, 1.0, lmax)
+                     + 0.15 * active_force_length(lce2, lmin, 0.5*(lmin+0.95), 0.95);
+
+    const double b_passive = 0.5 * (lmax + 1.0);
+    const double P1 = passive_force_length(lce1, p.pFLmax[j], b_passive);
+    const double P2 = passive_force_length(lce2, p.pFLmax[j], b_passive);
+
+    const double c   = p.FVmax[j] - 1.0;
+    const double FV1 = force_vel( r1 * dq, c, p.vmax[j], p.FVmax[j]);
+    const double FV2 = force_vel(-r1 * dq, c, p.vmax[j], p.FVmax[j]);
+
+    const double eff1 = FL1 * FV1;
+    const double eff2 = FL2 * FV2;
+
+    if (eff1 < 1e-8) { a1_out = 0.0; a2_out = 0.0; return; }
+
+    const double C      = tau_req / (-r1 * p.peak_force[j]) - (P1 - P2);
+    const double denom2 = std::max(eff2, 1e-8);
+    const double a2_lo  = std::max(0.0, -C / denom2);
+    const double a2_hi  = std::min(1.0, (eff1 - C) / denom2);
+
+    double a2;
+    if (a2_lo > a2_hi)
+        a2 = std::clamp(0.5 * (a2_lo + a2_hi), 0.0, 1.0);
+    else
+        a2 = a2_lo + stiffness * (a2_hi - a2_lo);
+
+    a1_out = std::clamp((C + eff2 * a2) / eff1, 0.0, 1.0);
+    a2_out = a2;
+}
+
 // Compute joint torques from antagonistic muscle pairs.
 //
 // Action layout (act_cmd, activation): interleaved per joint:

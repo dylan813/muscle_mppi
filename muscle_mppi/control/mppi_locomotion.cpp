@@ -34,13 +34,29 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
         const YAML::Node& c = root[task_name]["cost"];
-        cost_.height        = c["height"]        ? c["height"].as<double>()        : 0.0;
-        cost_.orientation   = c["orientation"]   ? c["orientation"].as<double>()   : 0.0;
-        cost_.vel           = c["vel"]           ? c["vel"].as<double>()           : 0.0;
-        cost_.gait_ref      = c["gait_ref"]      ? c["gait_ref"].as<double>()      : 0.0;
+        cost_.pos_x       = c["pos_x"]       ? c["pos_x"].as<double>()       : 0.0;
+        cost_.pos_y       = c["pos_y"]       ? c["pos_y"].as<double>()       : 0.0;
+        cost_.pos_z       = c["pos_z"]       ? c["pos_z"].as<double>()       : 0.0;
+        cost_.orientation = c["orientation"] ? c["orientation"].as<double>() : 0.0;
+        cost_.vel_x       = c["vel_x"]       ? c["vel_x"].as<double>()       : 0.0;
+        cost_.vel_y       = c["vel_y"]       ? c["vel_y"].as<double>()       : 0.0;
+        cost_.vel_z       = c["vel_z"]       ? c["vel_z"].as<double>()       : 0.0;
+        cost_.ang_vel     = c["ang_vel"]     ? c["ang_vel"].as<double>()     : 0.0;
+        if (c["gait_ref_weights"]) {
+            const auto& gw = c["gait_ref_weights"];
+            for (int j = 0; j < NUM_JOINTS; ++j)
+                cost_.gait_ref_weights[j] = gw[j].as<double>();
+        }
+        gait_stiffness_   = c["gait_stiffness"] ? c["gait_stiffness"].as<double>() : 0.75;
         if (c["vel_des"]) {
             cmd_.vx = c["vel_des"][0].as<double>();
             cmd_.vy = c["vel_des"][1].as<double>();
+        }
+        cmd_.goal_pos[2] = task_.height_target;  // z default; overridden below if set in YAML
+        if (c["goal_pos"]) {
+            cmd_.goal_pos[0] = c["goal_pos"][0].as<double>();
+            cmd_.goal_pos[1] = c["goal_pos"][1].as<double>();
+            cmd_.goal_pos[2] = c["goal_pos"][2].as<double>();
         }
     }
 
@@ -122,7 +138,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 
         double gait_ref[NUM_MUSCLES] = {};
         if (gait_sched_.loaded()) gait_sched_.get_phase(t, gait_ref);
-        total_cost += step_cost(d, act_cmd, gait_ref);
+        total_cost += step_cost(d, gait_ref);
     }
 
     return std::isfinite(total_cost) ? total_cost : 1e6;
@@ -132,36 +148,47 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 // Cost function
 // ============================================================================
 
-double MPPILocomotion::step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES],
-                                  const double gait_ref[NUM_MUSCLES])
+double MPPILocomotion::step_cost(const mjData* d, const double gait_ref[NUM_MUSCLES])
 {
     const CostWeights& w = cost_;
     double cost = 0.0;
 
-    cost += w.height * std::abs(d->xpos[base_bid_ * 3 + 2] - height_target_);
+    const double* pos = d->xpos + base_bid_ * 3;
+    cost += w.pos_x * std::abs(pos[0] - cmd_.goal_pos[0]);
+    cost += w.pos_y * std::abs(pos[1] - cmd_.goal_pos[1]);
+    cost += w.pos_z * std::abs(pos[2] - cmd_.goal_pos[2]);
 
-    const double qw    = d->qpos[3];
-    const double angle = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
-    cost += w.orientation * angle * angle;
+    const double qw     = d->qpos[3];
+    const double q_dist = 1.0 - std::abs(qw);
+    cost += w.orientation * q_dist * q_dist;
 
-    if (w.vel > 0.0) {
-        // Project world-frame CoM velocity onto body x and y axes (R^T * v_world).
+    if (w.vel_x > 0.0 || w.vel_y > 0.0 || w.vel_z > 0.0) {
+        // Project world-frame CoM velocity onto body axes (R^T * v_world).
         // xmat is row-major: columns are body axes expressed in world frame.
         const double* xmat = d->xmat + base_bid_ * 9;
         const double vx_body = d->qvel[0]*xmat[0] + d->qvel[1]*xmat[3] + d->qvel[2]*xmat[6];
         const double vy_body = d->qvel[0]*xmat[1] + d->qvel[1]*xmat[4] + d->qvel[2]*xmat[7];
+        const double vz_body = d->qvel[0]*xmat[2] + d->qvel[1]*xmat[5] + d->qvel[2]*xmat[8];
         const double ex = vx_body - cmd_.vx;
         const double ey = vy_body - cmd_.vy;
-        cost += w.vel * (ex*ex + ey*ey);
+        cost += w.vel_x * ex*ex + w.vel_y * ey*ey + w.vel_z * vz_body*vz_body;
     }
 
-    // contact_vel: iterate over all active contacts, penalize velocity at each contact point.
-    // gait_ref: L1 deviation of activation commands from the cyclic gait reference.
-    if (w.gait_ref > 0.0) {
-        for (int m = 0; m < NUM_MUSCLES; ++m) {
-            const double e = act_cmd[m] - gait_ref[m];
-            cost += w.gait_ref * e * e;
-        }
+    if (w.ang_vel > 0.0) {
+        const double wx = d->qvel[3], wy = d->qvel[4], wz = d->qvel[5];
+        cost += w.ang_vel * (wx*wx + wy*wy + wz*wz);
+    }
+
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        if (w.gait_ref_weights[j] == 0.0) continue;
+        const double q_j   = d->qpos[act_qpos_adr_[j]];
+        const double dq_j  = d->qvel[act_qvel_adr_[j]];
+        const double tau_j = d->qfrc_bias[act_qvel_adr_[j]];
+        double a1_imp, a2_imp;
+        hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, gait_stiffness_, a1_imp, a2_imp);
+        const double e1 = a1_imp - gait_ref[2 * j];
+        const double e2 = a2_imp - gait_ref[2 * j + 1];
+        cost += w.gait_ref_weights[j] * (e1*e1 + e2*e2);
     }
 
     return cost;
@@ -251,7 +278,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         double act_log[NUM_MUSCLES];
         std::memcpy(act_log, real_act_, NUM_MUSCLES * sizeof(double));
 
-        double c_height = 0, c_orient = 0, c_vel = 0, c_gait = 0;
+        double c_pos = 0, c_orient = 0, c_vel = 0, c_gait = 0;
 
         for (int t = 0; t < task_.horizon; ++t) {
             double cmd[NUM_MUSCLES];
@@ -270,31 +297,49 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
                 mj_step(model_, dl);
             }
 
-            c_height += cost_.height * std::abs(dl->xpos[base_bid_*3+2] - height_target_);
+            const double* lpos = dl->xpos + base_bid_ * 3;
+            c_pos += cost_.pos_x * std::abs(lpos[0] - cmd_.goal_pos[0]);
+            c_pos += cost_.pos_y * std::abs(lpos[1] - cmd_.goal_pos[1]);
+            c_pos += cost_.pos_z * std::abs(lpos[2] - cmd_.goal_pos[2]);
 
-            const double qw = dl->qpos[3];
-            const double ang = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0));
-            c_orient += cost_.orientation * ang * ang;
+            const double qw     = dl->qpos[3];
+            const double q_dist = 1.0 - std::abs(qw);
+            c_orient += cost_.orientation * q_dist * q_dist;
 
-            if (cost_.vel > 0.0) {
+            if (cost_.vel_x > 0.0 || cost_.vel_y > 0.0 || cost_.vel_z > 0.0) {
                 const double* xmat = dl->xmat + base_bid_ * 9;
                 const double vx = dl->qvel[0]*xmat[0] + dl->qvel[1]*xmat[3] + dl->qvel[2]*xmat[6];
                 const double vy = dl->qvel[0]*xmat[1] + dl->qvel[1]*xmat[4] + dl->qvel[2]*xmat[7];
-                c_vel += cost_.vel * ((vx - cmd_.vx)*(vx - cmd_.vx) + (vy - cmd_.vy)*(vy - cmd_.vy));
+                const double vz = dl->qvel[0]*xmat[2] + dl->qvel[1]*xmat[5] + dl->qvel[2]*xmat[8];
+                c_vel += cost_.vel_x * (vx - cmd_.vx)*(vx - cmd_.vx)
+                       + cost_.vel_y * (vy - cmd_.vy)*(vy - cmd_.vy)
+                       + cost_.vel_z * vz*vz;
             }
 
-            if (cost_.gait_ref > 0.0 && gait_sched_.loaded()) {
+            if (cost_.ang_vel > 0.0) {
+                const double wx = dl->qvel[3], wy = dl->qvel[4], wz = dl->qvel[5];
+                c_vel += cost_.ang_vel * (wx*wx + wy*wy + wz*wz);
+            }
+
+            if (gait_sched_.loaded()) {
                 double gref[NUM_MUSCLES] = {};
                 gait_sched_.get_phase(t, gref);
-                for (int m = 0; m < NUM_MUSCLES; ++m) {
-                    const double e = cmd[m] - gref[m];
-                    c_gait += cost_.gait_ref * e * e;
+                for (int j = 0; j < NUM_JOINTS; ++j) {
+                    if (cost_.gait_ref_weights[j] == 0.0) continue;
+                    const double q_j   = dl->qpos[act_qpos_adr_[j]];
+                    const double dq_j  = dl->qvel[act_qvel_adr_[j]];
+                    const double tau_j = dl->qfrc_bias[act_qvel_adr_[j]];
+                    double a1_imp, a2_imp;
+                    hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, gait_stiffness_, a1_imp, a2_imp);
+                    const double e1 = a1_imp - gref[2 * j];
+                    const double e2 = a2_imp - gref[2 * j + 1];
+                    c_gait += cost_.gait_ref_weights[j] * (e1*e1 + e2*e2);
                 }
             }
         }
 
-        std::printf("[cost] height=%6.1f  orient=%6.1f  vel=%6.1f  gait=%6.1f  | best=%6.1f  dt=%.1fms\n",
-                    c_height, c_orient, c_vel, c_gait, best_cost_, last_compute_ms_);
+        std::printf("[cost] pos=%6.1f  orient=%6.1f  vel=%6.1f  gait=%6.1f  | best=%6.1f  dt=%.1fms\n",
+                    c_pos, c_orient, c_vel, c_gait, best_cost_, last_compute_ms_);
     }
 
     // Output: execute step 0 of best trajectory from current state.

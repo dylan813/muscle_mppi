@@ -5,10 +5,15 @@
 #include "muscle.h"
 
 struct CostWeights {
-    double height      = 0.0;
-    double orientation = 0.0;
-    double vel         = 0.0;   // body-frame velocity tracking (per step)
-    double gait_ref    = 0.0;   // activation gait reference (cost only, not prior)
+    double pos_x       = 0.0;  // L1 world-frame x-position error
+    double pos_y       = 0.0;  // L1 world-frame y-position error
+    double pos_z       = 0.0;  // L1 z-position error (height)
+    double orientation = 0.0;  // (1 - |q · q_ref|)^2 quaternion distance from upright
+    double vel_x       = 0.0;  // body-frame x-velocity tracking (forward)
+    double vel_y       = 0.0;  // body-frame y-velocity tracking (lateral)
+    double vel_z       = 0.0;  // body-frame z-velocity tracking (vertical)
+    double ang_vel     = 0.0;  // body-frame angular velocity damping (x, y, z equally)
+    double gait_ref_weights[NUM_JOINTS] = {};  // per-joint activation tracking (replaces Q[7:19])
 };
 
 // Reference-free MPPI with direct per-muscle activation (co-contraction capable).
@@ -37,14 +42,14 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    double step_cost(const mjData* d, const double act_cmd[NUM_MUSCLES],
-                     const double gait_ref[NUM_MUSCLES]);
+    double step_cost(const mjData* d, const double gait_ref[NUM_MUSCLES]);
 
     MuscleParams   muscle_;
     CostWeights    cost_;
     GaitScheduler  gait_sched_;
     MotionCommand  cmd_;
 
+    double gait_stiffness_  = 0.75;
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;
 

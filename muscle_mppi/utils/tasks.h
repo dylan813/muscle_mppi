@@ -64,8 +64,9 @@ struct TaskConfig {
 };
 
 struct MotionCommand {
-    double vx = 0.0;
-    double vy = 0.0;
+    double vx          = 0.0;
+    double vy          = 0.0;
+    double goal_pos[3] = {};  // world-frame position target [x, y, z]
 };
 
 TaskConfig load_task(const std::string& task_name,
