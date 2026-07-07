@@ -50,7 +50,7 @@ BaseMPPI::~BaseMPPI() {
     mj_deleteModel(model_);
 }
 
-void BaseMPPI::sample_noise(int /*iter*/) {
+void BaseMPPI::sample_noise() {
     const int H = task_.horizon;
 
     for (int s = 0; s < task_.n_samples; ++s)
@@ -75,71 +75,68 @@ void BaseMPPI::warm_start(int n_skip)
             trajectory_[t * NUM_MUSCLES + m] = best_traj_[(H - 1) * NUM_MUSCLES + m];
 }
 
-void BaseMPPI::run_iterations(const RobotState& state)
+void BaseMPPI::run_mppi_step(const RobotState& state)
 {
     best_cost_ = 1e9;
-    const int N = task_.n_iterations;
 
-    for (int iter = 0; iter < N; ++iter) {
-        sample_noise(iter);
+    sample_noise();
 
-        #pragma omp parallel for schedule(dynamic)
-        for (int s = 0; s < task_.n_samples; ++s)
-            costs_[s] = rollout(s, state);
+    #pragma omp parallel for schedule(dynamic)
+    for (int s = 0; s < task_.n_samples; ++s)
+        costs_[s] = rollout(s, state);
 
-        // Track best sample.
-        for (int s = 0; s < task_.n_samples; ++s) {
-            if (costs_[s] < best_cost_) {
-                best_cost_ = costs_[s];
-                for (int t = 0; t < task_.horizon; ++t)
-                    for (int m = 0; m < NUM_MUSCLES; ++m) {
-                        int idx = t * NUM_MUSCLES + m;
-                        best_traj_[idx] = std::clamp(
-                            trajectory_[idx]
-                                + noise_[s * task_.horizon * NUM_MUSCLES + idx],
-                            action_lo_[m], action_hi_[m]);
-                    }
-            }
-        }
-
-        // Softmin weights over min-max normalised costs.
-        // Exclude fall-penalty outliers (≥1e5) from cmax so one falling sample
-        // doesn't collapse all non-falling weights to near-uniform.
-        static constexpr double kFallThreshold = 1e5;
-        double cmin = *std::min_element(costs_.begin(), costs_.end());
-        double cmax = cmin;
-        for (int s = 0; s < task_.n_samples; ++s)
-            if (costs_[s] < kFallThreshold)
-                cmax = std::max(cmax, costs_[s]);
-        double crange = cmax - cmin;
-
-        std::vector<double> weights(task_.n_samples);
-        double wsum = 0.0;
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double s_hat = (crange > 1e-12)
-                ? std::min((costs_[s] - cmin) / crange, 1.0) : 0.0;
-            weights[s]   = std::exp(-s_hat / task_.lambda);
-            wsum        += weights[s];
-        }
-
-        std::vector<double> new_traj(task_.horizon * NUM_MUSCLES, 0.0);
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double w = weights[s] / wsum;
+    // Track best sample.
+    for (int s = 0; s < task_.n_samples; ++s) {
+        if (costs_[s] < best_cost_) {
+            best_cost_ = costs_[s];
             for (int t = 0; t < task_.horizon; ++t)
                 for (int m = 0; m < NUM_MUSCLES; ++m) {
                     int idx = t * NUM_MUSCLES + m;
-                    new_traj[idx] += w * (trajectory_[idx]
-                        + noise_[s * task_.horizon * NUM_MUSCLES + idx]);
+                    best_traj_[idx] = std::clamp(
+                        trajectory_[idx]
+                            + noise_[s * task_.horizon * NUM_MUSCLES + idx],
+                        action_lo_[m], action_hi_[m]);
                 }
         }
+    }
+
+    // Softmin weights over min-max normalised costs.
+    // Exclude fall-penalty outliers (≥1e5) from cmax so one falling sample
+    // doesn't collapse all non-falling weights to near-uniform.
+    static constexpr double kFallThreshold = 1e5;
+    double cmin = *std::min_element(costs_.begin(), costs_.end());
+    double cmax = cmin;
+    for (int s = 0; s < task_.n_samples; ++s)
+        if (costs_[s] < kFallThreshold)
+            cmax = std::max(cmax, costs_[s]);
+    double crange = cmax - cmin;
+
+    std::vector<double> weights(task_.n_samples);
+    double wsum = 0.0;
+    for (int s = 0; s < task_.n_samples; ++s) {
+        double s_hat = (crange > 1e-12)
+            ? std::min((costs_[s] - cmin) / crange, 1.0) : 0.0;
+        weights[s]   = std::exp(-s_hat / task_.lambda);
+        wsum        += weights[s];
+    }
+
+    std::vector<double> new_traj(task_.horizon * NUM_MUSCLES, 0.0);
+    for (int s = 0; s < task_.n_samples; ++s) {
+        double w = weights[s] / wsum;
         for (int t = 0; t < task_.horizon; ++t)
             for (int m = 0; m < NUM_MUSCLES; ++m) {
                 int idx = t * NUM_MUSCLES + m;
-                new_traj[idx] = std::clamp(new_traj[idx], action_lo_[m], action_hi_[m]);
+                new_traj[idx] += w * (trajectory_[idx]
+                    + noise_[s * task_.horizon * NUM_MUSCLES + idx]);
             }
-
-        trajectory_ = std::move(new_traj);
     }
+    for (int t = 0; t < task_.horizon; ++t)
+        for (int m = 0; m < NUM_MUSCLES; ++m) {
+            int idx = t * NUM_MUSCLES + m;
+            new_traj[idx] = std::clamp(new_traj[idx], action_lo_[m], action_hi_[m]);
+        }
+
+    trajectory_ = std::move(new_traj);
 }
 
 void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {

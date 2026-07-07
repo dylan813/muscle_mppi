@@ -74,7 +74,6 @@ reach:
   n_samples:     64
   horizon:       10
   substeps:      1
-  n_iterations:  5
   lambda:        0.1
   dt:            0.02
 
@@ -113,7 +112,6 @@ walk:
   n_samples:     32
   horizon:       45
   substeps:      10
-  n_iterations:  3
   lambda:        0.1
   dt:            0.002
   cmd_vel:       [0.2, 0.0]   # body-frame [vx, vy] velocity command (m/s)

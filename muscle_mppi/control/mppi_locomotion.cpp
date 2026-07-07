@@ -219,56 +219,53 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
     trajectory_ = shifted;
 
-    const int N = task_.n_iterations;
     best_cost_ = 1e9;
 
-    for (int iter = 0; iter < N; ++iter) {
-        sample_noise(iter);
+    sample_noise();
 
-        #pragma omp parallel for schedule(dynamic)
-        for (int s = 0; s < task_.n_samples; ++s)
-            costs_[s] = rollout(s, state);
+    #pragma omp parallel for schedule(dynamic)
+    for (int s = 0; s < task_.n_samples; ++s)
+        costs_[s] = rollout(s, state);
 
-        // Track best sample.
-        for (int s = 0; s < task_.n_samples; ++s) {
-            if (costs_[s] < best_cost_) {
-                best_cost_ = costs_[s];
-                for (int t = 0; t < task_.horizon; ++t)
-                    for (int m = 0; m < NUM_MUSCLES; ++m) {
-                        const int idx = t * NUM_MUSCLES + m;
-                        best_traj_[idx] = std::clamp(
-                            trajectory_[idx] + noise_[s * stride + idx], 0.0, 1.0);
-                    }
-            }
-        }
-
-        // Softmin weights.
-        double cmin   = *std::min_element(costs_.begin(), costs_.end());
-        double cmax   = *std::max_element(costs_.begin(), costs_.end());
-        double crange = cmax - cmin;
-
-        std::vector<double> weights(task_.n_samples);
-        double wsum = 0.0;
-        for (int s = 0; s < task_.n_samples; ++s) {
-            double s_hat = (crange > 1e-12) ? (costs_[s] - cmin) / crange : 0.0;
-            weights[s]   = std::exp(-s_hat / task_.lambda);
-            wsum        += weights[s];
-        }
-
-        // Weighted average update.
-        std::vector<double> new_traj(stride, 0.0);
-        for (int s = 0; s < task_.n_samples; ++s) {
-            const double w = weights[s] / wsum;
+    // Track best sample.
+    for (int s = 0; s < task_.n_samples; ++s) {
+        if (costs_[s] < best_cost_) {
+            best_cost_ = costs_[s];
             for (int t = 0; t < task_.horizon; ++t)
                 for (int m = 0; m < NUM_MUSCLES; ++m) {
                     const int idx = t * NUM_MUSCLES + m;
-                    new_traj[idx] += w * std::clamp(
+                    best_traj_[idx] = std::clamp(
                         trajectory_[idx] + noise_[s * stride + idx], 0.0, 1.0);
                 }
         }
-        for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
-        trajectory_ = std::move(new_traj);
     }
+
+    // Softmin weights.
+    double cmin   = *std::min_element(costs_.begin(), costs_.end());
+    double cmax   = *std::max_element(costs_.begin(), costs_.end());
+    double crange = cmax - cmin;
+
+    std::vector<double> weights(task_.n_samples);
+    double wsum = 0.0;
+    for (int s = 0; s < task_.n_samples; ++s) {
+        double s_hat = (crange > 1e-12) ? (costs_[s] - cmin) / crange : 0.0;
+        weights[s]   = std::exp(-s_hat / task_.lambda);
+        wsum        += weights[s];
+    }
+
+    // Weighted average update.
+    std::vector<double> new_traj(stride, 0.0);
+    for (int s = 0; s < task_.n_samples; ++s) {
+        const double w = weights[s] / wsum;
+        for (int t = 0; t < task_.horizon; ++t)
+            for (int m = 0; m < NUM_MUSCLES; ++m) {
+                const int idx = t * NUM_MUSCLES + m;
+                new_traj[idx] += w * std::clamp(
+                    trajectory_[idx] + noise_[s * stride + idx], 0.0, 1.0);
+            }
+    }
+    for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
+    trajectory_ = std::move(new_traj);
 
     // Cost breakdown logging — runs once per second (every 50 updates at 50 Hz).
     static constexpr int LOG_INTERVAL = 50;

@@ -49,7 +49,7 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
 
     std::filesystem::create_directories(log_dir);
     lat_log_.open(log_dir + "/single_leg_latency.csv", std::ios::out | std::ios::trunc);
-    lat_log_ << "call,total_ms,warm_start_ms,run_iterations_ms,final_hill_ms,"
+    lat_log_ << "call,total_ms,warm_start_ms,mppi_step_ms,final_hill_ms,"
                 "avg_rollout_hill_ms,avg_rollout_mjstep_ms,avg_rollout_cost_ms\n";
 
     act_log_.open(log_dir + "/single_leg_activations.csv", std::ios::out | std::ios::trunc);
@@ -206,7 +206,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     long long ws_us = elapsed_us(t_ws);
 
     auto t_ri = Clock::now();
-    run_iterations(state);
+    run_mppi_step(state);
     long long ri_us = elapsed_us(t_ri);
 
     // Compute t=0 sample distribution from the last iteration's noise + current mean.
@@ -262,7 +262,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     }
 
     if (lat_log_.is_open()) {
-        long long n_rollouts = (long long)task_.n_iterations * task_.n_samples;
+        long long n_rollouts = task_.n_samples;
         double avg_hill_ms   = lat_hill_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;
         double avg_mjstep_ms = lat_mjstep_us_.load(std::memory_order_relaxed) * 1e-3 / n_rollouts;
         double avg_cost_ms   = lat_cost_us_.load(std::memory_order_relaxed)   * 1e-3 / n_rollouts;

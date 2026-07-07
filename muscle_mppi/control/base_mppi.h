@@ -37,15 +37,15 @@ public:
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
-    void sample_noise(int iter);
+    void sample_noise();
     void set_mj_state(mjData* d, const RobotState& state);
 
     // Shift trajectory_ forward by n_skip steps, holding the tail constant.
     void warm_start(int n_skip);
 
-    // Run task_.n_iterations of: sample → parallel rollouts → best tracking → softmin update.
+    // Single MPPI pass: sample → parallel rollouts → best tracking → softmin update.
     // Subclasses set action_lo_/action_hi_ in their constructor to define per-action clamping.
-    void run_iterations(const RobotState& state);
+    void run_mppi_step(const RobotState& state);
 
     TaskConfig task_;
 
@@ -59,7 +59,7 @@ protected:
     std::vector<double> best_traj_;
     double              best_cost_  = 1e9;
 
-    // Per-muscle clamp bounds used by run_iterations(). Set by subclass constructors.
+    // Per-muscle clamp bounds used by run_mppi_step(). Set by subclass constructors.
     double action_lo_[NUM_MUSCLES] = {};
     double action_hi_[NUM_MUSCLES] = {};
 

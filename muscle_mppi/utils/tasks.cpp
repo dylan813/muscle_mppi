@@ -36,7 +36,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.n_samples     = t["n_samples"].as<int>();
     cfg.horizon       = t["horizon"].as<int>();
     cfg.substeps      = t["substeps"].as<int>();
-    cfg.n_iterations  = t["n_iterations"].as<int>();
     cfg.lambda        = t["lambda"].as<double>();
     cfg.dt            = t["dt"].as<double>();
 

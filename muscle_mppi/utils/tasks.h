@@ -35,7 +35,6 @@ struct TaskConfig {
     int          n_samples    = 16;
     int          horizon      = 25;
     int          substeps     = 10;
-    int          n_iterations = 3;
     double       lambda       = 0.1;
     double       dt           = 0.002;
 
