@@ -93,5 +93,5 @@ python3 plot_force_velocity.py
 ```bash
 cd muscle_mppi/muscle_mppi/build
 ./mppi_sim
-/home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/mppi_sim.gif
+MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/mppi_sim.gif
 ```

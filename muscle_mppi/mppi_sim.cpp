@@ -68,6 +68,15 @@ int main(int argc, char** argv)
     // ── load MPPI (also loads the model internally) ──────────────────────────
     MPPILocomotion mppi(task_name, yaml_path);
 
+    // ── apply cmd_vel from YAML ───────────────────────────────────────────────
+    {
+        const TaskConfig& t = mppi.task_ref();
+        MotionCommand cmd   = mppi.command();
+        cmd.vx = t.cmd_vel[0];
+        cmd.vy = t.cmd_vel[1];
+        mppi.set_command(cmd);
+    }
+
     // ── load a separate sim model/data ───────────────────────────────────────
     const TaskConfig& task = mppi.task_ref();   // public accessor we'll add
     char err[1000];

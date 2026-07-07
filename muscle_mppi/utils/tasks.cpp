@@ -51,6 +51,11 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.beta1 = t["beta1"] ? t["beta1"].as<double>() : 1.0;
     cfg.beta2 = t["beta2"] ? t["beta2"].as<double>() : 1.0;
 
+    if (t["cmd_vel"] && t["cmd_vel"].IsSequence() && t["cmd_vel"].size() == 2) {
+        cfg.cmd_vel[0] = t["cmd_vel"][0].as<double>();
+        cfg.cmd_vel[1] = t["cmd_vel"][1].as<double>();
+    }
+
     if (t["posture_bias"])
         load_doubles(t["posture_bias"], cfg.posture_bias, NUM_JOINTS, "posture_bias");
     if (t["posture_FL1"])

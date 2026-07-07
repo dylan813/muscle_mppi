@@ -108,7 +108,7 @@ default_muscle_quad: &default_muscle_quad
 # Locomotion task
 walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
-  gait_path:     "../gaits/FAST/activation_gait_FAST_0_0_10cm.tsv"
+  gait_path:     "../gaits/MED/activation_gait_MED_0_1_10cm.tsv"
   height_target: 0.34
   n_samples:     32
   horizon:       45
@@ -118,6 +118,7 @@ walk:
   dt:            0.002
   beta1:         1.0    # iteration-level noise decay (larger = slower)
   beta2:         1.0    # horizon-level noise decay   (larger = slower)
+  cmd_vel:       [0.2, 0.0]   # body-frame [vx, vy] velocity command (m/s)
 
   cost:
     pos_x:         300.0      # L1 x-position error to goal_pos[0]
@@ -130,7 +131,7 @@ walk:
     ang_vel:       0.0001     # body angular velocity damping (x, y, z)
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]  # per-joint (FR/FL/RR/RL × hip/thigh/calf)
     gait_stiffness: 0.75     # constraint-line blend — must match generate_activation_gaits.py STIFFNESS
-    goal_pos:      [0.0, 0.0, 0.34]   # world-frame position target [x, y, z]
+    goal_pos:      [5.0, 0.0, 0.34]   # world-frame position target [x, y, z]
 
   # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]

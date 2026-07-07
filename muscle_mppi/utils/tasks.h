@@ -54,6 +54,8 @@ struct TaskConfig {
     double beta1 = 1.0;
     double beta2 = 1.0;
 
+    double cmd_vel[2] = {};  // [vx, vy] body-frame velocity command
+
     // Normalized gravity torque at the nominal pose: tau_grav/(-r*peak_force) - (P1-P2).
     // Used by MPPILocomotion to seed the trajectory warm-start.
     double posture_bias[NUM_JOINTS] = {};
