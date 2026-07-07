@@ -129,9 +129,6 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
             for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
 
             mj_step(model_, d);
-
-            if (!std::isfinite(d->qpos[2]) || d->qpos[2] < -1.0)
-                return 1e6;
         }
 
         double gait_ref[NUM_MUSCLES] = {};
