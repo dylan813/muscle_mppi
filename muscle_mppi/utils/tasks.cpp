@@ -43,13 +43,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     if (t["noise_sigma_act"])
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
-    if (t["noise_sigma_final"])
-        load_doubles(t["noise_sigma_final"], cfg.noise_sigma_final, NUM_JOINTS, "noise_sigma_final");
-    else
-        std::copy(cfg.noise_sigma_act, cfg.noise_sigma_act + NUM_JOINTS, cfg.noise_sigma_final);
-
-    cfg.beta1 = t["beta1"] ? t["beta1"].as<double>() : 1.0;
-    cfg.beta2 = t["beta2"] ? t["beta2"].as<double>() : 1.0;
 
     if (t["cmd_vel"] && t["cmd_vel"].IsSequence() && t["cmd_vel"].size() == 2) {
         cfg.cmd_vel[0] = t["cmd_vel"][0].as<double>();

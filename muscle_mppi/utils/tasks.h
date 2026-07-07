@@ -41,18 +41,7 @@ struct TaskConfig {
 
     // Per-joint noise sigma. Both muscles of each antagonistic pair receive the
     // same draw, scaled by this value. Used by BaseMPPI::sample_noise().
-    // noise_sigma_act: initial (exploration) sigma at iter=0.
-    // noise_sigma_final: final (exploitation) sigma at iter=n_iterations-1.
-    // Linearly interpolated across iterations. If noise_sigma_final is absent
-    // in YAML it defaults to noise_sigma_act (no annealing).
     double noise_sigma_act[NUM_JOINTS]   = {};
-    double noise_sigma_final[NUM_JOINTS] = {};
-
-    // Diffusion-inspired noise annealing (paper Eq. 8).
-    // beta1: iteration-level decay — larger = slower annealing across iterations.
-    // beta2: horizon-level decay  — larger = slower decay toward near-term steps.
-    double beta1 = 1.0;
-    double beta2 = 1.0;
 
     double cmd_vel[2] = {};  // [vx, vy] body-frame velocity command
 

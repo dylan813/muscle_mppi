@@ -116,8 +116,6 @@ walk:
   n_iterations:  3
   lambda:        0.1
   dt:            0.002
-  beta1:         1.0    # iteration-level noise decay (larger = slower)
-  beta2:         1.0    # horizon-level noise decay   (larger = slower)
   cmd_vel:       [0.2, 0.0]   # body-frame [vx, vy] velocity command (m/s)
 
   cost:
