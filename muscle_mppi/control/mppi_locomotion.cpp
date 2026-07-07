@@ -63,8 +63,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     if (!task_.gait_path.empty())
         gait_sched_.load(task_.gait_path);
 
-    // Seed trajectory_, best_traj_, real_act_, predicted_activation_ with the
-    // constraint-line midpoint activations — same role as RTWholeBodyMPPI's sampling_init.
+    // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
+    // midpoint activations — same role as RTWholeBodyMPPI's sampling_init.
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
     {
         bool has_posture = false;
@@ -85,10 +85,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
                 nominal[2 * j + 1] = a2_mid;
             }
             for (int t = 0; t < task_.horizon; ++t)
-                for (int m = 0; m < NUM_MUSCLES; ++m) {
+                for (int m = 0; m < NUM_MUSCLES; ++m)
                     trajectory_[t * NUM_MUSCLES + m] = nominal[m];
-                    best_traj_[t * NUM_MUSCLES + m]  = nominal[m];
-                }
             std::memcpy(real_act_, nominal, NUM_MUSCLES * sizeof(double));
         }
     }
@@ -219,31 +217,17 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
     trajectory_ = shifted;
 
-    best_cost_ = 1e9;
-
     sample_noise();
 
     #pragma omp parallel for schedule(dynamic)
     for (int s = 0; s < task_.n_samples; ++s)
         costs_[s] = rollout(s, state);
 
-    // Track best sample.
-    for (int s = 0; s < task_.n_samples; ++s) {
-        if (costs_[s] < best_cost_) {
-            best_cost_ = costs_[s];
-            for (int t = 0; t < task_.horizon; ++t)
-                for (int m = 0; m < NUM_MUSCLES; ++m) {
-                    const int idx = t * NUM_MUSCLES + m;
-                    best_traj_[idx] = std::clamp(
-                        trajectory_[idx] + noise_[s * stride + idx], 0.0, 1.0);
-                }
-        }
-    }
-
     // Softmin weights.
     double cmin   = *std::min_element(costs_.begin(), costs_.end());
     double cmax   = *std::max_element(costs_.begin(), costs_.end());
     double crange = cmax - cmin;
+    best_cost_    = cmin;  // diagnostic only: best sampled cost this step
 
     std::vector<double> weights(task_.n_samples);
     double wsum = 0.0;
@@ -279,7 +263,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
 
         for (int t = 0; t < task_.horizon; ++t) {
             double cmd[NUM_MUSCLES];
-            for (int m = 0; m < NUM_MUSCLES; ++m) cmd[m] = best_traj_[t * NUM_MUSCLES + m];
+            for (int m = 0; m < NUM_MUSCLES; ++m) cmd[m] = trajectory_[t * NUM_MUSCLES + m];
 
             for (int sub = 0; sub < task_.substeps; ++sub) {
                 double q_l[NUM_JOINTS], dq_l[NUM_JOINTS];
@@ -335,13 +319,13 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             }
         }
 
-        std::printf("[cost] pos=%6.1f  orient=%6.1f  vel=%6.1f  gait=%6.1f  | best=%6.1f  dt=%.1fms\n",
+        std::printf("[cost] pos=%6.1f  orient=%6.1f  vel=%6.1f  gait=%6.1f  | sample_min=%6.1f  dt=%.1fms\n",
                     c_pos, c_orient, c_vel, c_gait, best_cost_, last_compute_ms_);
     }
 
-    // Output: execute step 0 of best trajectory from current state.
+    // Output: execute step 0 of the weighted-mean trajectory from current state.
     double act_cmd[NUM_MUSCLES];
-    for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
+    for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = trajectory_[m];
     hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
 
     gait_sched_.advance();
