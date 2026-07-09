@@ -16,7 +16,7 @@ struct CostWeights {
     double gait_ref_weights[NUM_JOINTS] = {};  // per-joint activation tracking (replaces Q[7:19])
 };
 
-// Reference-free MPPI with direct per-muscle activation (co-contraction capable).
+// Reference-free MPPI with direct per-muscle activation (co-contraction capable). this is wrong
 //
 // Search space: act[m] ∈ [0, 1] per muscle per horizon step (NUM_MUSCLES × horizon).
 // Layout: [agonist_j0, antagonist_j0, agonist_j1, ...] interleaved per joint.
@@ -42,7 +42,12 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    double step_cost(const mjData* d, const double gait_ref[NUM_MUSCLES]);
+    double step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]);
+
+    // Whole-robot (trunk + legs) CoM position (world frame) and CoM
+    // velocity (body-frame axes). Non-const mjData*: calls mj_subtreeVel,
+    // which writes into d->subtree_linvel/subtree_angmom.
+    void base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const;
 
     MuscleParams   muscle_;
     CostWeights    cost_;
@@ -50,7 +55,7 @@ private:
     MotionCommand  cmd_;
 
     double gait_stiffness_  = 0.75;
-    double last_compute_ms_ = 20.0;
+    double last_compute_ms_ = 20.0; //why is this here?
     int    log_counter_     = 0;
 
     // Tracks the activation state at the most recently issued command.

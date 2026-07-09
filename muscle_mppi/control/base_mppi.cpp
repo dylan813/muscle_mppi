@@ -64,6 +64,7 @@ void BaseMPPI::sample_noise() {
         }
 }
 
+// need to double check this
 void BaseMPPI::warm_start(int n_skip)
 {
     const int H = task_.horizon;
@@ -85,7 +86,7 @@ void BaseMPPI::run_mppi_step(const RobotState& state)
     for (int s = 0; s < task_.n_samples; ++s)
         costs_[s] = rollout(s, state);
 
-    // Track best sample.
+    // Track best sample. looks old
     for (int s = 0; s < task_.n_samples; ++s) {
         if (costs_[s] < best_cost_) {
             best_cost_ = costs_[s];

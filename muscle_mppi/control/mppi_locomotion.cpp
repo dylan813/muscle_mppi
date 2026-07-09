@@ -143,12 +143,40 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 // Cost function
 // ============================================================================
 
-double MPPILocomotion::step_cost(const mjData* d, const double gait_ref[NUM_MUSCLES])
+// Whole-robot CoM position (world frame) and CoM velocity (body-frame axes).
+//
+// base_bid_ is the trunk (root) body, so its subtree is the entire robot
+// (trunk + all legs). d->subtree_com is the mass-weighted CoM of that whole
+// subtree and is already computed every step by mj_fwdPosition, so it's
+// free. Its velocity (d->subtree_linvel) is a diagnostic quantity MuJoCo
+// does NOT compute by default, so we call mj_subtreeVel() to populate it —
+// this is an extra O(nbody) pass on top of the regular step, cheap for this
+// model but not free. subtree_linvel comes out in world-aligned axes, so we
+// rotate it into the body frame the same way the old code rotated qvel.
+void MPPILocomotion::base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const
+{
+    mj_subtreeVel(model_, d);
+
+    const double* com = d->subtree_com + base_bid_ * 3;
+    com_pos[0] = com[0];
+    com_pos[1] = com[1];
+    com_pos[2] = com[2];
+
+    const double* v_world = d->subtree_linvel + base_bid_ * 3;
+    const double* xmat    = d->xmat + base_bid_ * 9;
+    com_vel_body[0] = v_world[0]*xmat[0] + v_world[1]*xmat[3] + v_world[2]*xmat[6];
+    com_vel_body[1] = v_world[0]*xmat[1] + v_world[1]*xmat[4] + v_world[2]*xmat[7];
+    com_vel_body[2] = v_world[0]*xmat[2] + v_world[1]*xmat[5] + v_world[2]*xmat[8];
+}
+
+double MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES])
 {
     const CostWeights& w = cost_;
     double cost = 0.0;
 
-    const double* pos = d->xpos + base_bid_ * 3;
+    double pos[3], vel_body[3];
+    base_com_state(d, pos, vel_body);
+
     cost += w.pos_x * std::abs(pos[0] - cmd_.goal_pos[0]);
     cost += w.pos_y * std::abs(pos[1] - cmd_.goal_pos[1]);
     cost += w.pos_z * std::abs(pos[2] - cmd_.goal_pos[2]);
@@ -158,15 +186,9 @@ double MPPILocomotion::step_cost(const mjData* d, const double gait_ref[NUM_MUSC
     cost += w.orientation * q_dist * q_dist;
 
     if (w.vel_x > 0.0 || w.vel_y > 0.0 || w.vel_z > 0.0) {
-        // Project world-frame CoM velocity onto body axes (R^T * v_world).
-        // xmat is row-major: columns are body axes expressed in world frame.
-        const double* xmat = d->xmat + base_bid_ * 9;
-        const double vx_body = d->qvel[0]*xmat[0] + d->qvel[1]*xmat[3] + d->qvel[2]*xmat[6];
-        const double vy_body = d->qvel[0]*xmat[1] + d->qvel[1]*xmat[4] + d->qvel[2]*xmat[7];
-        const double vz_body = d->qvel[0]*xmat[2] + d->qvel[1]*xmat[5] + d->qvel[2]*xmat[8];
-        const double ex = vx_body - cmd_.vx;
-        const double ey = vy_body - cmd_.vy;
-        cost += w.vel_x * ex*ex + w.vel_y * ey*ey + w.vel_z * vz_body*vz_body;
+        const double ex = vel_body[0] - cmd_.vx;
+        const double ey = vel_body[1] - cmd_.vy;
+        cost += w.vel_x * ex*ex + w.vel_y * ey*ey + w.vel_z * vel_body[2]*vel_body[2];
     }
 
     if (w.ang_vel > 0.0) {
@@ -275,7 +297,8 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
                 mj_step(model_, dl);
             }
 
-            const double* lpos = dl->xpos + base_bid_ * 3;
+            double lpos[3], lvel[3];
+            base_com_state(dl, lpos, lvel);
             c_pos += cost_.pos_x * std::abs(lpos[0] - cmd_.goal_pos[0]);
             c_pos += cost_.pos_y * std::abs(lpos[1] - cmd_.goal_pos[1]);
             c_pos += cost_.pos_z * std::abs(lpos[2] - cmd_.goal_pos[2]);
@@ -285,13 +308,9 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             c_orient += cost_.orientation * q_dist * q_dist;
 
             if (cost_.vel_x > 0.0 || cost_.vel_y > 0.0 || cost_.vel_z > 0.0) {
-                const double* xmat = dl->xmat + base_bid_ * 9;
-                const double vx = dl->qvel[0]*xmat[0] + dl->qvel[1]*xmat[3] + dl->qvel[2]*xmat[6];
-                const double vy = dl->qvel[0]*xmat[1] + dl->qvel[1]*xmat[4] + dl->qvel[2]*xmat[7];
-                const double vz = dl->qvel[0]*xmat[2] + dl->qvel[1]*xmat[5] + dl->qvel[2]*xmat[8];
-                c_vel += cost_.vel_x * (vx - cmd_.vx)*(vx - cmd_.vx)
-                       + cost_.vel_y * (vy - cmd_.vy)*(vy - cmd_.vy)
-                       + cost_.vel_z * vz*vz;
+                c_vel += cost_.vel_x * (lvel[0] - cmd_.vx)*(lvel[0] - cmd_.vx)
+                       + cost_.vel_y * (lvel[1] - cmd_.vy)*(lvel[1] - cmd_.vy)
+                       + cost_.vel_z * lvel[2]*lvel[2];
             }
 
             if (cost_.ang_vel > 0.0) {
