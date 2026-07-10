@@ -24,7 +24,7 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
         action_hi_[m] = 1.0;
     }
 
-    std::fill(best_traj_.begin(), best_traj_.end(), 0.0);
+    std::fill(trajectory_.begin(), trajectory_.end(), 0.0);
 
     // Load reach-specific config directly — these don't belong in the shared TaskConfig.
     {
@@ -53,7 +53,7 @@ SingleLegReach::SingleLegReach(const std::string& task_name,
                 "avg_rollout_hill_ms,avg_rollout_mjstep_ms,avg_rollout_cost_ms\n";
 
     act_log_.open(log_dir + "/single_leg_activations.csv", std::ios::out | std::ios::trunc);
-    act_log_ << "call,best_cost";
+    act_log_ << "call,sample_min_cost";
     for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << ",cmd_m" << m;
     for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << ",act_m" << m;
     for (int j = 0; j < NUM_JOINTS;  ++j) act_log_ << ",tau_j" << j;
@@ -103,7 +103,7 @@ void SingleLegReach::maybe_advance_target(double foot_err)
         hold_count_ = 0;
         target_idx_ = (target_idx_ + 1) % n_foot_targets_;
         for (int k = 0; k < 3; ++k) active_target_[k] = foot_targets_[target_idx_][k];
-        std::fill(best_traj_.begin(), best_traj_.end(), 0.0);
+        std::fill(trajectory_.begin(), trajectory_.end(), 0.0);
     }
 }
 
@@ -185,7 +185,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
 {
     if (!state.valid) {
         double act_cmd[NUM_MUSCLES];
-        for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
+        for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = trajectory_[m];
         hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt,
                              real_act_, tau_out);
         return;
@@ -227,7 +227,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     }
 
     double act_cmd[NUM_MUSCLES];
-    for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = best_traj_[m];
+    for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = trajectory_[m];
 
     auto t_fh = Clock::now();
     hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt,
@@ -251,7 +251,7 @@ void SingleLegReach::update(const RobotState& state, double tau_out[NUM_JOINTS])
     }
 
     if (act_log_.is_open()) {
-        act_log_ << ++act_call_count_ << "," << best_cost_;
+        act_log_ << ++act_call_count_ << "," << cost_min();
         for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << "," << act_cmd[m];
         for (int m = 0; m < NUM_MUSCLES; ++m) act_log_ << "," << real_act_[m];
         for (int j = 0; j < NUM_JOINTS;  ++j) act_log_ << "," << tau_out[j];

@@ -43,7 +43,7 @@ protected:
     // Shift trajectory_ forward by n_skip steps, holding the tail constant.
     void warm_start(int n_skip);
 
-    // Single MPPI pass: sample → parallel rollouts → best tracking → softmin update.
+    // Single MPPI pass: sample → parallel rollouts → softmin weighted-average update.
     // Subclasses set action_lo_/action_hi_ in their constructor to define per-action clamping.
     void run_mppi_step(const RobotState& state);
 
@@ -55,9 +55,6 @@ protected:
     std::vector<double> trajectory_;
     std::vector<double> noise_;
     std::vector<double> costs_;
-
-    std::vector<double> best_traj_;
-    double              best_cost_  = 1e9;
 
     // Per-muscle clamp bounds used by run_mppi_step(). Set by subclass constructors.
     double action_lo_[NUM_MUSCLES] = {};

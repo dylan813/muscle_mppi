@@ -22,7 +22,7 @@ struct CostWeights {
 // Layout: [agonist_j0, antagonist_j0, agonist_j1, ...] interleaved per joint.
 // Activation dynamics in hill_compute_torques provide implicit trajectory smoothing.
 //
-// Storage layout for trajectory_ and best_traj_ (size horizon × NUM_MUSCLES):
+// Storage layout for trajectory_ (size horizon × NUM_MUSCLES):
 //   [t * NUM_MUSCLES + m] = act[t][m]
 
 class MPPILocomotion : public BaseMPPI {
@@ -55,7 +55,7 @@ private:
     MotionCommand  cmd_;
 
     double gait_stiffness_  = 0.75;
-    double last_compute_ms_ = 20.0; //why is this here?
+    double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;
 
     // Tracks the activation state at the most recently issued command.

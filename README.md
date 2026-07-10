@@ -37,14 +37,7 @@ cmake ..
 make -j$(nproc)
 ```
 
-```bash
-cd muscle_mppi/ref_free_mppi/
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-```
-
-Terminal 1: Open the MuJoCo simulation with the Unitree Go2-W
+Terminal 1: Open the MuJoCo simulation with the Unitree Go2
 ```bash
 cd muscle_mppi/unitree_mujoco/simulate/build
 ./unitree_mujoco -r go2 -s scene.xml

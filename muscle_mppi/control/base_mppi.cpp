@@ -41,8 +41,6 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     trajectory_.assign(task_.horizon * NUM_MUSCLES, 0.0);
     noise_.assign(task_.n_samples * task_.horizon * NUM_MUSCLES, 0.0);
     costs_.resize(task_.n_samples);
-    best_traj_.assign(task_.horizon * NUM_MUSCLES, 0.0);
-
 }
 
 BaseMPPI::~BaseMPPI() {
@@ -64,42 +62,26 @@ void BaseMPPI::sample_noise() {
         }
 }
 
-// need to double check this
 void BaseMPPI::warm_start(int n_skip)
 {
     const int H = task_.horizon;
+    std::vector<double> shifted(H * NUM_MUSCLES);
     for (int t = 0; t < H - n_skip; ++t)
         for (int m = 0; m < NUM_MUSCLES; ++m)
-            trajectory_[t * NUM_MUSCLES + m] = best_traj_[(t + n_skip) * NUM_MUSCLES + m];
+            shifted[t * NUM_MUSCLES + m] = trajectory_[(t + n_skip) * NUM_MUSCLES + m];
     for (int t = H - n_skip; t < H; ++t)
         for (int m = 0; m < NUM_MUSCLES; ++m)
-            trajectory_[t * NUM_MUSCLES + m] = best_traj_[(H - 1) * NUM_MUSCLES + m];
+            shifted[t * NUM_MUSCLES + m] = trajectory_[(H - 1) * NUM_MUSCLES + m];
+    trajectory_ = std::move(shifted);
 }
 
 void BaseMPPI::run_mppi_step(const RobotState& state)
 {
-    best_cost_ = 1e9;
-
     sample_noise();
 
     #pragma omp parallel for schedule(dynamic)
     for (int s = 0; s < task_.n_samples; ++s)
         costs_[s] = rollout(s, state);
-
-    // Track best sample. looks old
-    for (int s = 0; s < task_.n_samples; ++s) {
-        if (costs_[s] < best_cost_) {
-            best_cost_ = costs_[s];
-            for (int t = 0; t < task_.horizon; ++t)
-                for (int m = 0; m < NUM_MUSCLES; ++m) {
-                    int idx = t * NUM_MUSCLES + m;
-                    best_traj_[idx] = std::clamp(
-                        trajectory_[idx]
-                            + noise_[s * task_.horizon * NUM_MUSCLES + idx],
-                        action_lo_[m], action_hi_[m]);
-                }
-        }
-    }
 
     // Softmin weights over min-max normalised costs.
     // Exclude fall-penalty outliers (≥1e5) from cmax so one falling sample

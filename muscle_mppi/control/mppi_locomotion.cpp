@@ -18,7 +18,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 {
     muscle_ = task_.muscle;
 
-    // BaseMPPI already initializes trajectory_, best_traj_, noise_, costs_
+    // BaseMPPI already initializes trajectory_, noise_, costs_
     // to the correct sizes (horizon × NUM_MUSCLES). Only action bounds need setting here.
     for (int m = 0; m < NUM_MUSCLES; ++m) {
         action_lo_[m] = 0.0;
@@ -64,7 +64,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         gait_sched_.load(task_.gait_path);
 
     // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
-    // midpoint activations — same role as RTWholeBodyMPPI's sampling_init.
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
     {
         bool has_posture = false;
@@ -245,8 +244,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     // Softmin weights.
     double cmin   = *std::min_element(costs_.begin(), costs_.end());
     double cmax   = *std::max_element(costs_.begin(), costs_.end());
-    double crange = cmax - cmin;
-    best_cost_    = cmin;  // diagnostic only: best sampled cost this step
+    double crange = cmax - cmin;  // cmin logged below as a diagnostic only
 
     std::vector<double> weights(task_.n_samples);
     double wsum = 0.0;
@@ -336,7 +334,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         }
 
         std::printf("[cost] pos=%6.1f  orient=%6.1f  vel=%6.1f  gait=%6.1f  | sample_min=%6.1f  dt=%.1fms\n",
-                    c_pos, c_orient, c_vel, c_gait, best_cost_, last_compute_ms_);
+                    c_pos, c_orient, c_vel, c_gait, cmin, last_compute_ms_);
     }
 
     // Output: execute step 0 of the weighted-mean trajectory from current state.
