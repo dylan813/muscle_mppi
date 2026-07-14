@@ -115,20 +115,18 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         }
 
         double tau_out[NUM_JOINTS];
-        for (int sub = 0; sub < task_.substeps; ++sub) {
-            double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                q_cur[j]  = d->qpos[act_qpos_adr_[j]];
-                dq_cur[j] = d->qvel[act_qvel_adr_[j]];
-            }
-
-            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
-
-            for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
-            for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
-
-            mj_step(model_, d);
+        double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            q_cur[j]  = d->qpos[act_qpos_adr_[j]];
+            dq_cur[j] = d->qvel[act_qvel_adr_[j]];
         }
+
+        hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
+
+        for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
+        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
+
+        mj_step(model_, d);
 
         double gait_ref[NUM_MUSCLES] = {};
         if (gait_sched_.loaded()) gait_sched_.get_phase(t, gait_ref);
@@ -282,18 +280,16 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             double cmd[NUM_MUSCLES];
             for (int m = 0; m < NUM_MUSCLES; ++m) cmd[m] = trajectory_[t * NUM_MUSCLES + m];
 
-            for (int sub = 0; sub < task_.substeps; ++sub) {
-                double q_l[NUM_JOINTS], dq_l[NUM_JOINTS];
-                for (int j = 0; j < NUM_JOINTS; ++j) {
-                    q_l[j]  = dl->qpos[act_qpos_adr_[j]];
-                    dq_l[j] = dl->qvel[act_qvel_adr_[j]];
-                }
-                double tau_l[NUM_JOINTS];
-                hill_compute_torques(cmd, q_l, dq_l, muscle_, task_.dt, act_log, tau_l);
-                for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
-                for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[JOINT_OFFSET + j] = tau_l[j];
-                mj_step(model_, dl);
+            double q_l[NUM_JOINTS], dq_l[NUM_JOINTS];
+            for (int j = 0; j < NUM_JOINTS; ++j) {
+                q_l[j]  = dl->qpos[act_qpos_adr_[j]];
+                dq_l[j] = dl->qvel[act_qvel_adr_[j]];
             }
+            double tau_l[NUM_JOINTS];
+            hill_compute_torques(cmd, q_l, dq_l, muscle_, task_.dt, act_log, tau_l);
+            for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
+            for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[JOINT_OFFSET + j] = tau_l[j];
+            mj_step(model_, dl);
 
             double lpos[3], lvel[3];
             base_com_state(dl, lpos, lvel);

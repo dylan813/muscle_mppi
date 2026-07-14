@@ -133,33 +133,31 @@ double SingleLegReach::rollout(int s, const RobotState& state)
         }
 
         double tau_out[NUM_JOINTS];
-        for (int sub = 0; sub < task_.substeps; ++sub) {
-            double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                q_cur[j]  = d->qpos[act_qpos_adr_[j]];
-                dq_cur[j] = d->qvel[act_qvel_adr_[j]];
-            }
-
-            auto t_h = Clock::now();
-            hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt,
-                                 activation, tau_out);
-            lat_hill_us_.fetch_add(
-                std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
-                std::memory_order_relaxed);
-
-            for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
-            for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[JOINT_OFFSET + j] = tau_out[j];
-
-            auto t_mj = Clock::now();
-            mj_step(model_, d);
-            lat_mjstep_us_.fetch_add(
-                std::chrono::duration_cast<Us>(Clock::now() - t_mj).count(),
-                std::memory_order_relaxed);
-
-            if (!std::isfinite(d->qpos[act_qpos_adr_[0]]))
-                return 1e6;
+        double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            q_cur[j]  = d->qpos[act_qpos_adr_[j]];
+            dq_cur[j] = d->qvel[act_qvel_adr_[j]];
         }
+
+        auto t_h = Clock::now();
+        hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt,
+                             activation, tau_out);
+        lat_hill_us_.fetch_add(
+            std::chrono::duration_cast<Us>(Clock::now() - t_h).count(),
+            std::memory_order_relaxed);
+
+        for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
+        for (int j = 0; j < NUM_JOINTS; ++j)
+            d->ctrl[JOINT_OFFSET + j] = tau_out[j];
+
+        auto t_mj = Clock::now();
+        mj_step(model_, d);
+        lat_mjstep_us_.fetch_add(
+            std::chrono::duration_cast<Us>(Clock::now() - t_mj).count(),
+            std::memory_order_relaxed);
+
+        if (!std::isfinite(d->qpos[act_qpos_adr_[0]]))
+            return 1e6;
 
         auto t_c = Clock::now();
         total_cost += step_cost(d);

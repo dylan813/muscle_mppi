@@ -159,13 +159,11 @@ int main(int argc, char** argv)
             converged = true;
         }
 
-        // --- apply torques for one control step (substeps physics steps) ---
-        for (int sub = 0; sub < task.substeps; ++sub) {
-            for (int j = 0; j < NUM_JOINTS; ++j)
-                d->ctrl[JOINT_OFFSET + j] = tau[j];
-            mj_step(m, d);
-        }
-        sim_t += task.substeps * task.dt;
+        // --- apply torques for one control step ---
+        for (int j = 0; j < NUM_JOINTS; ++j)
+            d->ctrl[JOINT_OFFSET + j] = tau[j];
+        mj_step(m, d);
+        sim_t += task.dt;
 
         // --- log ---
         if (converged) {

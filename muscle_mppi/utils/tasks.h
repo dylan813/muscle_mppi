@@ -34,7 +34,6 @@ struct TaskConfig {
     MuscleParams muscle;
     int          n_samples    = 16;
     int          horizon      = 25;
-    int          substeps     = 10;
     double       lambda       = 0.1;
     double       dt           = 0.002;
 

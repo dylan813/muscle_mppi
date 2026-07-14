@@ -73,7 +73,6 @@ reach:
     - [0.25, 0.3, 0.6 ]
   n_samples:     64
   horizon:       10
-  substeps:      1
   lambda:        0.1
   dt:            0.02
 
@@ -111,9 +110,8 @@ walk:
   height_target: 0.34
   n_samples:     32
   horizon:       45
-  substeps:      10
   lambda:        0.1
-  dt:            0.002
+  dt:            0.01
   cmd_vel:       [0.2, 0.0]   # body-frame [vx, vy] velocity command (m/s)
 
   cost:
