@@ -37,6 +37,8 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.horizon       = t["horizon"].as<int>();
     cfg.lambda        = t["lambda"].as<double>();
     cfg.dt            = t["dt"].as<double>();
+    cfg.sample_type   = t["sample_type"] ? t["sample_type"].as<std::string>() : "normal";
+    cfg.n_knots       = t["n_knots"]     ? t["n_knots"].as<int>()             : 4;
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     if (t["noise_sigma_act"])

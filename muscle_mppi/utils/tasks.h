@@ -37,6 +37,13 @@ struct TaskConfig {
     double       lambda       = 0.1;
     double       dt           = 0.002;
 
+    // Noise sampling. "normal": iid Gaussian per timestep (default).
+    // "cubic": draw n_knots iid Gaussians spread evenly across the horizon and
+    // natural-cubic-spline interpolate between them, matching RTWholeBodyMPPI's
+    // spline-parameterized sampling (smoother, lower-dimensional search).
+    std::string  sample_type  = "normal";
+    int          n_knots      = 4;
+
     // Per-joint noise sigma. Both muscles of each antagonistic pair receive the
     // same draw, scaled by this value. Used by BaseMPPI::sample_noise().
     double noise_sigma_act[NUM_JOINTS]   = {};

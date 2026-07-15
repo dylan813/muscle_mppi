@@ -76,6 +76,12 @@ reach:
   lambda:        0.1
   dt:            0.02
 
+  # Spline-parameterized noise sampling: draw noise at
+  # n_knots points spread across the horizon and cubic-interpolate the rest,
+  # instead of independent per-timestep noise. Smoother action trajectories.
+  sample_type:   "cubic"
+  n_knots:       4
+
   cost:
     terminal:      500.0
     foot_pos:      10.0

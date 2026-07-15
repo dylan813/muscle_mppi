@@ -38,6 +38,7 @@ protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
     void sample_noise();
+    void sample_noise_cubic();
     void set_mj_state(mjData* d, const RobotState& state);
 
     // Shift trajectory_ forward by n_skip steps, holding the tail constant.
@@ -55,6 +56,10 @@ protected:
     std::vector<double> trajectory_;
     std::vector<double> noise_;
     std::vector<double> costs_;
+
+    // Knot timesteps (0..horizon-1) used by sample_noise_cubic() when
+    // task_.sample_type == "cubic". Built once in the constructor.
+    std::vector<double> knot_x_;
 
     // Per-muscle clamp bounds used by run_mppi_step(). Set by subclass constructors.
     double action_lo_[NUM_MUSCLES] = {};
