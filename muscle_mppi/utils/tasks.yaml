@@ -97,7 +97,7 @@ reach:
 # -----------------------------------------------------------------------
 # Quadruped muscle parameters (12 joints — same values repeated 4× for FR/FL/RR/RL).
 default_muscle_quad: &default_muscle_quad
-  act_bandwidth: 50.0
+  act_bandwidth: 20.0
   peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
   lce_min:     [0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75,  0.75, 0.75, 0.75]
   lce_max:     [1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05,  1.05, 1.05, 1.05]
@@ -114,11 +114,17 @@ walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
   gait_path:     "../gaits/FAST/activation_gait_FAST_0_1_10cm.tsv"
   height_target: 0.34
-  n_samples:     32
-  horizon:       45
+  n_samples:     30
+  horizon:       40
   lambda:        0.1
   dt:            0.01
   cmd_vel:       [0.2, 0.0]   # body-frame [vx, vy] velocity command (m/s)
+
+  # Spline-parameterized noise sampling: draw noise at
+  # n_knots points spread across the horizon and cubic-interpolate the rest,
+  # instead of independent per-timestep noise. Smoother action trajectories.
+  sample_type:   "cubic"
+  n_knots:       4
 
   cost:
     pos_x:         300.0      # L1 x-position error to goal_pos[0]
