@@ -8,12 +8,44 @@
 
 static void mujoco_warning_noop(const char*) {}
 
-// Natural cubic spline through (xk[i], yk[i]), i=0..n-1 with xk strictly increasing.
-// Evaluates at integer query points t=0..H-1 into yt. Mirrors scipy.interpolate.CubicSpline
-// closely enough for noise smoothing purposes (boundary condition differs: natural vs.
-// scipy's default not-a-knot, which only affects the first/last segment shape).
-static void natural_cubic_spline(const std::vector<double>& xk, const std::vector<double>& yk,
-                                  double* yt, int H)
+// Solves the dense linear system A x = b (n x n, row-major A) via Gaussian elimination
+// with partial pivoting. A and b are taken by value since both are destructively modified.
+static void solve_linear_system(std::vector<double> A, std::vector<double> b,
+                                 std::vector<double>& x, int n)
+{
+    for (int col = 0; col < n; ++col) {
+        int piv = col;
+        double best = std::abs(A[col * n + col]);
+        for (int r = col + 1; r < n; ++r) {
+            double v = std::abs(A[r * n + col]);
+            if (v > best) { best = v; piv = r; }
+        }
+        if (piv != col) {
+            for (int c = 0; c < n; ++c) std::swap(A[col * n + c], A[piv * n + c]);
+            std::swap(b[col], b[piv]);
+        }
+        double diag = A[col * n + col];
+        for (int r = col + 1; r < n; ++r) {
+            double factor = A[r * n + col] / diag;
+            if (factor == 0.0) continue;
+            for (int c = col; c < n; ++c) A[r * n + c] -= factor * A[col * n + c];
+            b[r] -= factor * b[col];
+        }
+    }
+    x.assign(n, 0.0);
+    for (int r = n - 1; r >= 0; --r) {
+        double sum = b[r];
+        for (int c = r + 1; c < n; ++c) sum -= A[r * n + c] * x[c];
+        x[r] = sum / A[r * n + r];
+    }
+}
+
+// Not-a-knot cubic spline through (xk[i], yk[i]), i=0..n-1 with xk strictly increasing.
+// Evaluates at integer query points t=0..H-1 into yt. Verified bit-for-bit (to fp precision)
+// against scipy.interpolate.CubicSpline(bc_type='not-a-knot') — scipy's default — rather than
+// the cheaper natural boundary condition (S''=0 at the ends), so segment shapes match exactly.
+static void not_a_knot_cubic_spline(const std::vector<double>& xk, const std::vector<double>& yk,
+                                     double* yt, int H)
 {
     const int n = static_cast<int>(xk.size());
     if (n == 1) { std::fill(yt, yt + H, yk[0]); return; }
@@ -29,22 +61,39 @@ static void natural_cubic_spline(const std::vector<double>& xk, const std::vecto
     std::vector<double> h(n - 1);
     for (int i = 0; i < n - 1; ++i) h[i] = xk[i + 1] - xk[i];
 
-    std::vector<double> alpha(n, 0.0);
-    for (int i = 1; i < n - 1; ++i)
-        alpha[i] = 3.0 * ((yk[i + 1] - yk[i]) / h[i] - (yk[i] - yk[i - 1]) / h[i - 1]);
+    // n == 3 has only one interior knot, so the two not-a-knot conditions (third-derivative
+    // continuity at x1 and at x_{n-2} — the same point here) collapse into one equation and
+    // the system is rank-deficient. Fall back to natural (S''=0 at both ends) in that case.
+    std::vector<double> A(n * n, 0.0), rhs(n, 0.0);
+    if (n == 3) {
+        A[0] = 1.0; rhs[0] = 0.0;                                  // c0 = 0
+        A[1 * n + 0] = h[0]; A[1 * n + 1] = 2.0 * (h[0] + h[1]); A[1 * n + 2] = h[1];
+        rhs[1] = 3.0 * ((yk[2] - yk[1]) / h[1] - (yk[1] - yk[0]) / h[0]);
+        A[2 * n + 2] = 1.0; rhs[2] = 0.0;                          // c2 = 0
+    } else {
+        // Not-a-knot at x1: third derivative of segment 0 equals that of segment 1.
+        A[0] = -h[1]; A[1] = h[0] + h[1]; A[2] = -h[0]; rhs[0] = 0.0;
 
-    std::vector<double> l(n), mu(n), z(n);
-    l[0] = 1.0; mu[0] = 0.0; z[0] = 0.0;
-    for (int i = 1; i < n - 1; ++i) {
-        l[i]  = 2.0 * (xk[i + 1] - xk[i - 1]) - h[i - 1] * mu[i - 1];
-        mu[i] = h[i] / l[i];
-        z[i]  = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+        // Interior knots: standard first-derivative-continuity equations.
+        for (int i = 1; i <= n - 2; ++i) {
+            A[i * n + (i - 1)] = h[i - 1];
+            A[i * n + i]       = 2.0 * (h[i - 1] + h[i]);
+            A[i * n + (i + 1)] = h[i];
+            rhs[i] = 3.0 * ((yk[i + 1] - yk[i]) / h[i] - (yk[i] - yk[i - 1]) / h[i - 1]);
+        }
+
+        // Not-a-knot at x_{n-2}: third derivative of the last two segments match.
+        A[(n - 1) * n + (n - 3)] = -h[n - 2];
+        A[(n - 1) * n + (n - 2)] = h[n - 3] + h[n - 2];
+        A[(n - 1) * n + (n - 1)] = -h[n - 3];
+        rhs[n - 1] = 0.0;
     }
-    l[n - 1] = 1.0; z[n - 1] = 0.0;
 
-    std::vector<double> c(n, 0.0), b(n - 1), d(n - 1);
-    for (int j = n - 2; j >= 0; --j) {
-        c[j] = z[j] - mu[j] * c[j + 1];
+    std::vector<double> c;
+    solve_linear_system(A, rhs, c, n);
+
+    std::vector<double> b(n - 1), d(n - 1);
+    for (int j = 0; j < n - 1; ++j) {
         b[j] = (yk[j + 1] - yk[j]) / h[j] - h[j] * (c[j + 1] + 2.0 * c[j]) / 3.0;
         d[j] = (c[j + 1] - c[j]) / (3.0 * h[j]);
     }
@@ -142,7 +191,7 @@ void BaseMPPI::sample_noise_cubic() {
             for (int side = 0; side < 2; ++side) {
                 const int m = 2 * j + side;
                 for (int k = 0; k < K; ++k) knot_y[k] = sigma * normal_(rng_);
-                natural_cubic_spline(knot_x_, knot_y, yt.data(), H);
+                not_a_knot_cubic_spline(knot_x_, knot_y, yt.data(), H);
                 for (int t = 0; t < H; ++t)
                     noise_[s * H * NUM_MUSCLES + t * NUM_MUSCLES + m] = yt[t];
             }
