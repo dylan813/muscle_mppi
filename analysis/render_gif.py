@@ -1,6 +1,11 @@
 """
 Render a GIF from a qpos trajectory saved by mppi_sim.
 
+mppi_sim also writes a sibling <name>.csv (default mppi_sim.csv) with per-joint
+velocity and per-muscle activation columns for FR-leg plotting via
+analysis/log/plot_walk_leg.py — this script only reads the qpos companion and
+ignores that file.
+
 Usage (from muscle_mppi/muscle_mppi/):
     python3 ../../analysis/render_gif.py [qpos_csv] [output.gif]
 

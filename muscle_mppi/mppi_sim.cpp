@@ -7,7 +7,7 @@
 //   ./build/mppi_sim [task] [yaml] [output.csv]
 //
 // Output CSV columns:
-//   t, px, py, pz, vx, vy, vz, qw, height_cost, orient_cost, vel_cost, gait_cost
+//   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, act_m0..act_m{NUM_MUSCLES-1}
 
 #include <mujoco/mujoco.h>
 
@@ -110,7 +110,10 @@ int main(int argc, char** argv)
 
     // ── output files ─────────────────────────────────────────────────────────
     std::ofstream csv(csv_path);
-    csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg\n";
+    csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg";
+    for (int j = 0; j < NUM_JOINTS; ++j) csv << ",dq_j" << j;
+    for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;
+    csv << "\n";
 
     const std::string qpos_path = csv_path.substr(0, csv_path.rfind('.')) + "_qpos.csv";
     std::ofstream qpos_log(qpos_path);
@@ -173,7 +176,11 @@ int main(int argc, char** argv)
             csv << sim_t << ","
                 << d->qpos[0] << "," << d->qpos[1] << "," << d->qpos[2] << ","
                 << d->qvel[0] << "," << d->qvel[1] << "," << d->qvel[2] << ","
-                << qw << "," << roll << "\n";
+                << qw << "," << roll;
+            for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
+            const double* act = mppi.activation();
+            for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
+            csv << "\n";
 
             // save full qpos for GIF rendering
             for (int i = 0; i < m->nq; ++i)

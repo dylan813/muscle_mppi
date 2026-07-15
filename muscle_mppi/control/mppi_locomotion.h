@@ -38,6 +38,7 @@ public:
 
     const MuscleParams& muscle_params() const { return muscle_; }
     const TaskConfig&   task_ref()      const { return task_; }
+    const double*       activation()    const { return real_act_; }
 
 private:
     double rollout(int s, const RobotState& state) override;

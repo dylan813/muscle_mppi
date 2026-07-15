@@ -87,4 +87,5 @@ python3 plot_force_velocity.py
 cd muscle_mppi/muscle_mppi/build
 ./mppi_sim
 MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/mppi_sim.gif
+python3 ../../analysis/log/plot_walk_leg.py <name>
 ```
