@@ -1,6 +1,7 @@
 """
 Plot the force-velocity curve for the Hill muscle model in muscle.h.
-Parameters are read from tasks.yaml (default_muscle block).
+Parameters are read from tasks.yaml (default_muscle_quad block),
+one subplot per joint type (hip, thigh, calf) — values are identical across the 4 legs.
 
 X-axis: lce_dot / vmax  (normalized fiber velocity)
 Y-axis: F / F_max       (force normalized by peak isometric force)
@@ -16,13 +17,14 @@ import os
 # ---------------------------------------------------------------------------
 # Load parameters from tasks.yaml
 # ---------------------------------------------------------------------------
-yaml_path = os.path.join(os.path.dirname(__file__), "../muscle_mppi/utils/tasks.yaml")
+yaml_path = os.path.join(os.path.dirname(__file__), "../../muscle_mppi/utils/tasks.yaml")
 with open(yaml_path) as f:
     cfg = yaml.safe_load(f)
 
-muscle = cfg["default_muscle"]
-FVmax = muscle["FVmax"][0]   # same for all joints
-c = FVmax - 1.0
+muscle = cfg["default_muscle_quad"]
+FVmax_list = muscle["FVmax"][:3]   # identical across the 4 legs; only need one set
+
+JOINT_NAMES = ["hip", "thigh", "calf"]
 
 # ---------------------------------------------------------------------------
 # Reimplementation of force_vel() from muscle.h
@@ -38,33 +40,42 @@ def force_vel(eff_vel, c, FVmax):
         return FVmax
 
 # ---------------------------------------------------------------------------
-# Evaluate over normalised velocity range
+# Evaluate + plot per joint
 # ---------------------------------------------------------------------------
 eff_vel = np.linspace(-1.5, 2.0, 1000)
-fv = np.array([force_vel(v, c, FVmax) for v in eff_vel])
 
-# ---------------------------------------------------------------------------
-# Plot
-# ---------------------------------------------------------------------------
-fig, ax = plt.subplots(figsize=(7, 5))
+fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
 
-ax.plot(eff_vel, fv, color="#2196F3", linewidth=2)
+for joint_j in range(3):
+    ax = axes[joint_j]
 
-ax.axvline(0.0,  color="gray", linewidth=0.8, linestyle="--", alpha=0.6, label="Isometric ($\\dot{l}_{ce}=0$)")
-ax.axvline(-1.0, color="gray", linewidth=0.8, linestyle=":",  alpha=0.6, label="Max shortening ($\\dot{l}_{ce}/v_{max}=-1$)")
-ax.axvline(c,    color="gray", linewidth=0.8, linestyle="-.", alpha=0.6, label=f"Eccentric plateau onset ($c={c:.2f}$)")
-ax.axhline(1.0,  color="gray", linewidth=0.8, linestyle="--", alpha=0.4)
-ax.axhline(FVmax, color="#FF9800", linewidth=1.0, linestyle="--", alpha=0.7, label=f"$F_{{v,max}}={FVmax}$")
+    FVmax = FVmax_list[joint_j]
+    c = FVmax - 1.0
 
-ax.set_xlabel("Muscle velocity  $\\dot{l}_{ce} / v_{max}$", fontsize=13)
-ax.set_ylabel("Force  $F / F_{max}$", fontsize=13)
-ax.set_title("Force–Velocity Curve", fontsize=14)
-ax.legend(fontsize=10)
-ax.set_xlim(-1.5, 2.0)
-ax.set_ylim(-0.05, FVmax * 1.15)
-ax.grid(True, alpha=0.3)
+    fv = np.array([force_vel(v, c, FVmax) for v in eff_vel])
+
+    ax.plot(eff_vel, fv, color="#2196F3", linewidth=3, zorder=3)
+
+    ax.axvline(0.0,  color="#4CAF50", linewidth=2.0, linestyle="--", alpha=0.9, label="Isometric")
+    ax.axvline(-1.0, color="#9C27B0", linewidth=2.0, linestyle=":",  alpha=0.9, label="Max shortening")
+    ax.axvline(c,    color="#E91E63", linewidth=2.0, linestyle="-.", alpha=0.9, label="Plateau onset")
+    ax.axhline(1.0,  color="#607D8B", linewidth=1.5, linestyle="--", alpha=0.6)
+    ax.axhline(FVmax, color="#FF9800", linewidth=2.0, linestyle="--", alpha=0.9, label="$F_{v,max}$")
+
+    ax.set_title(f"{JOINT_NAMES[joint_j]}  FVmax={FVmax:.3f}", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlabel("$\\dot{l}_{ce} / v_{max}$", fontsize=11)
+    if joint_j == 0:
+        ax.set_ylabel("$F / F_{max}$", fontsize=11)
+
+axes[0].legend(fontsize=8, loc="upper left")
+
+axes[0].set_xlim(-1.5, 2.0)
+axes[0].set_ylim(-0.05, max(FVmax_list) * 1.15)
+
+fig.suptitle("Force–Velocity Curves (default_muscle_quad, per joint type)", fontsize=16)
+fig.tight_layout(rect=[0, 0, 1, 0.93])
 
 out_path = os.path.join(os.path.dirname(__file__), "force_velocity.png")
-fig.tight_layout()
 fig.savefig(out_path, dpi=150)
 print(f"Saved → {out_path}")
