@@ -45,7 +45,15 @@ class MPPIController {
 public:
     explicit MPPIController(const std::string& task      = "walk",
                             const std::string& yaml_path = "../utils/tasks.yaml")
-        : mppi_(task, yaml_path) {}
+        : mppi_(task, yaml_path) {
+        // TaskConfig::cmd_vel isn't picked up by the constructor (which only reads
+        // cost.vel_des), so apply it explicitly — mirrors mppi_sim.cpp.
+        const TaskConfig& t = mppi_.task_ref();
+        MotionCommand cmd   = mppi_.command();
+        cmd.vx = t.cmd_vel[0];
+        cmd.vy = t.cmd_vel[1];
+        mppi_.set_command(cmd);
+    }
 
     void Init() {
         InitLowCmd();
@@ -118,6 +126,8 @@ private:
         if (!mppi_ready_.load()) {
             // Smooth stand-up: tanh ramp over 3 s, mirrors stand_go2.cpp exactly.
             running_time_ += 0.02;
+            if (running_time_ >= STANDUP_SECS + HOLD_SECS)
+                standup_done_.store(true, std::memory_order_relaxed);
             const double phase = std::tanh(running_time_ / 1.2);
             const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
             for (int i = 0; i < NUM_JOINTS; ++i) {
@@ -182,9 +192,12 @@ private:
             if (solve_count % 20 == 0)
                 std::cout << "Muscle MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
 
-            // Wait for CONVERGENCE_SOLVES iterations before handing over to avoid
-            // instability from a cold warm-start.
-            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES) {
+            // Wait for CONVERGENCE_SOLVES iterations AND the stand-up ramp to finish
+            // before handing over — otherwise handover can fire mid-crouch since this
+            // thread starts solving (and counting) as soon as state is valid, well
+            // before ControlLoop's tanh ramp has actually settled the robot.
+            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES &&
+                standup_done_.load(std::memory_order_relaxed)) {
                 std::cout << "MPPI converged after " << solve_count
                           << " solves (avg " << solve_sum_ms / solve_count
                           << " ms) — handing over to Hill torques\n";
@@ -193,7 +206,9 @@ private:
         }
     }
 
-    static constexpr int CONVERGENCE_SOLVES = 20;
+    static constexpr int    CONVERGENCE_SOLVES = 10;
+    static constexpr double STANDUP_SECS       = 3.0;
+    static constexpr double HOLD_SECS          = 1.0;
 
     // Damping gains applied after handover (one per joint: hip, thigh, calf × 4 legs).
     const double kd_[NUM_JOINTS] = {
@@ -219,6 +234,7 @@ private:
     double running_time_ = 0.0;
 
     std::atomic<bool> mppi_ready_{false};
+    std::atomic<bool> standup_done_{false};
 
     MPPILocomotion mppi_;
 
