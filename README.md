@@ -89,3 +89,10 @@ cd muscle_mppi/muscle_mppi/build
 MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/mppi_sim.gif
 python3 ../../analysis/log/plot_walk_leg.py <name>
 ```
+
+#CMA-ES
+
+```bash
+cd muscle_mppi/analysis/optimize
+python3 cmaes_walk.py --maxiter 50 --workers <x> --run-name <xxx>
+```

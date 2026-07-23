@@ -35,3 +35,4 @@ __pycache__/
 analysis/log/*
 !analysis/log/plot_activations.py
 analysis/optimize/results/*
+analysis/optimize/wandb/*
