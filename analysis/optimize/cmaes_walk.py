@@ -1,8 +1,9 @@
 """
 CMA-ES optimizer for Hill muscle parameters of the walk task.
 
-Optimizes x = [lce_min, lce_max, FVmax, pFLmax] (scalar per param, broadcast
-to all 12 joints) to minimize the mean per-step locomotion cost from tasks.yaml.
+Optimizes x = [lce_min, lce_max, pFLmax] (scalar per param, broadcast to all
+12 joints) to minimize the mean per-step locomotion cost from tasks.yaml.
+FVmax is held fixed at objective.FVMAX_FIXED rather than searched.
 
 Usage:
   python cmaes_walk.py               # run full optimization
@@ -25,29 +26,27 @@ sys.path.insert(0, os.path.dirname(__file__))
 import cma
 from objective import evaluate, render_rollout, RENDER_FPS
 
-# ── search space (12D: hip/thigh/calf × lce_min/lce_max/FVmax/pFLmax) ────────
+# ── search space (9D: hip/thigh/calf × lce_min/lce_max/pFLmax) ───────────────
+# FVmax is fixed at objective.FVMAX_FIXED (not searched).
 # All 4 legs share the same value per joint type.
 PARAM_NAMES = [
     "lce_min_hip",  "lce_min_thigh",  "lce_min_calf",
     "lce_max_hip",  "lce_max_thigh",  "lce_max_calf",
-    "FVmax_hip",    "FVmax_thigh",    "FVmax_calf",
     "pFLmax_hip",   "pFLmax_thigh",   "pFLmax_calf",
 ]
 # Start from the 4D-optimized values (all joint types same)
 X0 = [
     0.8474, 0.8474, 0.8474,   # lce_min: hip, thigh, calf
     1.1637, 1.1637, 1.1637,   # lce_max
-    1.4391, 1.4391, 1.4391,   # FVmax
     0.8050, 0.8050, 0.8050,   # pFLmax
 ]
 SIGMA0 = [
     0.05, 0.05, 0.05,   # lce_min
     0.10, 0.10, 0.10,   # lce_max
-    0.25, 0.25, 0.25,   # FVmax
     0.30, 0.30, 0.30,   # pFLmax
 ]
-LO = [0.50, 0.50, 0.50,  1.00, 1.00, 1.00,  1.00, 1.00, 1.00,  0.20, 0.20, 0.20]
-HI = [0.90, 0.90, 0.90,  1.60, 1.60, 1.60,  3.00, 3.00, 3.00,  2.50, 2.50, 2.50]
+LO = [0.50, 0.50, 0.50,  1.00, 1.00, 1.00,  0.20, 0.20, 0.20]
+HI = [0.90, 0.90, 0.90,  1.60, 1.60, 1.60,  2.50, 2.50, 2.50]
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
