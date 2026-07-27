@@ -11,11 +11,19 @@ Each call:
   5. Parses the output CSV and returns the mean per-step cost from tasks.yaml weights
 
 The cost formula mirrors mppi_locomotion.cpp::step_cost() for terms computable
-from the logged CSV (pos_x/y/z, orientation, vel_x/y/z). ang_vel and gait_ref
+from the logged CSV (pos_x/y/z, orientation, vel_x/y/z — px/py/pz are the
+whole-robot subtree CoM and vx/vy/vz are body-frame velocity, both computed
+in mppi_sim.cpp to match step_cost() exactly). ang_vel and gait_ref
 terms are omitted as those quantities are not logged.
 """
 
 import os
+
+# Headless (no X11 DISPLAY) EGL rendering — must be set before mujoco is
+# imported, since the GL backend is selected at import time. Only defaults
+# it; an existing MUJOCO_GL (e.g. a real DISPLAY, or osmesa) is left alone.
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 import copy
 import subprocess
 import tempfile
@@ -59,7 +67,13 @@ RENDER_FPS = 25
 _JOINT_TYPE = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2]
 
 # FVmax is held fixed (not part of the search space) — see cmaes_walk.py PARAM_NAMES.
-FVMAX_FIXED = 1.4
+# Per-joint-type overrides via FVMAX_HIP/FVMAX_THIGH/FVMAX_CALF (used by
+# sweep_fvmax_joint_grid.sh); each falls back to FVMAX_FIXED (used by the
+# older, single-value sweep_fvmax.sh) if unset.
+FVMAX_FIXED = float(os.environ.get("FVMAX_FIXED", 1.4))
+FVMAX_HIP   = float(os.environ.get("FVMAX_HIP",   FVMAX_FIXED))
+FVMAX_THIGH = float(os.environ.get("FVMAX_THIGH", FVMAX_FIXED))
+FVMAX_CALF  = float(os.environ.get("FVMAX_CALF",  FVMAX_FIXED))
 
 
 def _broadcast_per_type(vals_by_type):
@@ -72,14 +86,14 @@ def _build_muscle_params(x, base_quad):
     x = [lce_min_hip, lce_min_thigh, lce_min_calf,
          lce_max_hip, lce_max_thigh, lce_max_calf,
          pFLmax_hip,  pFLmax_thigh,  pFLmax_calf]
-    All 4 legs share the same value per joint type. FVmax is fixed at
-    FVMAX_FIXED for all joints (not searched).
+    All 4 legs share the same value per joint type. FVmax is fixed per joint
+    type at FVMAX_HIP/FVMAX_THIGH/FVMAX_CALF (not searched).
     Fixed params (vmax, phi_min, phi_max, peak_force) taken from base_quad.
     """
     p = copy.deepcopy(base_quad)
     p["lce_min"] = _broadcast_per_type(x[0:3])
     p["lce_max"] = _broadcast_per_type(x[3:6])
-    p["FVmax"]   = [FVMAX_FIXED] * 12
+    p["FVmax"]   = _broadcast_per_type([FVMAX_HIP, FVMAX_THIGH, FVMAX_CALF])
     p["pFLmax"]  = _broadcast_per_type(x[6:9])
     return p
 

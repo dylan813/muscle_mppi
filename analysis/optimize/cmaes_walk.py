@@ -3,7 +3,8 @@ CMA-ES optimizer for Hill muscle parameters of the walk task.
 
 Optimizes x = [lce_min, lce_max, pFLmax] (scalar per param, broadcast to all
 12 joints) to minimize the mean per-step locomotion cost from tasks.yaml.
-FVmax is held fixed at objective.FVMAX_FIXED rather than searched.
+FVmax is held fixed per joint type (objective.FVMAX_HIP/THIGH/CALF, each
+overridable via env var) rather than searched.
 
 Usage:
   python cmaes_walk.py               # run full optimization

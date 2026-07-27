@@ -8,6 +8,12 @@
 //
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, act_m0..act_m{NUM_MUSCLES-1}
+//   px/py/pz are the whole-robot (trunk + legs) center of mass, i.e. the base
+//   body's subtree_com — matching what step_cost() scores against goal_pos
+//   in mppi_locomotion.cpp, not the trunk frame origin.
+//   vx/vy/vz are body-frame linear velocity (rotated from the free joint's
+//   world-frame qvel[0:3]), matching the body-frame convention step_cost()
+//   uses when comparing against cmd_.vx/vy in mppi_locomotion.cpp.
 
 #include <mujoco/mujoco.h>
 
@@ -84,6 +90,14 @@ int main(int argc, char** argv)
     if (!m) { fprintf(stderr, "mj_loadXML: %s\n", err); return 1; }
     m->opt.timestep = task.dt;
     mjData* d = mj_makeData(m);
+
+    // Resolve the base body (mirrors MPPILocomotion::base_bid_ resolution)
+    // so logged position matches the whole-robot CoM the cost function scores.
+    int base_bid = 1;
+    for (const char* name : {"trunk", "base", "base_link"}) {
+        int bid = mj_name2id(m, mjOBJ_BODY, name);
+        if (bid >= 0) { base_bid = bid; break; }
+    }
 
     // set joint damping to match MPPI's internal model
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
@@ -173,9 +187,21 @@ int main(int argc, char** argv)
             const double qw  = d->qpos[3];
             const double roll = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0))
                                 * 180.0 / M_PI;
+
+            // Rotate world-frame free-joint velocity into body frame (xmat
+            // is the body->world rotation, so its transpose maps world->body).
+            double xmat[9];
+            mju_quat2Mat(xmat, d->qpos + 3);
+            const double vwx = d->qvel[0], vwy = d->qvel[1], vwz = d->qvel[2];
+            const double vx_body = vwx * xmat[0] + vwy * xmat[3] + vwz * xmat[6];
+            const double vy_body = vwx * xmat[1] + vwy * xmat[4] + vwz * xmat[7];
+            const double vz_body = vwx * xmat[2] + vwy * xmat[5] + vwz * xmat[8];
+
+            const double* com = d->subtree_com + base_bid * 3;
+
             csv << sim_t << ","
-                << d->qpos[0] << "," << d->qpos[1] << "," << d->qpos[2] << ","
-                << d->qvel[0] << "," << d->qvel[1] << "," << d->qvel[2] << ","
+                << com[0] << "," << com[1] << "," << com[2] << ","
+                << vx_body << "," << vy_body << "," << vz_body << ","
                 << qw << "," << roll;
             for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
             const double* act = mppi.activation();
