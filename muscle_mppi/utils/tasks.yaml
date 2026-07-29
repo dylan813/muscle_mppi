@@ -28,16 +28,19 @@ default_muscle: &default_muscle
   #   r values: hip=0.1584, thigh=0.0617, calf=0.1781
   peak_force:    [149.7, 384.1, 255.1]
 
-  # Fiber length range normalized by optimal isometric length (l_opt).
-  # Both muscles in the antagonistic pair span [lce_min, lce_max] as the joint sweeps phi_min→phi_max.
-  lce_min:       [0.75, 0.75, 0.75]
-  lce_max:       [1.05, 1.05, 1.05]
-
   # Joint angle range (rad) mapped linearly to [lce_min, lce_max] for the agonist muscle.
   # Taken from go2.xml joint limits, 0.1 rad inside the hard stops to avoid singularities at limits.
   # go2.xml limits — hip: [-1.0472, 1.0472], thigh: [-1.5708, 3.4907], calf: [-2.7227, -0.83776]
   phi_min:       [-0.9472, -1.4708, -2.6227]
   phi_max:       [0.9472,  3.3907,  -0.9378]
+
+  # Fiber length range normalized by optimal isometric length (l_opt).
+  # Both muscles in the antagonistic pair span [lce_min, lce_max] as the joint sweeps phi_min→phi_max.
+  lce_min:       [0.75, 0.75, 0.75]
+  lce_max:       [1.05, 1.05, 1.05]
+
+  # Passive parallel elasticity scale. Force at maximum extension relative to peak_force.
+  pFLmax:        [1.3, 1.3, 1.3]
 
   # Maximum fiber contraction velocity (fiber lengths / s). FV curve → 0 at lce_dot = -vmax.
   # Determined by: vmax = r * dq_max
@@ -47,9 +50,6 @@ default_muscle: &default_muscle
 
   # Eccentric force amplification plateau. FV saturates at FVmax when the muscle is lengthening.
   FVmax:         [1.33, 1.33, 1.33]
-
-  # Passive parallel elasticity scale. Force at maximum extension relative to peak_force.
-  pFLmax:        [1.3, 1.3, 1.3]
 
   # MuJoCo joint damping (N·m·s/rad) written directly to simulation DOFs at startup.
   # Overrides the go2.xml default of 0.1. Values should match Go2 motor driver kd gains.
@@ -90,17 +90,17 @@ reach:
   muscle: *default_muscle
 
 # -----------------------------------------------------------------------
-# Quadruped muscle parameters (12 joints — same values repeated 4× for FR/FL/RR/RL).
+# Quadruped muscle parameters (12 joints: (hip/thigh/calf)x(FR/FL/RR/RL))
 default_muscle_quad: &default_muscle_quad
   act_bandwidth: 20.0
   peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
-  lce_min:     [0.8128, 0.8960, 0.8484,  0.8128, 0.8960, 0.8484,  0.8128, 0.8960, 0.8484,  0.8128, 0.8960, 0.8484]
-  lce_max:     [1.0000, 1.0082, 1.1912,  1.0000, 1.0082, 1.1912,  1.0000, 1.0082, 1.1912,  1.0000, 1.0082, 1.1912]
   phi_min:     [-0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227]
   phi_max:     [ 0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378]
+  lce_min:     [0.8272, 0.8995, 0.8617,  0.8272, 0.8995, 0.8617,  0.8272, 0.8995, 0.8617,  0.8272, 0.8995, 0.8617]
+  lce_max:     [1.1057, 1.0088, 1.1758,  1.1057, 1.0088, 1.1758,  1.1057, 1.0088, 1.1758,  1.1057, 1.0088, 1.1758]
+  pFLmax:      [0.2429, 1.4197, 0.2890,  0.2429, 1.4197, 0.2890,  0.2429, 1.4197, 0.2890,  0.2429, 1.4197, 0.2890]
   vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
-  FVmax:       [1.2140, 1.6364, 1.0339,  1.2140, 1.6364, 1.0339,  1.2140, 1.6364, 1.0339,  1.2140, 1.6364, 1.0339]
-  pFLmax:      [2.1685, 1.9645, 0.2421,  2.1685, 1.9645, 0.2421,  2.1685, 1.9645, 0.2421,  2.1685, 1.9645, 0.2421]
+  FVmax:       [1.2, 1.2, 1.4,  1.2, 1.2, 1.4,  1.2, 1.2, 1.4,  1.2, 1.2, 1.4]
   kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
 
 # -----------------------------------------------------------------------
