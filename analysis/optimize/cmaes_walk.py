@@ -89,12 +89,19 @@ def main():
                         help="wandb project to log runs to")
     parser.add_argument("--run-name", type=str, default=None,
                         help="wandb run name (default: wandb auto-generates one)")
+    parser.add_argument("--results-dir", type=str, default=None,
+                        help="Override results dir (default: ./results). Use a "
+                             "distinct dir per process when running sweeps in "
+                             "parallel, so cmaes_log files don't collide.")
     args = parser.parse_args()
+
+    results_dir = args.results_dir if args.results_dir else RESULTS_DIR
+    os.makedirs(results_dir, exist_ok=True)
 
     print(f"CMA-ES walk optimizer")
     print(f"  x0:      {dict(zip(PARAM_NAMES, X0))}")
     print(f"  bounds:  lo={LO}  hi={HI}")
-    print(f"  results: {RESULTS_DIR}")
+    print(f"  results: {results_dir}")
     print()
 
     if args.test:
@@ -121,7 +128,7 @@ def main():
         opts["popsize"] = args.popsize
 
     es = cma.CMAEvolutionStrategy(X0, sigma0, opts)
-    cma_log_dir = os.path.join(RESULTS_DIR, "cmaes_log")
+    cma_log_dir = os.path.join(results_dir, "cmaes_log")
     os.makedirs(cma_log_dir, exist_ok=True)
     logger = cma.CMADataLogger(os.path.join(cma_log_dir, "run")).register(es)
 
@@ -206,7 +213,7 @@ def main():
     print("\n═══ Optimization complete ═══")
     print(f"Best fitness : {best_cost:.4f}")
     print(f"Best params  : {dict(zip(PARAM_NAMES, best_x))}")
-    print(f"Results saved to {RESULTS_DIR}")
+    print(f"Results saved to {results_dir}")
     wandb.finish()
 
 

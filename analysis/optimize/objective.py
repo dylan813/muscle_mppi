@@ -24,6 +24,17 @@ import os
 # it; an existing MUJOCO_GL (e.g. a real DISPLAY, or osmesa) is left alone.
 os.environ.setdefault("MUJOCO_GL", "egl")
 
+# mppi_sim parallelizes its rollout sampling internally via OpenMP
+# (#pragma omp parallel for in base_mppi.cpp / mppi_locomotion.cpp), which by
+# default spawns one thread per core. Each CMA-ES generation already runs
+# many mppi_sim processes concurrently (one per ProcessPoolExecutor worker),
+# so without this, every worker process independently tries to claim all
+# cores and they oversubscribe each other. subprocess.run() below inherits
+# this env, so setting it here covers every entry point (sweep script,
+# direct cmaes_walk.py invocation, etc). Only defaults it; an explicit
+# OMP_NUM_THREADS in the environment is left alone.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import copy
 import subprocess
 import tempfile
