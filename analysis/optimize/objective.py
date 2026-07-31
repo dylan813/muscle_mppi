@@ -2,9 +2,8 @@
 Objective function for CMA-ES optimization of Hill muscle parameters.
 
 Each call:
-  1. Expands 9D x=[lce_min×3, lce_max×3, pFLmax×3] to 12-element arrays
-     (hip/thigh/calf values shared across all 4 legs). FVmax is held fixed
-     at FVMAX_FIXED rather than searched.
+  1. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
+     arrays (hip/thigh/calf values shared across all 4 legs).
   2. Writes a temp tasks.yaml with absolute paths
   3. Regenerates the single gait file used by the walk task
   4. Runs mppi_sim as a subprocess
@@ -77,16 +76,6 @@ RENDER_FPS = 25
 # Type index repeats: [0,1,2, 0,1,2, 0,1,2, 0,1,2]
 _JOINT_TYPE = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2]
 
-# FVmax is held fixed (not part of the search space) — see cmaes_walk.py PARAM_NAMES.
-# Per-joint-type overrides via FVMAX_HIP/FVMAX_THIGH/FVMAX_CALF (used by
-# sweep_fvmax_joint_grid.sh); each falls back to FVMAX_FIXED (used by the
-# older, single-value sweep_fvmax.sh) if unset.
-FVMAX_FIXED = float(os.environ.get("FVMAX_FIXED", 1.4))
-FVMAX_HIP   = float(os.environ.get("FVMAX_HIP",   FVMAX_FIXED))
-FVMAX_THIGH = float(os.environ.get("FVMAX_THIGH", FVMAX_FIXED))
-FVMAX_CALF  = float(os.environ.get("FVMAX_CALF",  FVMAX_FIXED))
-
-
 def _broadcast_per_type(vals_by_type):
     """[hip_val, thigh_val, calf_val] → 12-element list following joint order."""
     return [float(vals_by_type[t]) for t in _JOINT_TYPE]
@@ -96,16 +85,16 @@ def _build_muscle_params(x, base_quad):
     """
     x = [lce_min_hip, lce_min_thigh, lce_min_calf,
          lce_max_hip, lce_max_thigh, lce_max_calf,
-         pFLmax_hip,  pFLmax_thigh,  pFLmax_calf]
-    All 4 legs share the same value per joint type. FVmax is fixed per joint
-    type at FVMAX_HIP/FVMAX_THIGH/FVMAX_CALF (not searched).
+         pFLmax_hip,  pFLmax_thigh,  pFLmax_calf,
+         FVmax_hip,   FVmax_thigh,   FVmax_calf]
+    All 4 legs share the same value per joint type.
     Fixed params (vmax, phi_min, phi_max, peak_force) taken from base_quad.
     """
     p = copy.deepcopy(base_quad)
     p["lce_min"] = _broadcast_per_type(x[0:3])
     p["lce_max"] = _broadcast_per_type(x[3:6])
-    p["FVmax"]   = _broadcast_per_type([FVMAX_HIP, FVMAX_THIGH, FVMAX_CALF])
     p["pFLmax"]  = _broadcast_per_type(x[6:9])
+    p["FVmax"]   = _broadcast_per_type(x[9:12])
     return p
 
 
@@ -171,7 +160,7 @@ def _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel):
 
 def evaluate(x, worker_id=0, verbose=False):
     """
-    Evaluate one candidate x = [lce_min, lce_max, pFLmax] (FVmax fixed).
+    Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D).
     Returns scalar fitness (lower is better).
     """
     # Load base config each call (safe for multiprocessing; file is read-only)
@@ -230,9 +219,9 @@ def evaluate(x, worker_id=0, verbose=False):
 
     if verbose:
         hip, thigh, calf = (
-            f"lce=[{x[0]:.3f},{x[3]:.3f}] pFL={x[6]:.3f}",
-            f"lce=[{x[1]:.3f},{x[4]:.3f}] pFL={x[7]:.3f}",
-            f"lce=[{x[2]:.3f},{x[5]:.3f}] pFL={x[8]:.3f}",
+            f"lce=[{x[0]:.3f},{x[3]:.3f}] pFL={x[6]:.3f} FV={x[9]:.3f}",
+            f"lce=[{x[1]:.3f},{x[4]:.3f}] pFL={x[7]:.3f} FV={x[10]:.3f}",
+            f"lce=[{x[2]:.3f},{x[5]:.3f}] pFL={x[8]:.3f} FV={x[11]:.3f}",
         )
         print(f"  [w{worker_id}] hip:{hip}  thigh:{thigh}  calf:{calf}"
               f"  → fitness={fitness:.1f}  inf_phases={n_inf}")
