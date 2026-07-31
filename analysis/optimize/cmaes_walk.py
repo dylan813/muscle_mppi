@@ -79,12 +79,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test",    action="store_true",
                         help="Evaluate initial point only (smoke test)")
-    parser.add_argument("--maxiter", type=int,   default=50)
+    parser.add_argument("--maxiter", type=int,   default=10)
     parser.add_argument("--workers", type=int,   default=8)
     parser.add_argument("--sigma",   type=float, default=None,
                         help="Override initial sigma (scalar); default: per-param")
-    parser.add_argument("--popsize", type=int,   default=None,
-                        help="CMA-ES population size (default: auto)")
+    parser.add_argument("--popsize", type=int,   default=100,
+                        help="CMA-ES population size (default: 100)")
     parser.add_argument("--wandb-project", type=str, default="muscle-mppi-cmaes",
                         help="wandb project to log runs to")
     parser.add_argument("--run-name", type=str, default=None,

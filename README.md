@@ -78,7 +78,7 @@ DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/v
 # Unit Tests
 
 ```bash
-cd muscle_mppi/unit_tests
+cd muscle_mppi/analysis/unit_tests
 python3 plot_force_length.py
 python3 plot_force_velocity.py
 ```
@@ -94,5 +94,5 @@ python3 ../../analysis/log/plot_walk_leg.py <name>
 
 ```bash
 cd muscle_mppi/analysis/optimize
-python3 cmaes_walk.py --maxiter 50 --workers <x> --run-name <xxx>
+python3 cmaes_walk.py --workers <x> --run-name <xxx>
 ```
