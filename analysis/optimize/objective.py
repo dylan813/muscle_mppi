@@ -1,13 +1,16 @@
 """
 Objective function for CMA-ES optimization of Hill muscle parameters.
 
-Each call:
-  1. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
+Each call to evaluate(x):
+  1. Computes the closed-form active/passive force-length curve area for
+     each joint type from x (no simulation involved) and combines it with
+     the locomotion cost below via AREA_WEIGHT (env var, default 0 = off).
+  2. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
      arrays (hip/thigh/calf values shared across all 4 legs).
-  2. Writes a temp tasks.yaml with absolute paths
-  3. Regenerates the single gait file used by the walk task
-  4. Runs mppi_sim as a subprocess
-  5. Parses the output CSV and returns the mean per-step cost from tasks.yaml weights
+  3. Writes a temp tasks.yaml with absolute paths
+  4. Regenerates the single gait file used by the walk task
+  5. Runs mppi_sim as a subprocess
+  6. Parses the output CSV and computes the mean per-step cost from tasks.yaml weights
 
 The cost formula mirrors mppi_locomotion.cpp::step_cost() for terms computable
 from the logged CSV (pos_x/y/z, orientation, vel_x/y/z — px/py/pz are the
@@ -75,6 +78,74 @@ RENDER_FPS = 25
 # Joint order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), ...
 # Type index repeats: [0,1,2, 0,1,2, 0,1,2, 0,1,2]
 _JOINT_TYPE = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2]
+
+# ── closed-form active/passive force-length curve area (no simulation) ──────
+# Reimplements muscle.h's active/passive FL curves exactly as in
+# unit_tests/plot_force_length.py, so the area between them can be scored
+# for every candidate before (and regardless of) running mppi_sim.
+#
+# Integration domain is fixed and wide enough to contain both curves'
+# crossing points for any lce_min/lce_max/pFLmax within cmaes_walk.py's
+# LO/HI bounds — active_fl is 0 outside [lce_min, lce_max], so the domain
+# only needs to bracket that interval plus passive's rise past lce=1.0.
+_AREA_DOMAIN = np.linspace(0.3, 1.9, 400)
+
+
+def _active_force_length(length, A, mid, B):
+    left  = 0.5 * (A + mid)
+    right = 0.5 * (mid + B)
+    if length <= A or length >= B:
+        return 0.0
+    if length < left:
+        temp = (length - A) / (left - A)
+        return 0.5 * temp * temp
+    elif length < mid:
+        temp = (mid - length) / (mid - left)
+        return 1.0 - 0.5 * temp * temp
+    elif length < right:
+        temp = (length - mid) / (right - mid)
+        return 1.0 - 0.5 * temp * temp
+    else:
+        temp = (B - length) / (B - right)
+        return 0.5 * temp * temp
+
+
+def _active_fl(lce, lmin, lmax):
+    return (_active_force_length(lce, lmin, 1.0, lmax)
+            + 0.15 * _active_force_length(lce, lmin, 0.5 * (lmin + 0.95), 0.95))
+
+
+def _passive_force_length(lce, fpmax, b):
+    if lce <= 1.0:
+        return 0.0
+    elif lce <= b:
+        temp = (lce - 1.0) / (b - 1.0)
+        return 0.25 * fpmax * temp ** 3
+    else:
+        temp = (lce - b) / (b - 1.0)
+        return 0.25 * fpmax * (1.0 + 3.0 * temp)
+
+
+def _joint_curve_area(lmin, lmax, fpmax):
+    """Area of the region where the active curve exceeds the passive curve,
+    i.e. ∫ max(active - passive, 0) dl over _AREA_DOMAIN. The max(...,0)
+    clamp means passive's unbounded growth past its crossing with active
+    never contributes negatively — larger pFLmax can only shrink this area,
+    never make it negative."""
+    b = 0.5 * (lmax + 1.0)
+    active  = np.array([_active_fl(l, lmin, lmax) for l in _AREA_DOMAIN])
+    passive = np.array([_passive_force_length(l, fpmax, b) for l in _AREA_DOMAIN])
+    gap = np.maximum(active - passive, 0.0)
+    return float(np.trapz(gap, _AREA_DOMAIN))
+
+
+def curve_area_total(x):
+    """Sum of the active/passive FL-curve area across hip/thigh/calf, given
+    a 12D (or 9D) candidate x whose first 9 entries are
+    [lce_min_hip/thigh/calf, lce_max_hip/thigh/calf, pFLmax_hip/thigh/calf]."""
+    lce_min, lce_max, pFLmax = x[0:3], x[3:6], x[6:9]
+    return sum(_joint_curve_area(lce_min[j], lce_max[j], pFLmax[j]) for j in range(3))
+
 
 def _broadcast_per_type(vals_by_type):
     """[hip_val, thigh_val, calf_val] → 12-element list following joint order."""
@@ -158,10 +229,11 @@ def _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel):
     return float(cost.mean())
 
 
-def evaluate(x, worker_id=0, verbose=False):
+def _locomotion_cost(x, worker_id=0, verbose=False):
     """
-    Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D).
-    Returns scalar fitness (lower is better).
+    Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D) by
+    running mppi_sim. Returns scalar locomotion cost (lower is better);
+    does not include the curve-area term (see evaluate()).
     """
     # Load base config each call (safe for multiprocessing; file is read-only)
     with open(BASE_YAML) as f:
@@ -215,7 +287,7 @@ def evaluate(x, worker_id=0, verbose=False):
         goal_pos     = walk_cfg["cost"]["goal_pos"]
         cmd_vel      = walk_cfg["cmd_vel"]
 
-        fitness = _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel)
+        cost = _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel)
 
     if verbose:
         hip, thigh, calf = (
@@ -224,7 +296,29 @@ def evaluate(x, worker_id=0, verbose=False):
             f"lce=[{x[2]:.3f},{x[5]:.3f}] pFL={x[8]:.3f} FV={x[11]:.3f}",
         )
         print(f"  [w{worker_id}] hip:{hip}  thigh:{thigh}  calf:{calf}"
-              f"  → fitness={fitness:.1f}  inf_phases={n_inf}")
+              f"  → cost={cost:.1f}  inf_phases={n_inf}")
+
+    return cost
+
+
+def evaluate(x, worker_id=0, verbose=False):
+    """
+    Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D).
+    Returns scalar fitness (lower is better) = locomotion_cost -
+    AREA_WEIGHT * curve_area_total(x). AREA_WEIGHT is read fresh from the
+    environment on every call (not cached at import time) so cmaes_walk.py
+    can set it via os.environ after argparse, before spawning workers.
+    Set AREA_WEIGHT=0 (the default) to recover plain locomotion-cost fitness.
+    """
+    area_total  = curve_area_total(x)
+    area_weight = float(os.environ.get("AREA_WEIGHT", 0.0))
+
+    cost    = _locomotion_cost(x, worker_id=worker_id, verbose=verbose)
+    fitness = cost - area_weight * area_total
+
+    if verbose and area_weight:
+        print(f"  [w{worker_id}] area_total={area_total:.4f} "
+              f"(weight={area_weight:g})  cost={cost:.1f}  → fitness={fitness:.1f}")
 
     return fitness
 
