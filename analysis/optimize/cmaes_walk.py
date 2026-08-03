@@ -39,14 +39,12 @@ PARAM_NAMES = [
     "pFLmax_hip",   "pFLmax_thigh",   "pFLmax_calf",
     "FVmax_hip",    "FVmax_thigh",    "FVmax_calf",
 ]
-# Start at the midpoint of each param's [LO, HI] bound (below), rather than
-# a physically-motivated point, so the initial search is unbiased within
-# the box.
+
 X0 = [
-    0.725, 0.725, 0.725,   # lce_min: hip, thigh, calf
-    1.275, 1.275, 1.275,   # lce_max
-    0.950, 0.950, 0.950,   # pFLmax
-    1.425, 1.425, 1.425,   # FVmax
+    0.85, 0.82, 0.80,   # lce_min: hip, thigh, calf
+    1.09, 1.06, 1.19,   # lce_max
+    0.54, 0.94, 0.21,   # pFLmax
+    1.2, 1.3, 1.1,   # FVmax
 ]
 # ~15% of each param's (HI - LO) range, recomputed for the current bounds.
 SIGMA0 = [
@@ -235,13 +233,6 @@ def main():
             for name, val in zip(PARAM_NAMES, best_x):
                 wandb.run.summary[f"best/{name}"] = val
 
-            frames = render_rollout(best_x)
-            if frames is not None:
-                wandb.log({"best_rollout": wandb.Video(frames, fps=RENDER_FPS, format="gif")},
-                          step=generation)
-            else:
-                print("  (rollout render failed, skipping gif)")
-
         # Mean/std over feasible candidates only, so infeasible-penalty
         # outliers don't swamp them.
         feasible_costs = [c for c in costs if c < 1e5]
@@ -287,6 +278,18 @@ def main():
         log["fv_curves"] = wandb.Image(fig_fv)
         plt.close(fig_fl)
         plt.close(fig_fv)
+
+        # Rollout video of this generation's best candidate — unlike the
+        # curve plots above, this re-runs gait generation + mppi_sim +
+        # MuJoCo rendering (real simulation cost, not free), but rendering
+        # every generation (rather than only on new-best) lets you watch
+        # gait behavior evolve generation-by-generation in wandb, not just
+        # at improvement points.
+        frames = render_rollout(gen_best_x)
+        if frames is not None:
+            log["gen_best_rollout"] = wandb.Video(frames, fps=RENDER_FPS, format="gif")
+        else:
+            print("  (rollout render failed, skipping gif)")
 
         wandb.log(log, step=generation)
 
