@@ -28,7 +28,7 @@ import wandb
 sys.path.insert(0, os.path.dirname(__file__))
 
 import cma
-from objective import evaluate, render_rollout, curve_area_total, RENDER_FPS
+from objective import evaluate, render_rollout, curve_area_mean, RENDER_FPS
 from curve_plots import plot_fl_curves, plot_fv_curves
 
 # ── search space (12D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax) ────────
@@ -75,7 +75,7 @@ def _write_best_result(results_dir, best_cost, best_generation, best_x, cli_args
     survives even if the run is interrupted before completing."""
     payload = {
         "best_cost": best_cost,
-        "best_area_total": curve_area_total(best_x),
+        "best_area_mean": curve_area_mean(best_x),
         "best_generation": best_generation,
         "best_params": dict(zip(PARAM_NAMES, best_x)),
         "run_complete": done,
@@ -230,7 +230,7 @@ def main():
             print(f"  ★ new best: {best_cost:.4f}")
             _write_best_result(results_dir, best_cost, generation, best_x, args)
             wandb.run.summary["best_cost"] = best_cost
-            wandb.run.summary["best_area_total"] = curve_area_total(best_x)
+            wandb.run.summary["best_area_mean"] = curve_area_mean(best_x)
             wandb.run.summary["best_generation"] = generation
             for name, val in zip(PARAM_NAMES, best_x):
                 wandb.run.summary[f"best/{name}"] = val
@@ -255,15 +255,15 @@ def main():
         # closed-form function of x, both raw components can be recovered
         # exactly without re-running mppi_sim, for watching the cost/area
         # trade-off as area_weight is tuned across runs.
-        gen_best_area  = curve_area_total(solutions[gen_best_idx])
-        best_area      = curve_area_total(best_x)
+        gen_best_area  = curve_area_mean(solutions[gen_best_idx])
+        best_area      = curve_area_mean(best_x)
         log = {
             "generation": generation,
             "gen_best_fitness": gen_best_cost,
-            "gen_best_area_total": gen_best_area,
+            "gen_best_area_mean": gen_best_area,
             "gen_best_locomotion_cost": gen_best_cost + args.area_weight * gen_best_area,
             "overall_best_fitness": best_cost,
-            "overall_best_area_total": best_area,
+            "overall_best_area_mean": best_area,
             "overall_best_locomotion_cost": best_cost + args.area_weight * best_area,
             "mean_cost": mean_cost,
             "std_cost": std_cost,
@@ -295,15 +295,15 @@ def main():
         print(f"  best x: {dict(zip(PARAM_NAMES, best_x))}")
         print(f"  overall best fitness: {best_cost:.4f}  "
               f"(locomotion_cost={best_cost + args.area_weight * best_area:.4f}, "
-              f"area_total={best_area:.4f})")
+              f"area_mean={best_area:.4f})")
         print("─" * 60)
 
     best_path = _write_best_result(results_dir, best_cost, generation, best_x, args, done=True)
-    final_area = curve_area_total(best_x)
+    final_area = curve_area_mean(best_x)
     print("\n═══ Optimization complete ═══")
     print(f"Best fitness         : {best_cost:.4f}")
     print(f"  locomotion_cost    : {best_cost + args.area_weight * final_area:.4f}")
-    print(f"  area_total         : {final_area:.4f}")
+    print(f"  area_mean          : {final_area:.4f}")
     print(f"Best params  : {dict(zip(PARAM_NAMES, best_x))}")
     print(f"Best params saved to {best_path}")
     print(f"Results saved to {results_dir}")

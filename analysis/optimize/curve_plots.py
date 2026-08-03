@@ -3,7 +3,7 @@ Render force-length and force-velocity curve plots for a 12D CMA-ES
 candidate x, for wandb logging during cmaes_walk.py runs.
 
 FL curve logic is recycled directly from objective.py's closed-form
-active/passive functions (the same ones curve_area_total() integrates).
+active/passive functions (the same ones curve_area_mean() integrates).
 FV curve logic is recycled from analysis/unit_tests/plot_force_velocity.py's
 force_vel(), reimplemented here since that script hardcodes tasks.yaml as
 its parameter source instead of taking x.

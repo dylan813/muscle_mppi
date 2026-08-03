@@ -139,12 +139,13 @@ def _joint_curve_area(lmin, lmax, fpmax):
     return float(np.trapz(gap, _AREA_DOMAIN))
 
 
-def curve_area_total(x):
-    """Sum of the active/passive FL-curve area across hip/thigh/calf, given
+def curve_area_mean(x):
+    """Mean of the active/passive FL-curve area across hip/thigh/calf, given
     a 12D (or 9D) candidate x whose first 9 entries are
     [lce_min_hip/thigh/calf, lce_max_hip/thigh/calf, pFLmax_hip/thigh/calf]."""
     lce_min, lce_max, pFLmax = x[0:3], x[3:6], x[6:9]
-    return sum(_joint_curve_area(lce_min[j], lce_max[j], pFLmax[j]) for j in range(3))
+    areas = [_joint_curve_area(lce_min[j], lce_max[j], pFLmax[j]) for j in range(3)]
+    return sum(areas) / len(areas)
 
 
 def _broadcast_per_type(vals_by_type):
@@ -305,19 +306,19 @@ def evaluate(x, worker_id=0, verbose=False):
     """
     Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D).
     Returns scalar fitness (lower is better) = locomotion_cost -
-    AREA_WEIGHT * curve_area_total(x). AREA_WEIGHT is read fresh from the
+    AREA_WEIGHT * curve_area_mean(x). AREA_WEIGHT is read fresh from the
     environment on every call (not cached at import time) so cmaes_walk.py
     can set it via os.environ after argparse, before spawning workers.
     Set AREA_WEIGHT=0 (the default) to recover plain locomotion-cost fitness.
     """
-    area_total  = curve_area_total(x)
+    area_mean   = curve_area_mean(x)
     area_weight = float(os.environ.get("AREA_WEIGHT", 0.0))
 
     cost    = _locomotion_cost(x, worker_id=worker_id, verbose=verbose)
-    fitness = cost - area_weight * area_total
+    fitness = cost - area_weight * area_mean
 
     if verbose and area_weight:
-        print(f"  [w{worker_id}] area_total={area_total:.4f} "
+        print(f"  [w{worker_id}] area_mean={area_mean:.4f} "
               f"(weight={area_weight:g})  cost={cost:.1f}  → fitness={fitness:.1f}")
 
     return fitness
