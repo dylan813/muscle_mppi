@@ -31,7 +31,6 @@ with open(YAML_PATH) as f:
     cfg = yaml.safe_load(f)
 
 muscle       = cfg["default_muscle_quad"]
-stand        = cfg["stand"]
 walk         = cfg["walk"]
 nominal_pose = walk["nominal_pose"]    # 12 values: FR(hip,thigh,calf) FL RR RL
 

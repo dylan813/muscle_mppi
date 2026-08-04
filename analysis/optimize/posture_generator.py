@@ -36,11 +36,15 @@ RAMP_SEC = 3.0
 HOLD_SEC = 2.0
 
 
-def _gravity_torques(nominal_pose, model_path):
+def _stand_equilibrium(nominal_pose, model_path):
     """
     Replay the stand_go2.cpp stand-up (tanh kp ramp 20->50, kd=3.5) in MuJoCo
     so ground contact forces develop naturally, then read steady-state joint
-    torques (qfrc_bias - qfrc_constraint) in ctrl order (FR/FL/RR/RL).
+    torques (qfrc_bias - qfrc_constraint) and the settled qpos, both in ctrl
+    order (FR/FL/RR/RL). The settled qpos differs from nominal_pose by the PD
+    tracking droop (~tau_grav/kp), largest at the calf (highest gravity
+    torque) — plot_stiffness_cocontraction.py uses this actual settled pose,
+    not the commanded nominal_pose, for the FL1/FL2/passive-force geometry.
     """
     model = mujoco.MjModel.from_xml_path(model_path)
     data  = mujoco.MjData(model)
@@ -78,8 +82,10 @@ def _gravity_torques(nominal_pose, model_path):
             data.ctrl[i] = kp * (q_des - data.qpos[qa_adr[i]]) + KD_PD * (-data.qvel[dof_adr[i]])
         mujoco.mj_step(model, data)
 
-    return np.array([data.qfrc_bias[dof_adr[i]] - data.qfrc_constraint[dof_adr[i]]
-                      for i in range(NUM_JOINTS)])
+    tau_grav    = np.array([data.qfrc_bias[dof_adr[i]] - data.qfrc_constraint[dof_adr[i]]
+                            for i in range(NUM_JOINTS)])
+    settled_pos = np.array([data.qpos[qa_adr[i]] for i in range(NUM_JOINTS)])
+    return tau_grav, settled_pos
 
 
 def compute_posture(muscle_params, nominal_pose, model_path=MODEL_PATH):
@@ -94,7 +100,7 @@ def compute_posture(muscle_params, nominal_pose, model_path=MODEL_PATH):
     muscle_params must contain keys (each a list of 12 floats):
         lce_min, lce_max, pFLmax, phi_min, phi_max, peak_force
     """
-    tau_grav = _gravity_torques(nominal_pose, model_path)
+    tau_grav, settled_pos = _stand_equilibrium(nominal_pose, model_path)
 
     posture_bias = [0.0] * NUM_JOINTS
     posture_FL1  = [0.0] * NUM_JOINTS
@@ -109,7 +115,7 @@ def compute_posture(muscle_params, nominal_pose, model_path=MODEL_PATH):
         peak_j    = muscle_params["peak_force"][j]
 
         r = _moment_arm(lce_min_j, lce_max_j, phi_min_j, phi_max_j)
-        lce1, lce2 = _lce_pair(nominal_pose[j], r, lce_min_j, phi_min_j, phi_max_j)
+        lce1, lce2 = _lce_pair(settled_pos[j], r, lce_min_j, phi_min_j, phi_max_j)
 
         FL1 = _active_fl(lce1, lce_min_j, lce_max_j)
         FL2 = _active_fl(lce2, lce_min_j, lce_max_j)
