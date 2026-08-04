@@ -142,31 +142,39 @@ void MPPILocomotion::activate_phase(int idx)
 
 void MPPILocomotion::advance_phase(const RobotState& state)
 {
-    if (task_.phases.empty() || task_success_) return;
+    if (task_.phases.empty()) return;
 
     const TaskPhase& cur = task_.phases[phase_index_];
     const double dx = state.pos[0] - cur.goal_pos[0];
     const double dy = state.pos[1] - cur.goal_pos[1];
     const double dz = state.pos[2] - cur.goal_pos[2];
-    if (std::sqrt(dx*dx + dy*dy + dz*dz) >= cur.goal_thresh) return;  // distance gate
+    if (std::sqrt(dx*dx + dy*dy + dz*dz) >= cur.goal_thresh) return;  // distance gate; dwelling_ untouched
 
     // Dwell gate: counts ticks spent within goal_thresh, not reset when the
     // robot drifts back out in between — matches RTWholeBodyMPPI's next_goal(),
     // whose Timer only ever increments on calls the driver's distance check let
-    // through, and is never reset on a failed check.
-    if (++dwell_ticks_ < cur.waiting_time) return;
+    // through, and is never reset on a failed check. Kept running even after
+    // task_success_ (matches the original driver still calling next_goal()
+    // every in-threshold tick forever) so dwelling_ keeps tracking correctly.
+    if (++dwell_ticks_ < cur.waiting_time) {
+        dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
+        return;
+    }
 
     if (phase_index_ + 1 < static_cast<int>(task_.phases.size())) {
         ++phase_index_;
         activate_phase(phase_index_);
         dwell_ticks_ = 0;
+        dwelling_ = false;  // resumed traveling toward the new phase's goal
         const TaskPhase& next = task_.phases[phase_index_];
         std::printf("[phase] -> %d (goal=%.2f,%.2f,%.2f gait=%s)\n",
                     phase_index_, next.goal_pos[0], next.goal_pos[1], next.goal_pos[2],
                     next.gait_path.empty() ? next.desired_gait.c_str() : next.gait_path.c_str());
-    } else {
-        task_success_ = true;
+    } else if (!task_success_) {
+        task_success_ = true;  // dwelling_ untouched here — matches the original
         std::printf("[phase] task complete.\n");
+    } else {
+        dwelling_ = true;  // settled at the final goal, post-success
     }
 }
 
@@ -257,8 +265,9 @@ double MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES])
     cost += w.pos_y * std::abs(pos[1] - cmd_.goal_pos[1]);
     cost += w.pos_z * std::abs(pos[2] - cmd_.goal_pos[2]);
 
-    const double qw     = d->qpos[3];
-    const double q_dist = 1.0 - std::abs(qw);
+    const double q_dot  = d->qpos[3]*goal_quat_[0] + d->qpos[4]*goal_quat_[1]
+                         + d->qpos[5]*goal_quat_[2] + d->qpos[6]*goal_quat_[3];
+    const double q_dist = 1.0 - std::abs(q_dot);
     cost += w.orientation * q_dist * q_dist;
 
     if (w.vel_x > 0.0 || w.vel_y > 0.0 || w.vel_z > 0.0) {
@@ -299,6 +308,31 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
         double act_cmd[NUM_MUSCLES] = {};
         hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
         return;
+    }
+
+    // Goal-facing orientation target for this tick's cost, held fixed across
+    // the whole rollout batch below (mirrors RTWholeBodyMPPI's body_ref[3:7]
+    // computed once per update() via calculate_orientation_quaternion). Only
+    // active when far enough from the goal and not settled at a waypoint;
+    // otherwise the target is identity (upright, no yaw preference).
+    {
+        const double dx = cmd_.goal_pos[0] - state.pos[0];
+        const double dy = cmd_.goal_pos[1] - state.pos[1];
+        const double dz = cmd_.goal_pos[2] - state.pos[2];
+        const double goal_delta = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+        if (goal_delta > 0.1 && !dwelling_) {
+            const double yaw   = std::atan2(dy, dx);
+            const double pitch = -std::atan2(dz, std::sqrt(dx*dx + dy*dy));
+            const double z_axis[3] = {0.0, 0.0, 1.0};
+            const double y_axis[3] = {0.0, 1.0, 0.0};
+            double q_yaw[4], q_pitch[4];
+            mju_axisAngle2Quat(q_yaw,   z_axis, yaw);
+            mju_axisAngle2Quat(q_pitch, y_axis, pitch);
+            mju_mulQuat(goal_quat_, q_yaw, q_pitch);  // matches scipy's yaw_quat * pitch_quat order
+        } else {
+            goal_quat_[0] = 1.0; goal_quat_[1] = 0.0; goal_quat_[2] = 0.0; goal_quat_[3] = 0.0;
+        }
     }
 
     // Warm-start: shift trajectory_ forward by 1 step (mirrors RTWholeBodyMPPI).
@@ -376,8 +410,9 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             c_pos += cost_.pos_y * std::abs(lpos[1] - cmd_.goal_pos[1]);
             c_pos += cost_.pos_z * std::abs(lpos[2] - cmd_.goal_pos[2]);
 
-            const double qw     = dl->qpos[3];
-            const double q_dist = 1.0 - std::abs(qw);
+            const double q_dot_l  = dl->qpos[3]*goal_quat_[0] + dl->qpos[4]*goal_quat_[1]
+                                   + dl->qpos[5]*goal_quat_[2] + dl->qpos[6]*goal_quat_[3];
+            const double q_dist = 1.0 - std::abs(q_dot_l);
             c_orient += cost_.orientation * q_dist * q_dist;
 
             if (cost_.vel_x > 0.0 || cost_.vel_y > 0.0 || cost_.vel_z > 0.0) {

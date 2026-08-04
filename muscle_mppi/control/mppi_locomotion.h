@@ -11,7 +11,11 @@ struct CostWeights {
     double pos_x       = 0.0;  // L1 world-frame x-position error
     double pos_y       = 0.0;  // L1 world-frame y-position error
     double pos_z       = 0.0;  // L1 z-position error (height)
-    double orientation = 0.0;  // (1 - |q · q_ref|)^2 quaternion distance from upright
+    double orientation = 0.0;  // (1 - |q · q_ref|)^2 distance from the goal-facing quaternion
+                                // (dynamic yaw+pitch toward the current goal, zero roll — see
+                                // MPPILocomotion::update()'s goal_quat_ computation). Still
+                                // penalizes roll/pitch deviation exactly as strictly as a fixed
+                                // identity target would; only the yaw target becomes dynamic.
     double vel_x       = 0.0;  // body-frame x-velocity tracking (forward)
     double vel_y       = 0.0;  // body-frame y-velocity tracking (lateral)
     double vel_z       = 0.0;  // body-frame z-velocity tracking (vertical)
@@ -40,8 +44,10 @@ public:
     // phase once the robot has stayed within the current phase's goal_thresh
     // for waiting_time consecutive in-threshold ticks (not reset if it drifts
     // back out in between — cumulative, matching RTWholeBodyMPPI's next_goal()).
-    // No-op once the task's final phase has been reached, or if the task has
-    // no phases at all.
+    // Keeps running (updating dwelling_) even after the task's final phase is
+    // reached — matches RTWholeBodyMPPI's next_goal(), which the driver keeps
+    // calling every in-threshold tick forever. No-op only if the task has no
+    // phases at all.
     void advance_phase(const RobotState& state);
 
     void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
@@ -78,6 +84,19 @@ private:
     int  phase_index_  = 0;
     int  dwell_ticks_  = 0;      // consecutive-ish ticks spent within goal_thresh
     bool task_success_ = false;  // true once the final phase's dwell gate passes
+
+    // True while settled at a waypoint (mid-dwell, or holding after
+    // task_success_) — mirrors RTWholeBodyMPPI's Timer.waiting. Disables
+    // goal-facing heading tracking (see goal_quat_) while true, matching
+    // update()'s `not self.timer.waiting` check in the original.
+    bool dwelling_ = false;
+
+    // Per-tick goal-facing orientation target used by step_cost(): identity
+    // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built
+    // from the direction to cmd_.goal_pos (mirrors RTWholeBodyMPPI's
+    // calculate_orientation_quaternion). Computed once per update() call,
+    // held fixed across that tick's whole rollout batch.
+    double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
 
     double gait_stiffness_  = 0.75;
     double last_compute_ms_ = 20.0;
