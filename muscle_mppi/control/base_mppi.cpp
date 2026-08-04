@@ -112,6 +112,9 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
 {
     mju_user_warning = mujoco_warning_noop;
 
+    if (task_.num_threads > 0)
+        omp_set_num_threads(task_.num_threads);
+
     char error[1000];
     model_ = mj_loadXML(task_.model_path.c_str(), nullptr, error, sizeof(error));
     if (!model_) throw std::runtime_error("Failed to load model: " + std::string(error));

@@ -37,6 +37,10 @@ struct TaskConfig {
     double       lambda       = 0.1;
     double       dt           = 0.002;
 
+    // OpenMP thread count for the parallel rollout loop. 0 (default) leaves the
+    // OpenMP runtime default in place (typically all available cores).
+    int          num_threads  = 0;
+
     // Noise sampling. "normal": iid Gaussian per timestep (default).
     // "cubic": draw n_knots iid Gaussians spread evenly across the horizon and
     // natural-cubic-spline interpolate between them, matching RTWholeBodyMPPI's

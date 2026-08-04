@@ -71,6 +71,10 @@ reach:
   lambda:        0.1
   dt:            0.02
 
+  # OpenMP threads for the parallel rollout loop (one rollout per sample).
+  # Omit or set to 0 to use the OpenMP default (all available cores).
+  num_threads:   0
+
   # Spline-parameterized noise sampling: draw noise at
   # n_knots points spread across the horizon and cubic-interpolate the rest,
   # instead of independent per-timestep noise. Smoother action trajectories.
@@ -96,11 +100,11 @@ default_muscle_quad: &default_muscle_quad
   peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
   phi_min:     [-0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227]
   phi_max:     [ 0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378]
-  lce_min:     [0.8272, 0.8995, 0.8617,  0.8272, 0.8995, 0.8617,  0.8272, 0.8995, 0.8617,  0.8272, 0.8995, 0.8617]
-  lce_max:     [1.1057, 1.0088, 1.1758,  1.1057, 1.0088, 1.1758,  1.1057, 1.0088, 1.1758,  1.1057, 1.0088, 1.1758]
-  pFLmax:      [0.2429, 1.4197, 0.2890,  0.2429, 1.4197, 0.2890,  0.2429, 1.4197, 0.2890,  0.2429, 1.4197, 0.2890]
+  lce_min:     [0.6137, 0.8731, 0.8368,  0.6137, 0.8731, 0.8368,  0.6137, 0.8731, 0.8368,  0.6137, 0.8731, 0.8368]
+  lce_max:     [1.0830, 1.0508, 1.1740,  1.0830, 1.0508, 1.1740,  1.0830, 1.0508, 1.1740,  1.0830, 1.0508, 1.1740]
+  pFLmax:      [0.4440, 1.4880, 0.3110,  0.4440, 1.4880, 0.3110,  0.4440, 1.4880, 0.3110,  0.4440, 1.4880, 0.3110]
   vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
-  FVmax:       [1.2, 1.2, 1.4,  1.2, 1.2, 1.4,  1.2, 1.2, 1.4,  1.2, 1.2, 1.4]
+  FVmax:       [1.2498, 1.3445, 1.0533,  1.2498, 1.3445, 1.0533,  1.2498, 1.3445, 1.0533,  1.2498, 1.3445, 1.0533]
   kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
 
 # -----------------------------------------------------------------------
@@ -114,6 +118,10 @@ walk:
   lambda:        0.1
   dt:            0.01
   cmd_vel:       [0.2, 0.0]   # body-frame [vx, vy] velocity command (m/s)
+
+  # OpenMP threads for the parallel rollout loop (one rollout per sample).
+  # Omit or set to 0 to use the OpenMP default (all available cores).
+  num_threads:   8
 
   # Spline-parameterized noise sampling: draw noise at
   # n_knots points spread across the horizon and cubic-interpolate the rest,
