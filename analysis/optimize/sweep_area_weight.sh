@@ -35,7 +35,7 @@ WORKERS=6
 
 # Edit this list freely. A doubling sequence covers a couple orders of
 # magnitude with few runs; 0 is the no-pressure control.
-AREA_WEIGHTS=(400 600)
+AREA_WEIGHTS=(0 400 600)
 
 # Start point: skip every value before this one. Edit directly, or override
 # via env var. Leave blank to run from the very start.
