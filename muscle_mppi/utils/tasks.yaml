@@ -111,7 +111,10 @@ default_muscle_quad: &default_muscle_quad
 # Locomotion task
 walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
-  gait_path:     "../gaits/FAST/activation_gait_FAST_0_1_10cm.tsv"
+  # Categorical gait — one of: in_place, walk, walk_fast, trot (see mppi_locomotion.cpp
+  # GAIT_*_PATH constants). walk_fast is FAST-class @ 0.1 m/s, matching the file this
+  # task used before the named-gait migration (../gaits/FAST/activation_gait_FAST_0_1_10cm.tsv).
+  desired_gait:  "walk_fast"
   height_target: 0.34
   n_samples:     30
   horizon:       40

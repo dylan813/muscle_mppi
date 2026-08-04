@@ -7,7 +7,36 @@
 #include <chrono>
 #include <omp.h>
 #include <stdexcept>
+#include <unordered_map>
 #include <yaml-cpp/yaml.h>
+
+// ============================================================================
+// Named gaits
+// ============================================================================
+//
+// Mirrors RTWholeBodyMPPI's GAIT_*_PATH constants (mppi_locomotion.py): a fixed
+// set of categorical gaits, each backed by one pre-generated activation-gait TSV
+// from the FAST/MED/SLOW library in ../gaits/. Tasks select a gait by name in
+// tasks.yaml (desired_gait), not by raw file path.
+static const char* GAIT_INPLACE_PATH  = "../gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
+static const char* GAIT_WALK_PATH     = "../gaits/MED/activation_gait_MED_0_1_10cm.tsv";
+static const char* GAIT_WALK_FAST_PATH = "../gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
+static const char* GAIT_TROT_PATH     = "../gaits/MED/activation_gait_MED_0_5_15cm.tsv";
+
+static std::string resolve_gait_path(const std::string& desired_gait)
+{
+    static const std::unordered_map<std::string, const char*> kGaitPaths = {
+        {"in_place",  GAIT_INPLACE_PATH},
+        {"walk",      GAIT_WALK_PATH},
+        {"walk_fast", GAIT_WALK_FAST_PATH},
+        {"trot",      GAIT_TROT_PATH},
+    };
+    auto it = kGaitPaths.find(desired_gait);
+    if (it == kGaitPaths.end())
+        throw std::runtime_error("Unknown desired_gait '" + desired_gait
+                                 + "'. Must be one of: in_place, walk, walk_fast, trot");
+    return it->second;
+}
 
 // ============================================================================
 // Constructor
@@ -60,8 +89,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
     }
 
-    if (!task_.gait_path.empty())
-        gait_sched_.load(task_.gait_path);
+    if (!task_.desired_gait.empty())
+        gait_sched_.load(resolve_gait_path(task_.desired_gait));
 
     // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).

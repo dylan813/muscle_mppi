@@ -28,7 +28,11 @@ struct MuscleParams {
 
 struct TaskConfig {
     std::string  model_path;
-    std::string  gait_path;   // optional: activation gait TSV for locomotion reference
+
+    // Categorical gait name: "in_place" | "walk" | "walk_fast" | "trot" (optional).
+    // Resolved to a gait TSV path by MPPILocomotion, matching RTWholeBodyMPPI's
+    // named-gait scheme (see mppi_locomotion.cpp).
+    std::string  desired_gait;
     double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     MuscleParams muscle;
