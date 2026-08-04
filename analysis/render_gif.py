@@ -7,25 +7,50 @@ analysis/log/plot_walk_leg.py — this script only reads the qpos companion and
 ignores that file.
 
 Usage (from muscle_mppi/muscle_mppi/):
-    python3 ../../analysis/render_gif.py [qpos_csv] [output.gif]
+    python3 ../../analysis/render_gif.py [qpos_csv] [output.gif] [task_name] [tasks_yaml]
 
 Defaults:
-    qpos_csv  = mppi_sim_qpos.csv
-    output    = mppi_sim.gif
+    qpos_csv   = mppi_sim_qpos.csv
+    output     = mppi_sim.gif
+    task_name  = none -> renders against the flat go2/scene.xml (old behavior)
+    tasks_yaml = ../muscle_mppi/utils/tasks.yaml (relative to this script)
+
+task_name must match whichever task the qpos_csv was actually generated from
+(the same name passed to mppi_sim) — its model_path is looked up in
+tasks_yaml so the render uses the scene the trajectory was actually simulated
+on. Without it, this always renders against the flat scene regardless of the
+data's actual source scene, which silently produces a wrong-looking render
+for any task using a non-default model_path (e.g. walk_straight_rough).
 """
 
 import sys
 import os
 import numpy as np
 import mujoco
+import yaml
 from PIL import Image
 
 # ── paths ──────────────────────────────────────────────────────────────────────
-_DIR       = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(_DIR, "../unitree_mujoco/unitree_robots/go2/scene.xml")
+_DIR                = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_MODEL_PATH  = os.path.join(_DIR, "../unitree_mujoco/unitree_robots/go2/scene.xml")
+DEFAULT_TASKS_YAML  = os.path.join(_DIR, "../muscle_mppi/utils/tasks.yaml")
+# model_path values inside tasks.yaml are relative to muscle_mppi/muscle_mppi/build/
+# (mppi_sim's own working directory) -- resolve against that, not this script's dir.
+TASKS_YAML_BASE_DIR = os.path.join(_DIR, "../muscle_mppi/build")
 
-qpos_path = sys.argv[1] if len(sys.argv) > 1 else "mppi_sim_qpos.csv"
-gif_path  = sys.argv[2] if len(sys.argv) > 2 else "mppi_sim.gif"
+qpos_path  = sys.argv[1] if len(sys.argv) > 1 else "mppi_sim_qpos.csv"
+gif_path   = sys.argv[2] if len(sys.argv) > 2 else "mppi_sim.gif"
+task_name  = sys.argv[3] if len(sys.argv) > 3 else None
+tasks_yaml = sys.argv[4] if len(sys.argv) > 4 else DEFAULT_TASKS_YAML
+
+if task_name:
+    with open(tasks_yaml) as f:
+        tasks = yaml.safe_load(f)
+    if task_name not in tasks:
+        raise ValueError(f"Task '{task_name}' not found in {tasks_yaml}")
+    MODEL_PATH = os.path.normpath(os.path.join(TASKS_YAML_BASE_DIR, tasks[task_name]["model_path"]))
+else:
+    MODEL_PATH = DEFAULT_MODEL_PATH
 
 # ── load ───────────────────────────────────────────────────────────────────────
 print(f"Loading model: {MODEL_PATH}")

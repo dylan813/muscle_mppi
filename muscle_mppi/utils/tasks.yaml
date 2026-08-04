@@ -287,6 +287,65 @@ walk_straight:
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
+# walk_straight_rough: same task as walk_straight, run on a mildly uneven
+# heightfield (scene_rough.xml, ~2cm bumps) instead of flat ground — see
+# unitree_mujoco/terrain_tool/generate_rough_ground.py for how the terrain
+# was generated. Not a RTWholeBodyMPPI port; deviates on purpose.
+walk_straight_rough:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough.xml"
+  height_target: 0.34
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    gait_stiffness: 0.75
+
+  phases:
+    - goal_pos:     [0.0, 0.0, 0.34]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [1.0, 0.0, 0.34]
+      cmd_vel:      [0.2, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [1.0, 0.0, 0.34]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  posture_bias: [-0.034673, -0.120845, -0.155732,  0.034673, -0.120846, -0.155732,
+                 -0.092919, -0.136516, -0.183224,  0.092919, -0.136515, -0.183224]
+
+  posture_FL1: [0.904806, 0.664309, 0.348336,  0.908773, 0.664309, 0.348336,
+                0.894216, 0.662541, 0.451398,  0.918588, 0.662541, 0.451398]
+  posture_FL2: [0.908773, 0.923175, 0.542686,  0.904806, 0.923175, 0.542686,
+                0.918588, 0.924256, 0.625957,  0.894216, 0.924256, 0.625957]
+
+  muscle: *default_muscle_quad
+
+# -----------------------------------------------------------------------
 # walk_octagon: 1:1 port of RTWholeBodyMPPI's walk_octagon task (tasks.py).
 # 8 walk_fast legs around an octagon, cmd_vel=[0.2,0] on every leg regardless
 # of segment direction (matches the original exactly). Note: muscle_mppi has

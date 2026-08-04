@@ -90,6 +90,11 @@ MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render
 python3 ../../analysis/log/plot_walk_leg.py <name>
 ```
 
+```bash
+./mppi_sim walk_straight_rough
+ MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/walk_straight_rough_test.gif walk_straight_rough
+```
+
 #CMA-ES
 
 ```bash
