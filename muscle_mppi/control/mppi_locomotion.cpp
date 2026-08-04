@@ -16,26 +16,31 @@
 //
 // Mirrors RTWholeBodyMPPI's GAIT_*_PATH constants (mppi_locomotion.py): a fixed
 // set of categorical gaits, each backed by one pre-generated activation-gait TSV
-// from the FAST/MED/SLOW library in ../gaits/. Tasks select a gait by name in
-// tasks.yaml (desired_gait), not by raw file path.
-static const char* GAIT_INPLACE_PATH  = "../gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH     = "../gaits/MED/activation_gait_MED_0_1_10cm.tsv";
+// from the FAST/MED/SLOW library in ../gaits/. A phase selects a gait by name
+// (TaskPhase::desired_gait) or, as an escape hatch, an explicit TSV path
+// (TaskPhase::gait_path) — see resolve_gait_key() below.
+static const char* GAIT_INPLACE_PATH   = "../gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
+static const char* GAIT_WALK_PATH      = "../gaits/MED/activation_gait_MED_0_1_10cm.tsv";
 static const char* GAIT_WALK_FAST_PATH = "../gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH     = "../gaits/MED/activation_gait_MED_0_5_15cm.tsv";
+static const char* GAIT_TROT_PATH      = "../gaits/MED/activation_gait_MED_0_5_15cm.tsv";
 
-static std::string resolve_gait_path(const std::string& desired_gait)
+static const std::unordered_map<std::string, const char*> kNamedGaits = {
+    {"in_place",  GAIT_INPLACE_PATH},
+    {"walk",      GAIT_WALK_PATH},
+    {"walk_fast", GAIT_WALK_FAST_PATH},
+    {"trot",      GAIT_TROT_PATH},
+};
+
+// Resolves a phase to the key it's loaded/stored under in MPPILocomotion::gaits_:
+// an explicit gait_path override (if set) is keyed by its own path string;
+// otherwise desired_gait must be one of kNamedGaits' keys.
+static std::string resolve_gait_key(const TaskPhase& p)
 {
-    static const std::unordered_map<std::string, const char*> kGaitPaths = {
-        {"in_place",  GAIT_INPLACE_PATH},
-        {"walk",      GAIT_WALK_PATH},
-        {"walk_fast", GAIT_WALK_FAST_PATH},
-        {"trot",      GAIT_TROT_PATH},
-    };
-    auto it = kGaitPaths.find(desired_gait);
-    if (it == kGaitPaths.end())
-        throw std::runtime_error("Unknown desired_gait '" + desired_gait
+    if (!p.gait_path.empty()) return p.gait_path;
+    if (!kNamedGaits.count(p.desired_gait))
+        throw std::runtime_error("Unknown desired_gait '" + p.desired_gait
                                  + "'. Must be one of: in_place, walk, walk_fast, trot");
-    return it->second;
+    return p.desired_gait;
 }
 
 // ============================================================================
@@ -76,21 +81,21 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
             for (int j = 0; j < NUM_JOINTS; ++j)
                 cost_.gait_ref_weights[j] = gw[j].as<double>();
         }
-        gait_stiffness_   = c["gait_stiffness"] ? c["gait_stiffness"].as<double>() : 0.75;
-        if (c["vel_des"]) {
-            cmd_.vx = c["vel_des"][0].as<double>();
-            cmd_.vy = c["vel_des"][1].as<double>();
-        }
-        cmd_.goal_pos[2] = task_.height_target;  // z default; overridden below if set in YAML
-        if (c["goal_pos"]) {
-            cmd_.goal_pos[0] = c["goal_pos"][0].as<double>();
-            cmd_.goal_pos[1] = c["goal_pos"][1].as<double>();
-            cmd_.goal_pos[2] = c["goal_pos"][2].as<double>();
-        }
+        gait_stiffness_ = c["gait_stiffness"] ? c["gait_stiffness"].as<double>() : 0.75;
     }
 
-    if (!task_.desired_gait.empty())
-        gait_sched_.load(resolve_gait_path(task_.desired_gait));
+    // Load the 4 canonical named gaits up front (mirrors RTWholeBodyMPPI's
+    // self.gaits dict), plus any per-phase gait_path override not already covered.
+    for (const auto& kv : kNamedGaits) gaits_[kv.first].load(kv.second);
+    for (const auto& p : task_.phases)
+        if (!p.gait_path.empty() && !gaits_.count(p.gait_path))
+            gaits_[p.gait_path].load(p.gait_path);
+
+    if (!task_.phases.empty()) {
+        activate_phase(0);
+    } else {
+        cmd_.goal_pos[2] = task_.height_target;  // z default for a phase-less task
+    }
 
     // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
@@ -117,6 +122,51 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
                     trajectory_[t * NUM_MUSCLES + m] = nominal[m];
             std::memcpy(real_act_, nominal, NUM_MUSCLES * sizeof(double));
         }
+    }
+}
+
+// ============================================================================
+// Phase sequencing
+// ============================================================================
+
+void MPPILocomotion::activate_phase(int idx)
+{
+    const TaskPhase& p = task_.phases[idx];
+    cmd_.goal_pos[0] = p.goal_pos[0];
+    cmd_.goal_pos[1] = p.goal_pos[1];
+    cmd_.goal_pos[2] = p.goal_pos[2];
+    cmd_.vx = p.cmd_vel[0];
+    cmd_.vy = p.cmd_vel[1];
+    active_gait_ = &gaits_.at(resolve_gait_key(p));
+}
+
+void MPPILocomotion::advance_phase(const RobotState& state)
+{
+    if (task_.phases.empty() || task_success_) return;
+
+    const TaskPhase& cur = task_.phases[phase_index_];
+    const double dx = state.pos[0] - cur.goal_pos[0];
+    const double dy = state.pos[1] - cur.goal_pos[1];
+    const double dz = state.pos[2] - cur.goal_pos[2];
+    if (std::sqrt(dx*dx + dy*dy + dz*dz) >= cur.goal_thresh) return;  // distance gate
+
+    // Dwell gate: counts ticks spent within goal_thresh, not reset when the
+    // robot drifts back out in between — matches RTWholeBodyMPPI's next_goal(),
+    // whose Timer only ever increments on calls the driver's distance check let
+    // through, and is never reset on a failed check.
+    if (++dwell_ticks_ < cur.waiting_time) return;
+
+    if (phase_index_ + 1 < static_cast<int>(task_.phases.size())) {
+        ++phase_index_;
+        activate_phase(phase_index_);
+        dwell_ticks_ = 0;
+        const TaskPhase& next = task_.phases[phase_index_];
+        std::printf("[phase] -> %d (goal=%.2f,%.2f,%.2f gait=%s)\n",
+                    phase_index_, next.goal_pos[0], next.goal_pos[1], next.goal_pos[2],
+                    next.gait_path.empty() ? next.desired_gait.c_str() : next.gait_path.c_str());
+    } else {
+        task_success_ = true;
+        std::printf("[phase] task complete.\n");
     }
 }
 
@@ -158,7 +208,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         mj_step(model_, d);
 
         double gait_ref[NUM_MUSCLES] = {};
-        if (gait_sched_.loaded()) gait_sched_.get_phase(t, gait_ref);
+        if (active_gait_) active_gait_->get_phase(t, gait_ref);
         total_cost += step_cost(d, gait_ref);
     }
 
@@ -341,9 +391,9 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
                 c_vel += cost_.ang_vel * (wx*wx + wy*wy + wz*wz);
             }
 
-            if (gait_sched_.loaded()) {
+            if (active_gait_) {
                 double gref[NUM_MUSCLES] = {};
-                gait_sched_.get_phase(t, gref);
+                active_gait_->get_phase(t, gref);
                 for (int j = 0; j < NUM_JOINTS; ++j) {
                     if (cost_.gait_ref_weights[j] == 0.0) continue;
                     const double q_j   = dl->qpos[act_qpos_adr_[j]];
@@ -367,7 +417,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = trajectory_[m];
     hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
 
-    gait_sched_.advance();
+    if (active_gait_) active_gait_->advance();
 
     last_compute_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - t_start).count();

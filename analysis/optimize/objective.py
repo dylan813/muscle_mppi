@@ -176,7 +176,7 @@ def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir, posture):
     Write a modified tasks.yaml to tmp_dir, with:
     - walk.muscle fields updated to muscle_params
     - walk.model_path  set to absolute MODEL_PATH
-    - walk.gait_path   set to gait_path_abs
+    - walk.phases[0].gait_path   set to gait_path_abs
     - walk.posture_bias / posture_FL1 / posture_FL2 set to posture
     Returns the path to the written yaml.
     """
@@ -188,8 +188,8 @@ def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir, posture):
         cfg["walk"]["muscle"][key]      = muscle_params[key]
 
     # Absolute paths so mppi_sim works from any CWD
-    cfg["walk"]["model_path"] = MODEL_PATH
-    cfg["walk"]["gait_path"]  = gait_path_abs
+    cfg["walk"]["model_path"]          = MODEL_PATH
+    cfg["walk"]["phases"][0]["gait_path"] = gait_path_abs
 
     # Constraint-line seed used by mppi_locomotion.cpp to warm-start MPPI —
     # must be recomputed per candidate since it depends on lce_min/lce_max/pFLmax.
@@ -297,8 +297,8 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
 
         # Parse fitness
         cost_weights = walk_cfg["cost"]
-        goal_pos     = walk_cfg["cost"]["goal_pos"]
-        cmd_vel      = walk_cfg["cmd_vel"]
+        goal_pos     = walk_cfg["phases"][0]["goal_pos"]
+        cmd_vel      = walk_cfg["phases"][0]["cmd_vel"]
 
         cost = _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel)
 

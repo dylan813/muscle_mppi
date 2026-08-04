@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <unordered_map>
+
 #include "base_mppi.h"
 #include "gait_scheduler.h"
 #include "muscle.h"
@@ -33,6 +36,14 @@ public:
     // Run one MPPI solve; returns Hill-model torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
 
+    // Call once per control tick, before update(). Advances to the next task
+    // phase once the robot has stayed within the current phase's goal_thresh
+    // for waiting_time consecutive in-threshold ticks (not reset if it drifts
+    // back out in between — cumulative, matching RTWholeBodyMPPI's next_goal()).
+    // No-op once the task's final phase has been reached, or if the task has
+    // no phases at all.
+    void advance_phase(const RobotState& state);
+
     void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
     const MotionCommand& command() const { return cmd_; }
 
@@ -45,6 +56,9 @@ private:
 
     double step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]);
 
+    // Point cmd_ and active_gait_ at task_.phases[idx].
+    void activate_phase(int idx);
+
     // Whole-robot (trunk + legs) CoM position (world frame) and CoM
     // velocity (body-frame axes). Non-const mjData*: calls mj_subtreeVel,
     // which writes into d->subtree_linvel/subtree_angmom.
@@ -52,8 +66,18 @@ private:
 
     MuscleParams   muscle_;
     CostWeights    cost_;
-    GaitScheduler  gait_sched_;
     MotionCommand  cmd_;
+
+    // All named gaits are loaded up front (mirrors RTWholeBodyMPPI's self.gaits
+    // dict), keyed by their resolved TSV path so that both the 4 canonical
+    // names and any per-phase gait_path override share one map without key
+    // collisions. active_gait_ points at whichever entry the current phase uses.
+    std::unordered_map<std::string, GaitScheduler> gaits_;
+    GaitScheduler* active_gait_ = nullptr;
+
+    int  phase_index_  = 0;
+    int  dwell_ticks_  = 0;      // consecutive-ish ticks spent within goal_thresh
+    bool task_success_ = false;  // true once the final phase's dwell gate passes
 
     double gait_stiffness_  = 0.75;
     double last_compute_ms_ = 20.0;

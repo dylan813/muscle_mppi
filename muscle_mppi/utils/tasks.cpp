@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 static void load_doubles(const YAML::Node& node, double* dst, int n,
                          const std::string& field)
@@ -31,7 +32,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     TaskConfig cfg;
 
     cfg.model_path    = t["model_path"].as<std::string>();
-    cfg.desired_gait  = t["desired_gait"] ? t["desired_gait"].as<std::string>() : "";
     cfg.height_target = t["height_target"] ? t["height_target"].as<double>() : 0.0;
     cfg.n_samples     = t["n_samples"].as<int>();
     cfg.horizon       = t["horizon"].as<int>();
@@ -45,9 +45,23 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     if (t["noise_sigma_act"])
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
 
-    if (t["cmd_vel"] && t["cmd_vel"].IsSequence() && t["cmd_vel"].size() == 2) {
-        cfg.cmd_vel[0] = t["cmd_vel"][0].as<double>();
-        cfg.cmd_vel[1] = t["cmd_vel"][1].as<double>();
+    if (t["phases"]) {
+        const YAML::Node& phases = t["phases"];
+        if (!phases.IsSequence())
+            throw std::runtime_error("Field 'phases': expected a sequence");
+        for (const auto& p : phases) {
+            TaskPhase phase;
+            load_doubles(p["goal_pos"], phase.goal_pos, 3, "phases[].goal_pos");
+            if (p["cmd_vel"])
+                load_doubles(p["cmd_vel"], phase.cmd_vel, 2, "phases[].cmd_vel");
+            phase.desired_gait = p["desired_gait"] ? p["desired_gait"].as<std::string>() : "";
+            phase.gait_path    = p["gait_path"]    ? p["gait_path"].as<std::string>()    : "";
+            if (phase.desired_gait.empty() && phase.gait_path.empty())
+                throw std::runtime_error("phases[]: needs desired_gait or gait_path");
+            phase.goal_thresh  = p["goal_thresh"]  ? p["goal_thresh"].as<double>()  : 0.2;
+            phase.waiting_time = p["waiting_time"] ? p["waiting_time"].as<int>()    : 0;
+            cfg.phases.push_back(std::move(phase));
+        }
     }
 
     if (t["posture_bias"])

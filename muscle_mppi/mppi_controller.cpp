@@ -45,15 +45,7 @@ class MPPIController {
 public:
     explicit MPPIController(const std::string& task      = "walk",
                             const std::string& yaml_path = "../utils/tasks.yaml")
-        : mppi_(task, yaml_path) {
-        // TaskConfig::cmd_vel isn't picked up by the constructor (which only reads
-        // cost.vel_des), so apply it explicitly — mirrors mppi_sim.cpp.
-        const TaskConfig& t = mppi_.task_ref();
-        MotionCommand cmd   = mppi_.command();
-        cmd.vx = t.cmd_vel[0];
-        cmd.vy = t.cmd_vel[1];
-        mppi_.set_command(cmd);
-    }
+        : mppi_(task, yaml_path) {}
 
     void Init() {
         InitLowCmd();
@@ -178,6 +170,7 @@ private:
 
             auto t0 = std::chrono::steady_clock::now();
             double tau_cmd[NUM_JOINTS] = {};
+            mppi_.advance_phase(snap);
             mppi_.update(snap, tau_cmd);
             double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();

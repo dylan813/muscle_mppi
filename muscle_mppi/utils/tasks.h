@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 // These are overridable at compile time via -DNUM_JOINTS=N -DJOINT_OFFSET=N.
 // Defaults: full quadruped (12 joints, offset 0).
@@ -26,13 +27,35 @@ struct MuscleParams {
     double kd_sim[NUM_JOINTS]     = {};        // MuJoCo joint damping (applied to sim dofs)
 };
 
+// One waypoint in a task's phase sequence, matching RTWholeBodyMPPI's per-phase
+// goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays. MPPILocomotion
+// advances phase_index_ once the robot has stayed within goal_thresh of the
+// current phase's goal_pos for waiting_time consecutive in-threshold ticks.
+struct TaskPhase {
+    double goal_pos[3]  = {};
+    double cmd_vel[2]   = {};  // [vx, vy] body-frame velocity command
+
+    // Categorical gait name: "in_place" | "walk" | "walk_fast" | "trot".
+    // Resolved to a gait TSV path by MPPILocomotion (see mppi_locomotion.cpp).
+    std::string desired_gait;
+
+    // Optional escape hatch: an explicit gait TSV path, overriding desired_gait
+    // when non-empty. Used by tooling (e.g. the CMA-ES muscle-parameter sweep in
+    // analysis/optimize/objective.py) that regenerates a gait file per candidate
+    // and needs mppi_sim to load that exact file rather than a canonical one.
+    std::string gait_path;
+
+    double goal_thresh  = 0.2;
+    int    waiting_time = 0;   // dwell ticks required within goal_thresh
+};
+
 struct TaskConfig {
     std::string  model_path;
 
-    // Categorical gait name: "in_place" | "walk" | "walk_fast" | "trot" (optional).
-    // Resolved to a gait TSV path by MPPILocomotion, matching RTWholeBodyMPPI's
-    // named-gait scheme (see mppi_locomotion.cpp).
-    std::string  desired_gait;
+    // Ordered waypoint sequence for locomotion tasks (MPPILocomotion). Empty for
+    // non-locomotion tasks (e.g. "reach", driven by SingleLegReach instead).
+    std::vector<TaskPhase> phases;
+
     double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     MuscleParams muscle;
@@ -55,8 +78,6 @@ struct TaskConfig {
     // Per-joint noise sigma. Both muscles of each antagonistic pair receive the
     // same draw, scaled by this value. Used by BaseMPPI::sample_noise().
     double noise_sigma_act[NUM_JOINTS]   = {};
-
-    double cmd_vel[2] = {};  // [vx, vy] body-frame velocity command
 
     // Normalized gravity torque at the nominal pose: tau_grav/(-r*peak_force) - (P1-P2).
     // Used by MPPILocomotion to seed the trajectory warm-start.
