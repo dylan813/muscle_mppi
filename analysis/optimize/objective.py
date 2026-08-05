@@ -52,6 +52,11 @@ from posture_generator import compute_posture
 _HERE      = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT  = os.path.abspath(os.path.join(_HERE, "..", ".."))
 MPPI_SIM   = os.path.join(REPO_ROOT, "muscle_mppi", "build", "mppi_sim")
+# mppi_sim's constructor loads the 4 canonical named gaits via paths relative
+# to its own working directory (../gaits/...) — matches every other invocation
+# in this repo (README always cd's into build/ first). subprocess.run() below
+# must set cwd explicitly since cmaes_walk.py is launched from analysis/optimize/.
+MPPI_SIM_CWD = os.path.dirname(MPPI_SIM)
 MODEL_PATH = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene.xml")
 BASE_YAML  = os.path.join(REPO_ROOT, "muscle_mppi", "utils", "tasks.yaml")
 
@@ -286,7 +291,7 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
         cmd = [MPPI_SIM, "walk", yaml_path, csv_path]
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=SIM_TIMEOUT
+                cmd, capture_output=True, text=True, timeout=SIM_TIMEOUT, cwd=MPPI_SIM_CWD
             )
             if result.returncode != 0 and verbose:
                 print(f"  [w{worker_id}] mppi_sim stderr: {result.stderr[-500:]}")
@@ -369,7 +374,8 @@ def render_rollout(x, fps=RENDER_FPS):
 
         try:
             result = subprocess.run([MPPI_SIM, "walk", yaml_path, csv_path],
-                                    capture_output=True, text=True, timeout=SIM_TIMEOUT)
+                                    capture_output=True, text=True, timeout=SIM_TIMEOUT,
+                                    cwd=MPPI_SIM_CWD)
         except subprocess.TimeoutExpired:
             return None
         if result.returncode != 0 or not os.path.exists(qpos_path):
