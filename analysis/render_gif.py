@@ -20,7 +20,7 @@ task_name must match whichever task the qpos_csv was actually generated from
 tasks_yaml so the render uses the scene the trajectory was actually simulated
 on. Without it, this always renders against the flat scene regardless of the
 data's actual source scene, which silently produces a wrong-looking render
-for any task using a non-default model_path (e.g. walk_straight_rough).
+for any task using a non-default model_path (e.g. walk_rough).
 """
 
 import sys
