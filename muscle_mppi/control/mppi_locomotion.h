@@ -98,6 +98,15 @@ private:
     // held fixed across that tick's whole rollout batch.
     double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
 
+    // Snapshot of task_.noise_sigma_act as loaded from YAML, taken once in the
+    // constructor before any phase mutates task_.noise_sigma_act. activate_phase()
+    // writes the active phase's override (or this baseline, if the phase has
+    // none) into task_.noise_sigma_act, which is what BaseMPPI::sample_noise()/
+    // sample_noise_cubic() actually read — so "fall back to task-level value"
+    // always means the true original baseline, not whatever a previous phase
+    // left behind.
+    double base_noise_sigma_act_[NUM_JOINTS] = {};
+
     double gait_stiffness_  = 0.75;
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;

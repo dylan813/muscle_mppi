@@ -91,6 +91,10 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         if (!p.gait_path.empty() && !gaits_.count(p.gait_path))
             gaits_[p.gait_path].load(p.gait_path);
 
+    // Snapshot the YAML-loaded baseline before activate_phase() can overwrite
+    // task_.noise_sigma_act with a per-phase override.
+    std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
+
     if (!task_.phases.empty()) {
         activate_phase(0);
     } else {
@@ -138,6 +142,14 @@ void MPPILocomotion::activate_phase(int idx)
     cmd_.vx = p.cmd_vel[0];
     cmd_.vy = p.cmd_vel[1];
     active_gait_ = &gaits_.at(resolve_gait_key(p));
+
+    // Per-phase noise_sigma_act override, falling back to the task-level
+    // baseline — mirrors RTWholeBodyMPPI's next_goal(), which doubles thigh/
+    // calf exploration noise specifically during trot phases.
+    if (p.has_noise_sigma_act)
+        std::memcpy(task_.noise_sigma_act, p.noise_sigma_act, sizeof(task_.noise_sigma_act));
+    else
+        std::memcpy(task_.noise_sigma_act, base_noise_sigma_act_, sizeof(task_.noise_sigma_act));
 }
 
 void MPPILocomotion::advance_phase(const RobotState& state)

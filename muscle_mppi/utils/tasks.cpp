@@ -60,6 +60,11 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
                 throw std::runtime_error("phases[]: needs desired_gait or gait_path");
             phase.goal_thresh  = p["goal_thresh"]  ? p["goal_thresh"].as<double>()  : 0.2;
             phase.waiting_time = p["waiting_time"] ? p["waiting_time"].as<int>()    : 0;
+            if (p["noise_sigma_act"]) {
+                load_doubles(p["noise_sigma_act"], phase.noise_sigma_act, NUM_JOINTS,
+                             "phases[].noise_sigma_act");
+                phase.has_noise_sigma_act = true;
+            }
             cfg.phases.push_back(std::move(phase));
         }
     }

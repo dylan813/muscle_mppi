@@ -447,6 +447,10 @@ climb_box:
       desired_gait: "trot"
       goal_thresh:  0.2
       waiting_time: 0
+      # Doubled thigh/calf exploration noise during trot -- matches RTWholeBodyMPPI's
+      # next_goal(), which switches to this value specifically for trot phases
+      # regardless of the task's declared baseline (0.06,0.1,0.1 here).
+      noise_sigma_act: [0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2]
     - goal_pos:     [0.9, 0.0, 0.54]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
@@ -457,6 +461,7 @@ climb_box:
       desired_gait: "trot"
       goal_thresh:  0.2
       waiting_time: 0
+      noise_sigma_act: [0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2]
     - goal_pos:     [1.9, 0.0, 0.34]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"

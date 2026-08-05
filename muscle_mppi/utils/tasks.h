@@ -47,6 +47,15 @@ struct TaskPhase {
 
     double goal_thresh  = 0.2;
     int    waiting_time = 0;   // dwell ticks required within goal_thresh
+
+    // Optional per-phase override of TaskConfig::noise_sigma_act, applied while
+    // this phase is active and reverted to the task-level baseline on the next
+    // phase that doesn't set one. Mirrors RTWholeBodyMPPI's next_goal(), which
+    // doubles thigh/calf exploration noise specifically during trot phases
+    // regardless of the task config's declared baseline. has_noise_sigma_act
+    // distinguishes "not set" from a legitimate all-zero override.
+    double noise_sigma_act[NUM_JOINTS] = {};
+    bool   has_noise_sigma_act = false;
 };
 
 struct TaskConfig {
