@@ -441,3 +441,93 @@ walk_octagon:
                 0.918588, 0.924256, 0.625957,  0.894216, 0.924256, 0.625957]
 
   muscle: *default_muscle_quad
+
+# -----------------------------------------------------------------------
+# climb_box: port of RTWholeBodyMPPI's climb_box_hw task (tasks.py) at
+# literal geometry scale (see unitree_mujoco/terrain_tool/generate_climb_box.py).
+# Named without the "_hw" suffix here: RTWholeBodyMPPI's sim_path and
+# model_path point at the identical file for this task (the "_hw" there just
+# means it was tuned with hardware deployment in mind, not that it's
+# hardware-only), and muscle_mppi doesn't distinguish hw/sim task variants.
+# Distinct from big_box: climbs a smaller box (0.2m, confirmed both from the
+# real model's box geom size AND the task's own goal_pos z-delta, 0.47-0.27),
+# pauses on top, then descends back down the far side -- rather than climbing
+# up and staying up.
+#
+# Positions translated from RTWholeBodyMPPI's own world frame (-2.204 ->
+# -0.304, moving in -x) to muscle_mppi's convention (spawn at x=0, +x
+# direction), preserving the exact same relative deltas between phases.
+# goal_pos z-values shifted +0.07 (Go1 baseline 0.27 -> Go2 baseline 0.34);
+# the box's own height (0.2m, world-fixed) is untouched. Gait pattern (climb
+# during "walk", cross/descend via "trot", holds via "in_place") and cost
+# weights match the original exactly -- notably gentler than big_box's
+# (smaller climb), including keeping vel_x at full strength (1.0, vs
+# big_box's near-zero) and standard (not doubled) exploration noise.
+climb_box:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_climb_box.xml"
+  height_target: 0.34
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         2000.0
+    pos_y:         2000.0
+    pos_z:         5000.0
+    orientation:   200000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    gait_stiffness: 0.75
+
+  phases:
+    - goal_pos:     [0.0, 0.0, 0.34]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 50
+    - goal_pos:     [0.5, 0.0, 0.54]
+      cmd_vel:      [0.5, 0.0]
+      desired_gait: "walk"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [0.9, 0.0, 0.54]
+      cmd_vel:      [0.5, 0.0]
+      desired_gait: "trot"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [0.9, 0.0, 0.54]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 200
+    - goal_pos:     [1.9, 0.0, 0.34]
+      cmd_vel:      [0.5, 0.0]
+      desired_gait: "trot"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [1.9, 0.0, 0.34]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 200
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  posture_bias: [-0.034673, -0.120845, -0.155732,  0.034673, -0.120846, -0.155732,
+                 -0.092919, -0.136516, -0.183224,  0.092919, -0.136515, -0.183224]
+
+  posture_FL1: [0.904806, 0.664309, 0.348336,  0.908773, 0.664309, 0.348336,
+                0.894216, 0.662541, 0.451398,  0.918588, 0.662541, 0.451398]
+  posture_FL2: [0.908773, 0.923175, 0.542686,  0.904806, 0.923175, 0.542686,
+                0.918588, 0.924256, 0.625957,  0.894216, 0.924256, 0.625957]
+
+  muscle: *default_muscle_quad
