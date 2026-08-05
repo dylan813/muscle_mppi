@@ -178,6 +178,11 @@ walk:
 # ground (scene_rough.xml — a repositioned copy of scene_terrain.xml's
 # box-grid rubble field, not a heightfield) instead of flat ground. Not a
 # RTWholeBodyMPPI port; deviates on purpose.
+#
+# The box field is shifted to x in [0.53, 2.87] (see scene_rough.xml), so
+# the robot spawns on flat ground at x=0 and walks forward onto the rubble
+# rather than spawning embedded in it. goal_pos below is set past the far
+# edge of the field so the walk phase actually crosses it.
 walk_rough:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough.xml"
   height_target: 0.34
@@ -201,20 +206,11 @@ walk_rough:
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
     gait_stiffness: 0.75
 
+  sim_duration: 45.0
   phases:
-    - goal_pos:     [0.0, 0.0, 0.34]
-      cmd_vel:      [0.0, 0.0]
-      desired_gait: "in_place"
-      goal_thresh:  0.2
-      waiting_time: 0
-    - goal_pos:     [1.0, 0.0, 0.34]
+    - goal_pos:     [3.2, 0.0, 0.34]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
-      goal_thresh:  0.2
-      waiting_time: 0
-    - goal_pos:     [1.0, 0.0, 0.34]
-      cmd_vel:      [0.0, 0.0]
-      desired_gait: "in_place"
       goal_thresh:  0.2
       waiting_time: 0
 

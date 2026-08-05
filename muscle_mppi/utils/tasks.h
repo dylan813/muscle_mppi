@@ -73,6 +73,11 @@ struct TaskConfig {
     double       lambda       = 0.1;
     double       dt           = 0.002;
 
+    // Seconds of MPPI control mppi_sim records after stand-up, before it stops
+    // and writes the CSV/qpos log. Bump this for tasks whose phases need more
+    // time to complete (e.g. a longer walk distance) than the 10s default covers.
+    double       sim_duration = 10.0;
+
     // OpenMP thread count for the parallel rollout loop. 0 (default) leaves the
     // OpenMP runtime default in place (typically all available cores).
     int          num_threads  = 0;

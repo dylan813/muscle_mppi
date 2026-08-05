@@ -142,7 +142,7 @@ int main(int argc, char** argv)
     printf("Running MPPI for %d convergence solves then logging...\n",
            CONVERGENCE_SOLVES);
 
-    const double sim_duration = 10.0;   // seconds of MPPI control to record
+    const double sim_duration = task.sim_duration;   // seconds of MPPI control to record
     double sim_t = 0.0;
     int solve_count = 0;
     double solve_sum_ms = 0.0;

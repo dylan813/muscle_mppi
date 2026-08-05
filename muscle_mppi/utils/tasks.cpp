@@ -40,6 +40,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.sample_type   = t["sample_type"] ? t["sample_type"].as<std::string>() : "normal";
     cfg.n_knots       = t["n_knots"]     ? t["n_knots"].as<int>()             : 4;
     cfg.num_threads   = t["num_threads"] ? t["num_threads"].as<int>()        : 0;
+    cfg.sim_duration  = t["sim_duration"] ? t["sim_duration"].as<double>()   : 10.0;
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     if (t["noise_sigma_act"])
