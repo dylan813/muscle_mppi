@@ -82,6 +82,7 @@ def _write_best_result(results_dir, best_cost, best_generation, best_x, cli_args
             "popsize": cli_args.popsize,
             "workers": cli_args.workers,
             "seed": cli_args.seed,
+            "cmd_vel_x": cli_args.cmd_vel_x,
         },
     }
     path = os.path.join(results_dir, "best_params.json")
@@ -119,6 +120,10 @@ def main():
     parser.add_argument("--seed",    type=int,   default=None,
                         help="Random seed for CMA-ES's sampling (default: "
                              "unseeded/random each run)")
+    parser.add_argument("--cmd-vel-x", type=float, default=None,
+                        help="Override the walk task's forward cmd_vel "
+                             "(phases[0].cmd_vel[0]) for this run. Default: "
+                             "unset, uses the value from tasks.yaml.")
     parser.add_argument("--wandb-project", type=str, default="muscle-mppi-cmaes",
                         help="wandb project to log runs to")
     parser.add_argument("--run-name", type=str, default=None,
@@ -129,12 +134,20 @@ def main():
                              "parallel, so cmaes_log files don't collide.")
     args = parser.parse_args()
 
+    # objective.evaluate() reads CMD_VEL_X fresh from the environment on
+    # every call (not cached at import time), so setting it here — before
+    # any worker pool is spawned — is picked up by every worker process,
+    # and also applies to the --test smoke-test path below.
+    if args.cmd_vel_x is not None:
+        os.environ["CMD_VEL_X"] = str(args.cmd_vel_x)
+
     results_dir = args.results_dir if args.results_dir else RESULTS_DIR
     os.makedirs(results_dir, exist_ok=True)
 
     print(f"CMA-ES walk optimizer")
     print(f"  x0:          {dict(zip(PARAM_NAMES, X0))}")
     print(f"  bounds:      lo={LO}  hi={HI}")
+    print(f"  cmd_vel_x:   {args.cmd_vel_x if args.cmd_vel_x is not None else '(tasks.yaml default)'}")
     print(f"  results:     {results_dir}")
     print()
 
@@ -182,6 +195,7 @@ def main():
             "sigma": sigma0,
             "popsize": args.popsize,
             "seed": es.opts.get("seed"),  # resolved seed, even if unspecified
+            "cmd_vel_x": args.cmd_vel_x,
         },
     )
 

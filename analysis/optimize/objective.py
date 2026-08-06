@@ -241,6 +241,19 @@ def _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel):
     return float(cost.mean())
 
 
+def _apply_cmd_vel_override(walk_cfg):
+    """
+    Overrides phases[0].cmd_vel's forward (x) component from the CMD_VEL_X
+    env var, if set. Read fresh from the environment on every call (not
+    cached at import time) so cmaes_walk.py can set it via os.environ after
+    argparse, before spawning workers. Leaves tasks.yaml's value alone (and
+    the lateral y component untouched) when unset.
+    """
+    cmd_vel_x = os.environ.get("CMD_VEL_X")
+    if cmd_vel_x is not None:
+        walk_cfg["phases"][0]["cmd_vel"][0] = float(cmd_vel_x)
+
+
 def _locomotion_cost(x, worker_id=0, verbose=False):
     """
     Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D) by
@@ -253,6 +266,7 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
 
     quad_base = base_cfg["default_muscle_quad"]
     walk_cfg  = base_cfg["walk"]
+    _apply_cmd_vel_override(walk_cfg)
 
     muscle_params = _build_muscle_params(x, quad_base)
 
@@ -333,6 +347,7 @@ def render_rollout(x, fps=RENDER_FPS):
 
     quad_base = base_cfg["default_muscle_quad"]
     walk_cfg  = base_cfg["walk"]
+    _apply_cmd_vel_override(walk_cfg)
 
     muscle_params = _build_muscle_params(x, quad_base)
 
