@@ -284,28 +284,23 @@ walk_rough_2:
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
-# climb_box: port of RTWholeBodyMPPI's climb_box_hw task (tasks.py) at
-# literal geometry scale (see unitree_mujoco/terrain_tool/generate_climb_box.py).
-# Named without the "_hw" suffix here: RTWholeBodyMPPI's sim_path and
-# model_path point at the identical file for this task (the "_hw" there just
-# means it was tuned with hardware deployment in mind, not that it's
-# hardware-only), and muscle_mppi doesn't distinguish hw/sim task variants.
-# Distinct from big_box: climbs a smaller box (0.2m, confirmed both from the
-# real model's box geom size AND the task's own goal_pos z-delta, 0.47-0.27),
-# pauses on top, then descends back down the far side -- rather than climbing
-# up and staying up.
+# guinea_fowl: gap-crossing task -- two flat platforms of equal height
+# (0.1m, see scene_guinea_fowl.xml) with a 0.2m gap between them. The robot
+# spawns on platform A and must cross the gap to land on platform B at the
+# same elevation -- a pure horizontal negotiation task, distinct from
+# climb_box/big_box's step-up-and-descend obstacles (no climbing involved,
+# both platforms are the same height).
 #
-# Positions translated from RTWholeBodyMPPI's own world frame (-2.204 ->
-# -0.304, moving in -x) to muscle_mppi's convention (spawn at x=0, +x
-# direction), preserving the exact same relative deltas between phases.
-# goal_pos z-values shifted +0.07 (Go1 baseline 0.27 -> Go2 baseline 0.34);
-# the box's own height (0.2m, world-fixed) is untouched. Gait pattern (climb
-# during "walk", cross/descend via "trot", holds via "in_place") and cost
-# weights match the original exactly -- notably gentler than big_box's
-# (smaller climb), including keeping vel_x at full strength (1.0, vs
-# big_box's near-zero) and standard (not doubled) exploration noise.
-climb_box:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_climb_box.xml"
+# spawn_height_offset matches the platform height (0.1) so mppi_sim lands
+# the robot on top of platform A instead of at z=0; goal_pos z is likewise
+# 0.44 (0.34 nominal standing height + 0.1 elevation) throughout, since the
+# robot never returns to the base floor level. Phases: hold on platform A,
+# walk up to the gap's edge, trot across (doubled thigh/calf exploration
+# noise, matching climb_box's crossing-phase convention), then hold on
+# platform B. Cost weights reused from climb_box's obstacle-negotiation
+# tuning (tighter position/orientation tracking than the plain walk tasks).
+guinea_fowl:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -326,42 +321,33 @@ climb_box:
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
     gait_stiffness: 0.75
 
+  sim_duration: 15.0
+  spawn_height_offset: 0.1
   phases:
-    - goal_pos:     [0.0, 0.0, 0.34]
+    - goal_pos:     [0.0, 0.0, 0.44]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
       waiting_time: 50
-    - goal_pos:     [0.5, 0.0, 0.54]
+    - goal_pos:     [1.7, 0.0, 0.44]
       cmd_vel:      [0.5, 0.0]
-      desired_gait: "walk"
+      desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.9, 0.0, 0.54]
-      cmd_vel:      [0.5, 0.0]
-      desired_gait: "trot"
-      goal_thresh:  0.2
-      waiting_time: 0
-      # Doubled thigh/calf exploration noise during trot -- matches RTWholeBodyMPPI's
-      # next_goal(), which switches to this value specifically for trot phases
-      # regardless of the task's declared baseline (0.06,0.1,0.1 here).
-      noise_sigma_act: [0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2]
-    - goal_pos:     [0.9, 0.0, 0.54]
-      cmd_vel:      [0.0, 0.0]
-      desired_gait: "in_place"
-      goal_thresh:  0.2
-      waiting_time: 200
-    - goal_pos:     [1.9, 0.0, 0.34]
+    - goal_pos:     [2.5, 0.0, 0.44]
       cmd_vel:      [0.5, 0.0]
       desired_gait: "trot"
       goal_thresh:  0.2
       waiting_time: 0
+      # Doubled thigh/calf exploration noise while crossing the gap --
+      # matches climb_box's crossing-phase convention (also matches
+      # RTWholeBodyMPPI's next_goal(), which does the same for trot phases).
       noise_sigma_act: [0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2]
-    - goal_pos:     [1.9, 0.0, 0.34]
+    - goal_pos:     [2.5, 0.0, 0.44]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
-      waiting_time: 200
+      waiting_time: 50
 
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 
