@@ -32,7 +32,6 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     TaskConfig cfg;
 
     cfg.model_path    = t["model_path"].as<std::string>();
-    cfg.height_target = t["height_target"] ? t["height_target"].as<double>() : 0.0;
     cfg.n_samples     = t["n_samples"].as<int>();
     cfg.horizon       = t["horizon"].as<int>();
     cfg.lambda        = t["lambda"].as<double>();

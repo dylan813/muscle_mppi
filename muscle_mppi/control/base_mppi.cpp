@@ -108,7 +108,7 @@ static void not_a_knot_cubic_spline(const std::vector<double>& xk, const std::ve
 }
 
 BaseMPPI::BaseMPPI(const TaskConfig& task)
-    : task_(task), height_target_(task.height_target), rng_(std::random_device{}())
+    : task_(task), rng_(std::random_device{}())
 {
     mju_user_warning = mujoco_warning_noop;
 

@@ -65,7 +65,6 @@ struct TaskConfig {
     // non-locomotion tasks (e.g. "reach", driven by SingleLegReach instead).
     std::vector<TaskPhase> phases;
 
-    double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     MuscleParams muscle;
     int          n_samples    = 16;

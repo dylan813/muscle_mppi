@@ -22,11 +22,6 @@ public:
     explicit BaseMPPI(const TaskConfig& task);
     virtual ~BaseMPPI();
 
-    void   set_height_target(double z) { height_target_ = z; }
-    double height_target()       const { return height_target_; }
-
-
-
     double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
     double cost_mean() const {
         double s = 0.0;
@@ -69,8 +64,6 @@ protected:
     int  act_qpos_adr_[NUM_JOINTS] = {};
     int  act_qvel_adr_[NUM_JOINTS] = {};
     bool has_freejoint_ = false;
-
-    double height_target_;
 
     std::mt19937 rng_;
     std::normal_distribution<double> normal_{0.0, 1.0};

@@ -88,7 +88,6 @@ peak_force = np.array(muscle["peak_force"])  # (12,)
 pFLmax     = np.array(muscle["pFLmax"])      # (12,)
 vmax_arr   = np.array(muscle["vmax"])        # (12,)
 FVmax_arr  = np.array(muscle["FVmax"])       # (12,)
-HEIGHT     = walk_cfg["height_target"]       # base height for MuJoCo state
 
 NUM_JOINTS  = 12
 JOINT_NAMES = ["FR_hip", "FR_thigh", "FR_calf",
@@ -200,12 +199,11 @@ _dof_adr = [model.jnt_dofadr[j]        for j in _jid]
 
 def get_bias_torques(q_joints, dq_joints):
     """
-    Set Go2 to (HEIGHT, level base, q_joints, dq_joints) and return qfrc_bias
+    Set Go2 to (level base, q_joints, dq_joints) and return qfrc_bias
     for the 12 actuated joints — gravity + Coriolis + centrifugal, no contact.
     Base velocity is zeroed (we only have joint velocities from the gait TSV).
     """
     mujoco.mj_resetData(model, data)
-    data.qpos[2] = HEIGHT      # z height
     data.qpos[3] = 1.0         # quaternion w (level base)
     for i in range(NUM_JOINTS):
         data.qpos[_qa_adr[i]]  = q_joints[i]

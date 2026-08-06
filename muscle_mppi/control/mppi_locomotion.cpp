@@ -95,11 +95,8 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     // task_.noise_sigma_act with a per-phase override.
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
 
-    if (!task_.phases.empty()) {
+    if (!task_.phases.empty())
         activate_phase(0);
-    } else {
-        cmd_.goal_pos[2] = task_.height_target;  // z default for a phase-less task
-    }
 
     // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).

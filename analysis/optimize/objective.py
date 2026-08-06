@@ -258,8 +258,6 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
     walk_cfg  = base_cfg["walk"]
 
     muscle_params = _build_muscle_params(x, quad_base)
-    # height_target needed by gait_generator for bias torque computation
-    muscle_params["height_target"] = walk_cfg["height_target"]
 
     with tempfile.TemporaryDirectory(prefix=f"cmaes_w{worker_id}_") as tmp_dir:
         # Generate single gait file
@@ -354,7 +352,6 @@ def render_rollout(x, fps=RENDER_FPS):
     walk_cfg  = base_cfg["walk"]
 
     muscle_params = _build_muscle_params(x, quad_base)
-    muscle_params["height_target"] = walk_cfg["height_target"]
 
     with tempfile.TemporaryDirectory(prefix="cmaes_render_") as tmp_dir:
         gait_out = os.path.join(tmp_dir, "gaits", "FAST",
