@@ -82,7 +82,6 @@ def _write_best_result(results_dir, best_cost, best_generation, best_x, cli_args
             "popsize": cli_args.popsize,
             "workers": cli_args.workers,
             "seed": cli_args.seed,
-            "area_weight": cli_args.area_weight,
         },
     }
     path = os.path.join(results_dir, "best_params.json")
@@ -120,13 +119,6 @@ def main():
     parser.add_argument("--seed",    type=int,   default=None,
                         help="Random seed for CMA-ES's sampling (default: "
                              "unseeded/random each run)")
-    parser.add_argument("--area-weight", type=float, default=0.0,
-                        help="Weight on the closed-form active/passive FL "
-                             "curve area, subtracted from locomotion cost "
-                             "so larger area -> lower (better) fitness. "
-                             "Default 0.0 = curve shape has no effect on "
-                             "fitness. Start low and increase across runs "
-                             "until the resulting curves look right.")
     parser.add_argument("--wandb-project", type=str, default="muscle-mppi-cmaes",
                         help="wandb project to log runs to")
     parser.add_argument("--run-name", type=str, default=None,
@@ -137,19 +129,12 @@ def main():
                              "parallel, so cmaes_log files don't collide.")
     args = parser.parse_args()
 
-    # objective.evaluate() reads AREA_WEIGHT fresh from the environment on
-    # every call (not cached at import time), so setting it here — before
-    # any worker pool is spawned — is picked up by every worker process,
-    # and also applies to the --test smoke-test path below.
-    os.environ["AREA_WEIGHT"] = str(args.area_weight)
-
     results_dir = args.results_dir if args.results_dir else RESULTS_DIR
     os.makedirs(results_dir, exist_ok=True)
 
     print(f"CMA-ES walk optimizer")
     print(f"  x0:          {dict(zip(PARAM_NAMES, X0))}")
     print(f"  bounds:      lo={LO}  hi={HI}")
-    print(f"  area_weight: {args.area_weight}")
     print(f"  results:     {results_dir}")
     print()
 
@@ -197,7 +182,6 @@ def main():
             "sigma": sigma0,
             "popsize": args.popsize,
             "seed": es.opts.get("seed"),  # resolved seed, even if unspecified
-            "area_weight": args.area_weight,
         },
     )
 
@@ -240,22 +224,16 @@ def main():
         std_cost  = float(np.std(feasible_costs))  if feasible_costs else float("nan")
         n_feasible = len(feasible_costs)
 
-        # gen_best_cost/best_cost are the *combined* fitness (locomotion cost
-        # - area_weight * area) that CMA-ES actually optimizes on. Since
-        # fitness = locomotion_cost - area_weight * area, and area is a cheap
-        # closed-form function of x, both raw components can be recovered
-        # exactly without re-running mppi_sim, for watching the cost/area
-        # trade-off as area_weight is tuned across runs.
+        # area is a cheap closed-form function of x (no simulation), kept as
+        # an informational diagnostic alongside fitness (= locomotion cost).
         gen_best_area  = curve_area_mean(solutions[gen_best_idx])
         best_area      = curve_area_mean(best_x)
         log = {
             "generation": generation,
             "gen_best_fitness": gen_best_cost,
             "gen_best_area_mean": gen_best_area,
-            "gen_best_locomotion_cost": gen_best_cost + args.area_weight * gen_best_area,
             "overall_best_fitness": best_cost,
             "overall_best_area_mean": best_area,
-            "overall_best_locomotion_cost": best_cost + args.area_weight * best_area,
             "mean_cost": mean_cost,
             "std_cost": std_cost,
             "n_feasible": n_feasible,
@@ -270,7 +248,7 @@ def main():
         # Curve plots for this generation's best candidate — cheap (no
         # simulation, pure closed-form curves) so safe to render every
         # generation, letting you scrub through wandb's media history to
-        # watch the shape evolve as area_weight pulls on it.
+        # watch the shape evolve across generations.
         gen_best_x = solutions[gen_best_idx]
         fig_fl = plot_fl_curves(gen_best_x, title_suffix=f" (gen {generation})")
         fig_fv = plot_fv_curves(gen_best_x, title_suffix=f" (gen {generation})")
@@ -296,16 +274,13 @@ def main():
         print(f"\nGen {generation:3d} | best={gen_best_cost:.2f} "
               f"| feasible={n_feasible}/{len(costs)} | {elapsed:.0f}s")
         print(f"  best x: {dict(zip(PARAM_NAMES, best_x))}")
-        print(f"  overall best fitness: {best_cost:.4f}  "
-              f"(locomotion_cost={best_cost + args.area_weight * best_area:.4f}, "
-              f"area_mean={best_area:.4f})")
+        print(f"  overall best fitness: {best_cost:.4f}  (area_mean={best_area:.4f})")
         print("─" * 60)
 
     best_path = _write_best_result(results_dir, best_cost, generation, best_x, args, done=True)
     final_area = curve_area_mean(best_x)
     print("\n═══ Optimization complete ═══")
-    print(f"Best fitness         : {best_cost:.4f}")
-    print(f"  locomotion_cost    : {best_cost + args.area_weight * final_area:.4f}")
+    print(f"Best fitness (cost)  : {best_cost:.4f}")
     print(f"  area_mean          : {final_area:.4f}")
     print(f"Best params  : {dict(zip(PARAM_NAMES, best_x))}")
     print(f"Best params saved to {best_path}")

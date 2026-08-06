@@ -2,15 +2,12 @@
 Objective function for CMA-ES optimization of Hill muscle parameters.
 
 Each call to evaluate(x):
-  1. Computes the closed-form active/passive force-length curve area for
-     each joint type from x (no simulation involved) and combines it with
-     the locomotion cost below via AREA_WEIGHT (env var, default 0 = off).
-  2. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
+  1. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
      arrays (hip/thigh/calf values shared across all 4 legs).
-  3. Writes a temp tasks.yaml with absolute paths
-  4. Regenerates the single gait file used by the walk task
-  5. Runs mppi_sim as a subprocess
-  6. Parses the output CSV and computes the mean per-step cost from tasks.yaml weights
+  2. Writes a temp tasks.yaml with absolute paths
+  3. Regenerates the single gait file used by the walk task
+  4. Runs mppi_sim as a subprocess
+  5. Parses the output CSV and computes the mean per-step cost from tasks.yaml weights
 
 The cost formula mirrors mppi_locomotion.cpp::step_cost() for terms computable
 from the logged CSV (pos_x/y/z, orientation, vel_x/y/z — px/py/pz are the
@@ -320,23 +317,9 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
 def evaluate(x, worker_id=0, verbose=False):
     """
     Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D).
-    Returns scalar fitness (lower is better) = locomotion_cost -
-    AREA_WEIGHT * curve_area_mean(x). AREA_WEIGHT is read fresh from the
-    environment on every call (not cached at import time) so cmaes_walk.py
-    can set it via os.environ after argparse, before spawning workers.
-    Set AREA_WEIGHT=0 (the default) to recover plain locomotion-cost fitness.
+    Returns scalar fitness (lower is better) = locomotion_cost.
     """
-    area_mean   = curve_area_mean(x)
-    area_weight = float(os.environ.get("AREA_WEIGHT", 0.0))
-
-    cost    = _locomotion_cost(x, worker_id=worker_id, verbose=verbose)
-    fitness = cost - area_weight * area_mean
-
-    if verbose and area_weight:
-        print(f"  [w{worker_id}] area_mean={area_mean:.4f} "
-              f"(weight={area_weight:g})  cost={cost:.1f}  → fitness={fitness:.1f}")
-
-    return fitness
+    return _locomotion_cost(x, worker_id=worker_id, verbose=verbose)
 
 
 def render_rollout(x, fps=RENDER_FPS):
