@@ -229,6 +229,65 @@ walk_rough:
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
+# walk_rough_2: same straight-line +x traversal, run over scene_rough_2.xml's
+# Perlin-noise heightfield instead of walk_rough's box-grid rubble. The robot
+# spawns standing on top of a raised platform (x in [-0.1, 0.9], top at
+# z=0.1) rather than on the base floor -- mppi_sim's stand-up placement
+# assumes flat ground at z=0, so spawn_height_offset below tells it the
+# actual ground height under the spawn point. The hfield is shifted up by
+# that same 0.1 and repositioned so its leading edge (x=0.9) meets the
+# platform's top with no drop -- see scene_rough_2.xml. Field sits at
+# x in [0.9, 2.9]; goal_pos is set past its far edge, with z raised to 0.44
+# (0.34 nominal standing height + the 0.1 terrain elevation) so the height
+# cost tracks correctly while the robot is up on the platform/field instead
+# of pulling it back down to the old flat-ground target.
+walk_rough_2:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough_2.xml"
+  height_target: 0.34
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    gait_stiffness: 0.75
+
+  sim_duration: 10.0
+  spawn_height_offset: 0.1
+  phases:
+    - goal_pos:     [2.9, 0.0, 0.4]
+      cmd_vel:      [0.2, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  posture_bias: [-0.013492, -0.139178, -0.237088,  0.013492, -0.139179, -0.237088,
+                 -0.036156, -0.157226, -0.266074,  0.036156, -0.157226, -0.266074]
+
+  posture_FL1: [0.840162, 0.668695, 0.350412,  0.843239, 0.668695, 0.350412,
+                0.832209, 0.666395, 0.454089,  0.851119, 0.666395, 0.454089]
+  posture_FL2: [0.843239, 0.93456, 0.500727,  0.840162, 0.93456, 0.500727,
+                0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
+
+  muscle: *default_muscle_quad
+
+# -----------------------------------------------------------------------
 # climb_box: port of RTWholeBodyMPPI's climb_box_hw task (tasks.py) at
 # literal geometry scale (see unitree_mujoco/terrain_tool/generate_climb_box.py).
 # Named without the "_hw" suffix here: RTWholeBodyMPPI's sim_path and
