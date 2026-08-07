@@ -148,7 +148,14 @@ void MPPILocomotionPD::advance_phase(const RobotState& state)
     // Dwell gate: counts ticks spent within goal_thresh, not reset when the
     // robot drifts back out in between. Kept running even after task_success_
     // so dwelling_ keeps tracking correctly.
-    if (++dwell_ticks_ < cur.waiting_time) {
+    //
+    // <= (not <): RTWholeBodyMPPI's Timer.increment() only flips `done` once
+    // elapsed_time (pre-incremented) reaches end_time, and that `done` check
+    // happens inside the SAME next_goal() call that performed the increment —
+    // so it takes waiting_time+1 in-threshold calls to advance a phase, not
+    // waiting_time. Advancing on `dwell_ticks_ < waiting_time` (the previous
+    // version of this line) fires one tick early on every phase transition.
+    if (++dwell_ticks_ <= cur.waiting_time) {
         dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
         return;
     }
@@ -191,10 +198,9 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
         }
 
         for (int j = 0; j < NUM_JOINTS; ++j) {
-            double noisy = trajectory_[t * NUM_JOINTS + j]
-                         + noise_[s * stride + t * NUM_JOINTS + j];
-            const double q_des = std::clamp(noisy, action_lo_[j], action_hi_[j]);
-            tau_out[j] = pd_.kp[j] * (q_des - q_cur[j]) - pd_.kd[j] * dq_cur[j];
+            const double q_des = actions_[s * stride + t * NUM_JOINTS + j];
+            tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], q_des, q_cur[j],
+                                           /*dq_des=*/0.0, dq_cur[j], /*tau_ff=*/0.0);
         }
 
         for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
@@ -204,7 +210,8 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
 
         double gait_ref_q[NUM_JOINTS] = {}, gait_ref_dq[NUM_JOINTS] = {};
         if (active_gait_) active_gait_->get_phase(t, gait_ref_q, gait_ref_dq);
-        total_cost += step_cost(d, gait_ref_q, gait_ref_dq, tau_out);
+        total_cost += step_cost(d, gait_ref_q, gait_ref_dq,
+                                &actions_[s * stride + t * NUM_JOINTS]);
     }
 
     return std::isfinite(total_cost) ? total_cost : 1e6;
@@ -214,41 +221,36 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
 // Cost function
 // ============================================================================
 
-// Whole-robot CoM position (world frame) and CoM velocity (body-frame axes).
-//
-// base_bid_ is the trunk (root) body, so its subtree is the entire robot
-// (trunk + all legs). d->subtree_com is the mass-weighted CoM of that whole
-// subtree and is already computed every step by mj_fwdPosition, so it's
-// free. Its velocity (d->subtree_linvel) is a diagnostic quantity MuJoCo
-// does NOT compute by default, so we call mj_subtreeVel() to populate it —
-// this is an extra O(nbody) pass on top of the regular step, cheap for this
-// model but not free. subtree_linvel comes out in world-aligned axes, so we
-// rotate it into the body frame the same way the old code rotated qvel.
-void MPPILocomotionPD::base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const
+// Trunk-origin position (world frame) and trunk linear velocity (body-frame axes).
+void MPPILocomotionPD::base_state(mjData* d, double pos[3], double vel_body[3]) const
 {
-    mj_subtreeVel(model_, d);
+    // Track the raw free-joint trunk origin, matching RTWholeBodyMPPI:
+    // quadruped_cost_np's x[:, :3] is qpos[0:3] and x[:, 19:22] is qvel[0:3]
+    // (mppi_locomotion.py:240, 287-288), taken straight out of the rollout
+    // state — never a center-of-mass quantity. MuJoCo's free joint reports
+    // qvel[0:3] in world axes, so rotate into the body frame by R^T (xmat is
+    // body->world), which is what RTWholeBodyMPPI's
+    // batch_world_to_local_velocity does via rotation.inv().apply().
+    pos[0] = d->qpos[0];
+    pos[1] = d->qpos[1];
+    pos[2] = d->qpos[2];
 
-    const double* com = d->subtree_com + base_bid_ * 3;
-    com_pos[0] = com[0];
-    com_pos[1] = com[1];
-    com_pos[2] = com[2];
-
-    const double* v_world = d->subtree_linvel + base_bid_ * 3;
-    const double* xmat    = d->xmat + base_bid_ * 9;
-    com_vel_body[0] = v_world[0]*xmat[0] + v_world[1]*xmat[3] + v_world[2]*xmat[6];
-    com_vel_body[1] = v_world[0]*xmat[1] + v_world[1]*xmat[4] + v_world[2]*xmat[7];
-    com_vel_body[2] = v_world[0]*xmat[2] + v_world[1]*xmat[5] + v_world[2]*xmat[8];
+    const double* xmat = d->xmat + base_bid_ * 9;
+    const double vx = d->qvel[0], vy = d->qvel[1], vz = d->qvel[2];
+    vel_body[0] = vx*xmat[0] + vy*xmat[3] + vz*xmat[6];
+    vel_body[1] = vx*xmat[1] + vy*xmat[4] + vz*xmat[7];
+    vel_body[2] = vx*xmat[2] + vy*xmat[5] + vz*xmat[8];
 }
 
 double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],
                                    const double gait_ref_dq[NUM_JOINTS],
-                                   const double tau_pd[NUM_JOINTS])
+                                   const double q_des[NUM_JOINTS])
 {
     const CostWeights& w = cost_;
     double cost = 0.0;
 
     double pos[3], vel_body[3];
-    base_com_state(d, pos, vel_body);
+    base_state(d, pos, vel_body);
 
     cost += w.pos_x * std::abs(pos[0] - cmd_.goal_pos[0]);
     cost += w.pos_y * std::abs(pos[1] - cmd_.goal_pos[1]);
@@ -285,12 +287,24 @@ double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS
         cost += w.joint_vel_weights[j] * e * e;
     }
 
-    // Control-effort regularization on the PD-implied torque (mirrors
-    // RTWholeBodyMPPI's R_diag term on u_error = kp*(u-x_joint) - kd*v_joint;
-    // here tau_pd already equals that quantity under this task's own PD gains).
+    // Control-effort regularization (RTWholeBodyMPPI's R_diag term), computed
+    // exactly as quadruped_cost_np does it (mppi_locomotion.py:220-221, 236):
+    //     kp = 50; kd = 3
+    //     u_error = kp * (u - x_joint) - kd * v_joint
+    // Two deliberate details, both matching the reference rather than this
+    // task's own actuator: (1) the cost uses kp=50, NOT the 55 the physical
+    // actuator applies — RTWholeBodyMPPI hardcodes a separate cost-shaping
+    // gain pair and we mirror it rather than "correcting" it; (2) x_joint /
+    // v_joint are the POST-step joint state (Python scores the rollout state
+    // recorded after the control was applied), which is what d holds here
+    // since step_cost() runs after mj_step().
+    static constexpr double kCostKp = 50.0;
+    static constexpr double kCostKd = 3.0;
     for (int j = 0; j < NUM_JOINTS; ++j) {
         if (w.control_effort_weights[j] == 0.0) continue;
-        cost += w.control_effort_weights[j] * tau_pd[j] * tau_pd[j];
+        const double u_error = kCostKp * (q_des[j] - d->qpos[act_qpos_adr_[j]])
+                             - kCostKd * d->qvel[act_qvel_adr_[j]];
+        cost += w.control_effort_weights[j] * u_error * u_error;
     }
 
     return cost;
@@ -306,7 +320,8 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
 
     if (!state.valid) {
         for (int j = 0; j < NUM_JOINTS; ++j)
-            tau_out[j] = pd_.kp[j] * (real_q_des_[j] - state.q[j]) - pd_.kd[j] * state.dq[j];
+            tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], real_q_des_[j], state.q[j],
+                                           /*dq_des=*/0.0, state.dq[j], /*tau_ff=*/0.0);
         return;
     }
 
@@ -345,7 +360,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
             trajectory_[(task_.horizon - 1) * NUM_JOINTS + j];
     trajectory_ = shifted;
 
-    sample_noise();
+    sample_actions();
 
     #pragma omp parallel for schedule(dynamic)
     for (int s = 0; s < task_.n_samples; ++s)
@@ -364,15 +379,17 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
         wsum        += weights[s];
     }
 
-    // Weighted average update.
+    // Weighted average update. actions_ is already clamped (built in
+    // sample_actions()/sample_actions_cubic()), so no per-sample re-clamp
+    // here — matches RTWholeBodyMPPI's perturb_action() clipping once and
+    // reusing that same array for both rollout and this weighted average.
     std::vector<double> new_traj(stride, 0.0);
     for (int s = 0; s < task_.n_samples; ++s) {
         const double w = weights[s] / wsum;
         for (int t = 0; t < task_.horizon; ++t)
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 const int idx = t * NUM_JOINTS + j;
-                new_traj[idx] += w * std::clamp(
-                    trajectory_[idx] + noise_[s * stride + idx], action_lo_[j], action_hi_[j]);
+                new_traj[idx] += w * actions_[s * stride + idx];
             }
     }
     for (int t = 0; t < task_.horizon; ++t)
@@ -399,14 +416,15 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
             double tau_l[NUM_JOINTS];
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 const double q_des = trajectory_[t * NUM_JOINTS + j];
-                tau_l[j] = pd_.kp[j] * (q_des - q_l[j]) - pd_.kd[j] * dq_l[j];
+                tau_l[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], q_des, q_l[j],
+                                             /*dq_des=*/0.0, dq_l[j], /*tau_ff=*/0.0);
             }
             for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
             for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[JOINT_OFFSET + j] = tau_l[j];
             mj_step(model_, dl);
 
             double lpos[3], lvel[3];
-            base_com_state(dl, lpos, lvel);
+            base_state(dl, lpos, lvel);
             c_pos += cost_.pos_x * std::abs(lpos[0] - cmd_.goal_pos[0]);
             c_pos += cost_.pos_y * std::abs(lpos[1] - cmd_.goal_pos[1]);
             c_pos += cost_.pos_z * std::abs(lpos[2] - cmd_.goal_pos[2]);
@@ -444,7 +462,11 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
 
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 if (cost_.control_effort_weights[j] == 0.0) continue;
-                c_effort += cost_.control_effort_weights[j] * tau_l[j] * tau_l[j];
+                // Same cost-shaping gains + post-step state as step_cost().
+                const double u_error = 50.0 * (trajectory_[t * NUM_JOINTS + j]
+                                               - dl->qpos[act_qpos_adr_[j]])
+                                     - 3.0 * dl->qvel[act_qvel_adr_[j]];
+                c_effort += cost_.control_effort_weights[j] * u_error * u_error;
             }
         }
 
@@ -455,7 +477,8 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
     // Output: execute step 0 of the weighted-mean trajectory from current state.
     for (int j = 0; j < NUM_JOINTS; ++j) real_q_des_[j] = trajectory_[j];
     for (int j = 0; j < NUM_JOINTS; ++j)
-        tau_out[j] = pd_.kp[j] * (real_q_des_[j] - state.q[j]) - pd_.kd[j] * state.dq[j];
+        tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], real_q_des_[j], state.q[j],
+                                       /*dq_des=*/0.0, state.dq[j], /*tau_ff=*/0.0);
 
     if (active_gait_) active_gait_->advance();
 

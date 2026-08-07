@@ -108,7 +108,9 @@ static void not_a_knot_cubic_spline(const std::vector<double>& xk, const std::ve
 }
 
 BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
-    : task_(task), rng_(std::random_device{}())
+    : task_(task),
+      rng_(task.seed >= 0 ? static_cast<std::mt19937::result_type>(task.seed)
+                          : std::random_device{}())
 {
     mju_user_warning = mujoco_warning_noop;
 
@@ -120,6 +122,26 @@ BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
     if (!model_) throw std::runtime_error("Failed to load model: " + std::string(error));
 
     model_->opt.timestep = task_.dt;
+
+    // Mirrors RTWholeBodyMPPI's base_controller.py:33-34 (enableflags=1 is
+    // mjENBL_OVERRIDE; o_solref=[0.02,1.0] from every mppi_gait_config_*.yml,
+    // consistently across all of RTWholeBodyMPPI's tasks). This forces every
+    // contact in this model_ (used only for MPPI cost-evaluation rollouts) to
+    // use o_solref/o_solimp/o_friction/o_margin instead of each geom's own
+    // per-geom tuning. o_solref already equals MuJoCo's compiled default, so
+    // this line alone is a no-op; the actual effect is that
+    // o_solimp/o_friction/o_margin (left unset here, same as RTWholeBodyMPPI
+    // leaves them) fall back to MuJoCo's global defaults too — silently
+    // discarding go2.xml's own foot friction/solimp tuning for planning
+    // purposes, the same way this override silently discards RTWholeBodyMPPI's
+    // own go1 foot tuning in base_controller.py. Deliberately NOT applied to
+    // pd_mppi_sim.cpp's separate "real world" simulated model — RTWholeBodyMPPI's
+    // own real-world stepper (interface/simulator.py:51) leaves this same
+    // override commented out, so only the planner sees it, not the simulated
+    // robot's actual dynamics. See pd_mppi_sim.cpp's matching comment.
+    model_->opt.enableflags |= mjENBL_OVERRIDE;
+    model_->opt.o_solref[0] = 0.02;
+    model_->opt.o_solref[1] = 1.0;
 
     data_.resize(task_.n_samples + 1);
     for (int i = 0; i <= task_.n_samples; ++i)
@@ -147,7 +169,7 @@ BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
         model_->dof_damping[act_qvel_adr_[j]] = task_.pd.joint_damping[j];
 
     trajectory_.assign(task_.horizon * NUM_JOINTS, 0.0);
-    noise_.assign(task_.n_samples * task_.horizon * NUM_JOINTS, 0.0);
+    actions_.assign(task_.n_samples * task_.horizon * NUM_JOINTS, 0.0);
     costs_.resize(task_.n_samples);
 
     if (task_.sample_type == "cubic") {
@@ -168,9 +190,9 @@ BaseMPPIPD::~BaseMPPIPD() {
     mj_deleteModel(model_);
 }
 
-void BaseMPPIPD::sample_noise() {
+void BaseMPPIPD::sample_actions() {
     if (task_.sample_type == "cubic") {
-        sample_noise_cubic();
+        sample_actions_cubic();
         return;
     }
 
@@ -181,12 +203,25 @@ void BaseMPPIPD::sample_noise() {
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 const double sigma = task_.noise_sigma_act[j];
                 const int idx = s * H * NUM_JOINTS + ti * NUM_JOINTS + j;
-                noise_[idx] = sigma * normal_(rng_);
+                const double v = trajectory_[ti * NUM_JOINTS + j] + sigma * normal_(rng_);
+                actions_[idx] = std::clamp(v, action_lo_[j], action_hi_[j]);
             }
         }
 }
 
-void BaseMPPIPD::sample_noise_cubic() {
+// Mirrors RTWholeBodyMPPI's perturb_action() cubic branch (base_controller.py):
+// the spline is fit through trajectory_[knot] + noise at just n_knots points,
+// then evaluated over the WHOLE horizon — so the entire per-sample action
+// curve is re-projected onto a low-dimensional (n_knots-point) cubic-spline
+// basis every iteration, not just the noise. This is a real smoothing
+// mechanism on top of the mean trajectory itself: no matter how jagged
+// trajectory_ has become from repeated weighted-averaging, only n_knots
+// values per joint survive into each rollout batch. Splining the noise alone
+// and adding it to the raw, unsplined trajectory_ (the previous version of
+// this function) drops that regularization and lets trajectory_ accumulate
+// per-timestep artifacts across iterations — a likely source of visible
+// jitter distinct from ordinary MPPI sample-to-sample variance.
+void BaseMPPIPD::sample_actions_cubic() {
     const int H = task_.horizon;
     const int K = task_.n_knots;
 
@@ -196,10 +231,15 @@ void BaseMPPIPD::sample_noise_cubic() {
     for (int s = 0; s < task_.n_samples; ++s) {
         for (int j = 0; j < NUM_JOINTS; ++j) {
             const double sigma = task_.noise_sigma_act[j];
-            for (int k = 0; k < K; ++k) knot_y[k] = sigma * normal_(rng_);
+            for (int k = 0; k < K; ++k) {
+                const int t_idx = static_cast<int>(knot_x_[k]);
+                knot_y[k] = trajectory_[t_idx * NUM_JOINTS + j] + sigma * normal_(rng_);
+            }
             not_a_knot_cubic_spline(knot_x_, knot_y, yt.data(), H);
-            for (int t = 0; t < H; ++t)
-                noise_[s * H * NUM_JOINTS + t * NUM_JOINTS + j] = yt[t];
+            for (int t = 0; t < H; ++t) {
+                const int idx = s * H * NUM_JOINTS + t * NUM_JOINTS + j;
+                actions_[idx] = std::clamp(yt[t], action_lo_[j], action_hi_[j]);
+            }
         }
     }
 }
@@ -219,7 +259,7 @@ void BaseMPPIPD::warm_start(int n_skip)
 
 void BaseMPPIPD::run_mppi_step(const RobotState& state)
 {
-    sample_noise();
+    sample_actions();
 
     #pragma omp parallel for schedule(dynamic)
     for (int s = 0; s < task_.n_samples; ++s)
@@ -251,8 +291,7 @@ void BaseMPPIPD::run_mppi_step(const RobotState& state)
         for (int t = 0; t < task_.horizon; ++t)
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 int idx = t * NUM_JOINTS + j;
-                new_traj[idx] += w * (trajectory_[idx]
-                    + noise_[s * task_.horizon * NUM_JOINTS + idx]);
+                new_traj[idx] += w * actions_[s * task_.horizon * NUM_JOINTS + idx];
             }
     }
     for (int t = 0; t < task_.horizon; ++t)

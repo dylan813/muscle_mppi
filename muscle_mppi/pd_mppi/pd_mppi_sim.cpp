@@ -13,9 +13,9 @@
 //
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, qdes_j0..qdes_j{NUM_JOINTS-1}
-//   px/py/pz are the whole-robot (trunk + legs) center of mass, i.e. the base
-//   body's subtree_com — matching what step_cost() scores against goal_pos
-//   in mppi_locomotion_pd.cpp, not the trunk frame origin.
+//   px/py/pz are the trunk frame origin (free-joint qpos[0:3]) — matching
+//   what step_cost() scores against goal_pos in mppi_locomotion_pd.cpp, and
+//   matching RTWholeBodyMPPI's own position cost reference.
 //   vx/vy/vz are body-frame linear velocity (rotated from the free joint's
 //   world-frame qvel[0:3]), matching the body-frame convention step_cost()
 //   uses when comparing against cmd_.vx/vy in mppi_locomotion_pd.cpp.
@@ -88,6 +88,27 @@ int main(int argc, char** argv)
     mjModel* m = mj_loadXML(task.model_path.c_str(), nullptr, err, sizeof(err));
     if (!m) { fprintf(stderr, "mj_loadXML: %s\n", err); return 1; }
     m->opt.timestep = task.dt;
+
+    // Deliberately NOT applying the mjENBL_OVERRIDE contact override here.
+    // RTWholeBodyMPPI's own interface/simulator.py (the "real world" stepper,
+    // this model's counterpart) sets o_solref but leaves
+    // `self.model.opt.enableflags = 1` commented out (simulator.py:51) — so
+    // the override is inert there and the real simulated robot uses each
+    // geom's own contact tuning, unmodified. Only RTWholeBodyMPPI's MPPI
+    // planner (base_controller.py, ported in BaseMPPIPD's constructor) has
+    // the override actually active, since it's only used for cost-evaluation
+    // rollouts. Applying it here too (an earlier version of this file did)
+    // would make the actually-simulated robot's contacts diverge from
+    // RTWholeBodyMPPI's, not match it.
+
+    // Note: go2.xml's foot geoms keep their own contact tuning here, on
+    // purpose. RTWholeBodyMPPI's go1_mppi.xml uses a much softer foot
+    // (solimp="0.015 1 0.031", friction 0.8) than go2's MuJoCo-default
+    // solimp/0.4 friction, but that is a property of *their robot model*, not
+    // of the MPPI code being ported — and an A/B of go1's values on this robot
+    // showed no measurable change in body bounce or roll. Left alone so the
+    // simulated robot stays the Go2 that Unitree's model describes.
+
     mjData* d = mj_makeData(m);
 
     // Resolve the base body (mirrors MPPILocomotionPD::base_bid_ resolution)
@@ -139,8 +160,8 @@ int main(int argc, char** argv)
         const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
         for (int j = 0; j < NUM_JOINTS; ++j) {
             const double q_des = phase * STAND_UP[j] + (1.0 - phase) * STAND_DOWN[j];
-            d->ctrl[JOINT_OFFSET + j] =
-                kp * (q_des - d->qpos[qa[j]]) + 3.5 * (-d->qvel[qv[j]]);
+            d->ctrl[JOINT_OFFSET + j] = unitree_pd_torque(
+                kp, /*kd=*/3.5, q_des, d->qpos[qa[j]], /*dq_des=*/0.0, d->qvel[qv[j]], /*tau_ff=*/0.0);
         }
         mj_step(m, d);
     }
@@ -197,10 +218,8 @@ int main(int argc, char** argv)
             const double vy_body = vwx * xmat[1] + vwy * xmat[4] + vwz * xmat[7];
             const double vz_body = vwx * xmat[2] + vwy * xmat[5] + vwz * xmat[8];
 
-            const double* com = d->subtree_com + base_bid * 3;
-
             csv << sim_t << ","
-                << com[0] << "," << com[1] << "," << com[2] << ","
+                << d->qpos[0] << "," << d->qpos[1] << "," << d->qpos[2] << ","
                 << vx_body << "," << vy_body << "," << vz_body << ","
                 << qw << "," << roll;
             for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];

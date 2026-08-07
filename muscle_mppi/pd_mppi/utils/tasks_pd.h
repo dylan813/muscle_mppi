@@ -89,8 +89,14 @@ struct TaskConfig {
     std::string  sample_type  = "normal";
     int          n_knots      = 4;
 
+    // RNG seed for noise sampling. RTWholeBodyMPPI seeds deterministically
+    // (`seed: 42` in every mppi_gait_config_*.yml -> np.random.default_rng),
+    // so runs are reproducible; matched here. Set seed: -1 to draw a
+    // nondeterministic seed from std::random_device instead.
+    int          seed         = 42;
+
     // Per-joint noise sigma (radians) applied to the sampled desired joint
-    // position. Used by BaseMPPIPD::sample_noise().
+    // position. Used by BaseMPPIPD::sample_actions().
     double noise_sigma_act[NUM_JOINTS]   = {};
 };
 

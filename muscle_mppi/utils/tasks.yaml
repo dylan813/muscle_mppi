@@ -324,12 +324,12 @@ guinea_fowl:
   sim_duration: 15.0
   spawn_height_offset: 0.06
   phases:
-    - goal_pos:     [1.9, 0.0, 0.40]
+    - goal_pos:     [1.9, 0.0, 0.33]
       cmd_vel:      [0.5, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.9, 0.0, 0.40]
+    - goal_pos:     [1.9, 0.0, 0.33]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

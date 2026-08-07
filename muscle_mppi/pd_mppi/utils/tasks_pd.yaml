@@ -39,11 +39,14 @@ default_control_effort_weights: &default_control_effort_weights
 # GAIT_*_PATH constants) — or set gait_path directly to an explicit TSV, which
 # overrides desired_gait.
 #
-# noise_sigma_act and cost.gait_ref_weights below are carried over numerically
-# from ../../utils/tasks.yaml's `walk` task as a starting point, but they were
-# tuned for a very different action space (muscle activation in [0,1], gait
-# tracking error in activation units) than this task's (joint angle in radians,
-# gait tracking error in radians). Expect to re-tune both once this runs.
+# noise_sigma_act and every cost.* weight below were verified against
+# RTWholeBodyMPPI's own mppi_gait_config_walk.yml and match it exactly:
+# noise_sigma [0.06,0.1,0.1]x4, and Q_diag -> pos_x/y/z 300/300/500,
+# orientation 400000, vel_x/y/z 1/1e-4/1e-4, ang_vel 1e-4,
+# gait_ref_weights 800 (Q_diag[7:19]), joint_vel_weights 0.1 (Q_diag[25:37]),
+# control_effort_weights 0.001 (R_diag). These are in the same units as the
+# reference (joint angle in radians), so they are not "muscle-variant numbers
+# awaiting a re-tune" — they are the reference's own tuned values.
 walk:
   model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
   n_samples:     30
@@ -74,8 +77,17 @@ walk:
     joint_vel_weights: *default_joint_vel_weights
     control_effort_weights: *default_control_effort_weights
 
+  # goal_pos z = 0.27: the standing height the gait references actually
+  # produce. Forward-kinematicking any of the pd_mppi/gaits TSVs onto this
+  # robot puts the trunk at 0.2715 m with the stance foot on the ground, and
+  # RTWholeBodyMPPI uses exactly 0.27 for every walking goal (utils/tasks.py).
+  # The 0.34 this task previously carried over from the muscle variant is ~7cm
+  # above that, which pits pos_z (weight 500, pulling the body up) directly
+  # against gait_ref_weights (800, pulling the legs into the 0.27 crouch) —
+  # two strong terms with incompatible targets that the solver cannot satisfy
+  # at once. Elevated-terrain tasks below add their platform height to 0.27.
   phases:
-    - goal_pos:     [5.0, 0.0, 0.34]
+    - goal_pos:     [5.0, 0.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
@@ -123,7 +135,7 @@ walk_rough:
 
   sim_duration: 45.0
   phases:
-    - goal_pos:     [3.2, 0.0, 0.34]
+    - goal_pos:     [3.2, 0.0, 0.27]   # 0.27 = gait-implied standing height, see `walk`
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
@@ -171,7 +183,7 @@ walk_rough_2:
   sim_duration: 10.0
   spawn_height_offset: 0.1
   phases:
-    - goal_pos:     [2.9, 0.0, 0.4]
+    - goal_pos:     [2.9, 0.0, 0.37]   # 0.27 gait-implied height + 0.1 terrain elevation
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
@@ -212,12 +224,12 @@ guinea_fowl:
   sim_duration: 15.0
   spawn_height_offset: 0.06
   phases:
-    - goal_pos:     [1.9, 0.0, 0.40]
+    - goal_pos:     [1.9, 0.0, 0.33]   # 0.27 gait-implied height + 0.06 platform top
       cmd_vel:      [0.5, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.9, 0.0, 0.40]
+    - goal_pos:     [1.9, 0.0, 0.33]   # 0.27 gait-implied height + 0.06 platform top
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

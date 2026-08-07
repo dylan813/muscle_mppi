@@ -66,19 +66,20 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    // tau_pd[NUM_JOINTS]: the PD-implied torque already computed for this step
-    // (rollout()'s tau_out) — reused here as RTWholeBodyMPPI's u_error control-
-    // effort term rather than recomputed with a second hardcoded gain pair.
+    // q_des[NUM_JOINTS]: this step's commanded joint targets (the raw MPPI
+    // action), used for RTWholeBodyMPPI's u_error control-effort term — which
+    // recomputes the PD expression with its own cost-shaping gains rather than
+    // reusing the actuator's applied torque. See step_cost()'s definition.
     double step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],
-                     const double gait_ref_dq[NUM_JOINTS], const double tau_pd[NUM_JOINTS]);
+                     const double gait_ref_dq[NUM_JOINTS], const double q_des[NUM_JOINTS]);
 
     // Point cmd_ and active_gait_ at task_.phases[idx].
     void activate_phase(int idx);
 
-    // Whole-robot (trunk + legs) CoM position (world frame) and CoM
-    // velocity (body-frame axes). Non-const mjData*: calls mj_subtreeVel,
-    // which writes into d->subtree_linvel/subtree_angmom.
-    void base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const;
+    // Trunk-origin position (world frame) and trunk linear velocity
+    // (body-frame axes), matching RTWholeBodyMPPI's cost reference — see the
+    // definition in mppi_locomotion_pd.cpp.
+    void base_state(mjData* d, double pos[3], double vel_body[3]) const;
 
     PDParams       pd_;
     CostWeights    cost_;
@@ -110,8 +111,8 @@ private:
     // Snapshot of task_.noise_sigma_act as loaded from YAML, taken once in the
     // constructor before any phase mutates task_.noise_sigma_act. activate_phase()
     // writes the active phase's override (or this baseline, if the phase has
-    // none) into task_.noise_sigma_act, which is what BaseMPPIPD::sample_noise()/
-    // sample_noise_cubic() actually read.
+    // none) into task_.noise_sigma_act, which is what BaseMPPIPD::sample_actions()/
+    // sample_actions_cubic() actually read.
     double base_noise_sigma_act_[NUM_JOINTS] = {};
 
     double last_compute_ms_ = 20.0;
