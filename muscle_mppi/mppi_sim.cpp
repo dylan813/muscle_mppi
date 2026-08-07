@@ -210,6 +210,12 @@ int main(int argc, char** argv)
             printf("Robot fell at t=%.2f s — stopping.\n", sim_t);
             break;
         }
+
+        // --- stop once the task's final phase has been reached and held ---
+        if (converged && mppi.task_success()) {
+            printf("Task complete at t=%.2f s — stopping.\n", sim_t);
+            break;
+        }
     }
 
     printf("Done. Logged to %s and %s\n", csv_path.c_str(), qpos_path.c_str());

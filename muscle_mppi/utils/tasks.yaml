@@ -322,28 +322,14 @@ guinea_fowl:
     gait_stiffness: 0.75
 
   sim_duration: 15.0
-  spawn_height_offset: 0.1
+  spawn_height_offset: 0.06
   phases:
-    - goal_pos:     [0.0, 0.0, 0.44]
-      cmd_vel:      [0.0, 0.0]
-      desired_gait: "in_place"
-      goal_thresh:  0.2
-      waiting_time: 50
-    - goal_pos:     [1.7, 0.0, 0.44]
+    - goal_pos:     [1.9, 0.0, 0.40]
       cmd_vel:      [0.5, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.5, 0.0, 0.44]
-      cmd_vel:      [0.5, 0.0]
-      desired_gait: "trot"
-      goal_thresh:  0.2
-      waiting_time: 0
-      # Doubled thigh/calf exploration noise while crossing the gap --
-      # matches climb_box's crossing-phase convention (also matches
-      # RTWholeBodyMPPI's next_goal(), which does the same for trot phases).
-      noise_sigma_act: [0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2,  0.06, 0.2, 0.2]
-    - goal_pos:     [2.5, 0.0, 0.44]
+    - goal_pos:     [1.9, 0.0, 0.40]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

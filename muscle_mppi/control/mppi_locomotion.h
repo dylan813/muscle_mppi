@@ -53,6 +53,9 @@ public:
     void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
     const MotionCommand& command() const { return cmd_; }
 
+    // True once the final phase's dwell gate has passed (see advance_phase()).
+    bool task_success() const { return task_success_; }
+
     const MuscleParams& muscle_params() const { return muscle_; }
     const TaskConfig&   task_ref()      const { return task_; }
     const double*       activation()    const { return real_act_; }
