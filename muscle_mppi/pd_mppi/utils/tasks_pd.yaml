@@ -1,0 +1,230 @@
+# -----------------------------------------------------------------------
+# Task definitions for the PD-actuated MPPI variant (pd_mppi/).
+#
+# Independent of ../../utils/tasks.yaml (the muscle-actuated variant's task
+# file) by design — the two variants' action spaces differ (desired joint
+# angle in radians here vs. muscle activation in [0,1] there), so weights
+# and noise scales are not interchangeable.
+#
+# PD gains match RTWholeBodyMPPI's actual MJCF actuators (go1_mppi.xml:
+# <general biastype="affine" gainprm="55 ..." biasprm="0 -55 -3 ...">), i.e.
+# a flat kp=55, kd=3 for every joint: tau = kp*(q_des-q) - kd*qdot.
+default_pd_quad: &default_pd_quad
+  kp: [55,55,55,  55,55,55,  55,55,55,  55,55,55]
+  kd: [3,3,3,  3,3,3,  3,3,3,  3,3,3]
+  # MuJoCo joint damping (model_->dof_damping), matching RTWholeBodyMPPI's
+  # go1_mppi.xml: 1.0 for the hip/abduction joint, 2.0 for thigh/calf — go2.xml's
+  # own default (0.1 for every joint) is much lighter and under-damps this
+  # task's stiff kp=55 PD law, showing up as visible bouncing/jitter.
+  joint_damping: [1,2,2,  1,2,2,  1,2,2,  1,2,2]
+
+# RTWholeBodyMPPI's Q_diag[25:37] (joint-velocity gait tracking) and R_diag
+# (control-effort penalty on the PD-implied torque) — both 0.0 in the muscle
+# variant's tasks.yaml (never ported there) but present in RTWholeBodyMPPI's
+# own mppi_gait_config_walk.yml, so restored here for full fidelity.
+default_joint_vel_weights: &default_joint_vel_weights
+  [0.1,0.1,0.1,  0.1,0.1,0.1,  0.1,0.1,0.1,  0.1,0.1,0.1]
+default_control_effort_weights: &default_control_effort_weights
+  [0.001,0.001,0.001,  0.001,0.001,0.001,  0.001,0.001,0.001,  0.001,0.001,0.001]
+
+# -----------------------------------------------------------------------
+# Locomotion task
+#
+# `phases:` is an ordered waypoint sequence (mirrors RTWholeBodyMPPI's per-phase
+# goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays). MPPILocomotionPD
+# advances to the next phase once the robot has stayed within goal_thresh of the
+# current phase's goal_pos for waiting_time consecutive in-threshold ticks (not
+# reset if it drifts back out in between — cumulative, matching RTWholeBodyMPPI).
+# desired_gait is one of: in_place, walk, walk_fast, trot (see mppi_locomotion_pd.cpp
+# GAIT_*_PATH constants) — or set gait_path directly to an explicit TSV, which
+# overrides desired_gait.
+#
+# noise_sigma_act and cost.gait_ref_weights below are carried over numerically
+# from ../../utils/tasks.yaml's `walk` task as a starting point, but they were
+# tuned for a very different action space (muscle activation in [0,1], gait
+# tracking error in activation units) than this task's (joint angle in radians,
+# gait tracking error in radians). Expect to re-tune both once this runs.
+walk:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+
+  # OpenMP threads for the parallel rollout loop (one rollout per sample).
+  # Omit or set to 0 to use the OpenMP default (all available cores).
+  num_threads:   0
+
+  # Spline-parameterized noise sampling: draw noise at
+  # n_knots points spread across the horizon and cubic-interpolate the rest,
+  # instead of independent per-timestep noise. Smoother action trajectories.
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         300.0      # L1 x-position error to goal_pos[0]
+    pos_y:         300.0      # L1 y-position error to goal_pos[1]
+    pos_z:         500.0      # L1 height error to goal_pos[2]
+    orientation:   400000.0   # (1 - |qw|)^2 quaternion distance from upright
+    vel_x:         1.0        # forward velocity tracking
+    vel_y:         0.0001     # lateral velocity tracking
+    vel_z:         0.0001     # vertical velocity tracking
+    ang_vel:       0.0001     # body angular velocity damping (x, y, z)
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]  # per-joint (FR/FL/RR/RL × hip/thigh/calf)
+    joint_vel_weights: *default_joint_vel_weights
+    control_effort_weights: *default_control_effort_weights
+
+  phases:
+    - goal_pos:     [5.0, 0.0, 0.34]
+      cmd_vel:      [0.2, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  # 12 joints: FR(hip,thigh,calf), FL(hip,thigh,calf), RR(hip,thigh,calf), RL(hip,thigh,calf)
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  # Per-joint desired-joint-angle exploration noise (radians).
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  pd: *default_pd_quad
+
+# -----------------------------------------------------------------------
+# walk_rough: same straight-line +x traversal as `walk`, run over rough
+# ground (scene_rough.xml — a repositioned copy of scene_terrain.xml's
+# box-grid rubble field, not a heightfield) instead of flat ground.
+#
+# The box field is shifted to x in [0.53, 2.87] (see scene_rough.xml), so
+# the robot spawns on flat ground at x=0 and walks forward onto the rubble
+# rather than spawning embedded in it. goal_pos below is set past the far
+# edge of the field so the walk phase actually crosses it.
+walk_rough:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    joint_vel_weights: *default_joint_vel_weights
+    control_effort_weights: *default_control_effort_weights
+
+  sim_duration: 45.0
+  phases:
+    - goal_pos:     [3.2, 0.0, 0.34]
+      cmd_vel:      [0.2, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  pd: *default_pd_quad
+
+# -----------------------------------------------------------------------
+# walk_rough_2: same straight-line +x traversal, run over scene_rough_2.xml's
+# Perlin-noise heightfield instead of walk_rough's box-grid rubble. The robot
+# spawns standing on top of a raised platform (x in [-0.1, 0.9], top at
+# z=0.1) rather than on the base floor -- pd_mppi_sim's stand-up placement
+# assumes flat ground at z=0, so spawn_height_offset below tells it the
+# actual ground height under the spawn point. Field sits at x in [0.9, 2.9];
+# goal_pos is set past its far edge, with z raised to 0.44 (0.34 nominal
+# standing height + the 0.1 terrain elevation) so the height cost tracks
+# correctly while the robot is up on the platform/field.
+walk_rough_2:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough_2.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    joint_vel_weights: *default_joint_vel_weights
+    control_effort_weights: *default_control_effort_weights
+
+  sim_duration: 10.0
+  spawn_height_offset: 0.1
+  phases:
+    - goal_pos:     [2.9, 0.0, 0.4]
+      cmd_vel:      [0.2, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  pd: *default_pd_quad
+
+# -----------------------------------------------------------------------
+# guinea_fowl: walk forward then hold in place (2 phases) over
+# scene_guinea_fowl.xml's terrain.
+guinea_fowl:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         2000.0
+    pos_y:         2000.0
+    pos_z:         5000.0
+    orientation:   200000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    joint_vel_weights: *default_joint_vel_weights
+    control_effort_weights: *default_control_effort_weights
+
+  sim_duration: 15.0
+  spawn_height_offset: 0.06
+  phases:
+    - goal_pos:     [1.9, 0.0, 0.40]
+      cmd_vel:      [0.5, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [1.9, 0.0, 0.40]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 50
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  pd: *default_pd_quad

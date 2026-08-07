@@ -49,8 +49,10 @@ if task_name:
     if task_name not in tasks:
         raise ValueError(f"Task '{task_name}' not found in {tasks_yaml}")
     MODEL_PATH = os.path.normpath(os.path.join(TASKS_YAML_BASE_DIR, tasks[task_name]["model_path"]))
+    SIM_HZ = 1.0 / tasks[task_name]["dt"]
 else:
     MODEL_PATH = DEFAULT_MODEL_PATH
+    SIM_HZ = 50.0  # unknown task's actual dt; keep the old assumed rate
 
 # ── load ───────────────────────────────────────────────────────────────────────
 print(f"Loading model: {MODEL_PATH}")
@@ -64,7 +66,7 @@ print(f"  {len(qpos_log)} frames  |  nq={model.nq}")
 # ── render ─────────────────────────────────────────────────────────────────────
 HEIGHT, WIDTH = 480, 640
 FPS           = 25
-SKIP          = max(1, int(round(50 / FPS)))  # sim runs at 50 Hz → downsample to 25 fps
+SKIP          = max(1, int(round(SIM_HZ / FPS)))  # downsample the task's actual sim rate to 25 fps
 
 cam           = mujoco.MjvCamera()
 cam.type      = mujoco.mjtCamera.mjCAMERA_FREE

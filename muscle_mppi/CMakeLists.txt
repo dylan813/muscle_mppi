@@ -46,3 +46,13 @@ add_executable(single_leg_controller
 target_compile_definitions(single_leg_controller PRIVATE
     NUM_JOINTS=3 JOINT_OFFSET=3 NUM_MUSCLES=6)
 target_link_libraries(single_leg_controller ${COMMON_LIBS})
+
+# --- PD-actuated standalone MuJoCo simulation test (mirrors mppi_sim, but ---
+# --- with direct joint-space PD control instead of the muscle model)     ---
+add_executable(pd_mppi_sim
+    pd_mppi/pd_mppi_sim.cpp
+    pd_mppi/control/base_mppi_pd.cpp
+    pd_mppi/control/mppi_locomotion_pd.cpp
+    pd_mppi/utils/tasks_pd.cpp
+)
+target_link_libraries(pd_mppi_sim ${COMMON_LIBS})
