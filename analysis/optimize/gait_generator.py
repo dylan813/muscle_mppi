@@ -107,6 +107,8 @@ def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75)
 
     muscle_params must contain keys (each a list of 12 floats):
         lce_min, lce_max, FVmax, pFLmax, vmax, phi_min, phi_max, peak_force
+    and a scalar:
+        height_target
 
     Writes a 24×N TSV to output_path.
     Returns the number of infeasible phases clamped.
@@ -121,6 +123,8 @@ def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75)
     q_traj  = gait[:12, :]
     dq_traj = gait[12:24, :]
 
+    HEIGHT = muscle_params["height_target"]
+
     model = mujoco.MjModel.from_xml_path(SUSP_MODEL)
     data  = mujoco.MjData(model)
     _jid     = [model.actuator_trnid[i, 0] for i in range(NUM_JOINTS)]
@@ -129,6 +133,7 @@ def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75)
 
     def get_bias_torques(q_joints, dq_joints):
         mujoco.mj_resetData(model, data)
+        data.qpos[2] = HEIGHT
         data.qpos[3] = 1.0
         for i in range(NUM_JOINTS):
             data.qpos[_qa_adr[i]]  = q_joints[i]

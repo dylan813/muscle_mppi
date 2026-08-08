@@ -95,8 +95,11 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     // task_.noise_sigma_act with a per-phase override.
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
 
-    if (!task_.phases.empty())
+    if (!task_.phases.empty()) {
         activate_phase(0);
+    } else {
+        cmd_.goal_pos[2] = task_.height_target;  // z default for a phase-less task
+    }
 
     // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
@@ -165,14 +168,7 @@ void MPPILocomotion::advance_phase(const RobotState& state)
     // through, and is never reset on a failed check. Kept running even after
     // task_success_ (matches the original driver still calling next_goal()
     // every in-threshold tick forever) so dwelling_ keeps tracking correctly.
-    //
-    // <= (not <): RTWholeBodyMPPI's Timer.increment() only flips `done` once
-    // elapsed_time (pre-incremented) reaches end_time, and that `done` check
-    // happens inside the SAME next_goal() call that performed the increment —
-    // so it takes waiting_time+1 in-threshold calls to advance a phase, not
-    // waiting_time. Matches pd_mppi. No effect on any task with
-    // waiting_time: 0 (i.e. every task except guinea_fowl).
-    if (++dwell_ticks_ <= cur.waiting_time) {
+    if (++dwell_ticks_ < cur.waiting_time) {
         dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
         return;
     }

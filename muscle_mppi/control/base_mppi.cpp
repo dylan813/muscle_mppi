@@ -108,13 +108,7 @@ static void not_a_knot_cubic_spline(const std::vector<double>& xk, const std::ve
 }
 
 BaseMPPI::BaseMPPI(const TaskConfig& task)
-    : task_(task),
-      // Deterministic by default (task.seed, default 42) so runs are
-      // reproducible, matching RTWholeBodyMPPI's np.random.default_rng(seed)
-      // and pd_mppi's BaseMPPIPD. seed: -1 restores the previous
-      // nondeterministic std::random_device behavior.
-      rng_(task.seed >= 0 ? static_cast<std::mt19937::result_type>(task.seed)
-                          : std::random_device{}())
+    : task_(task), height_target_(task.height_target), rng_(std::random_device{}())
 {
     mju_user_warning = mujoco_warning_noop;
 
@@ -126,22 +120,6 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     if (!model_) throw std::runtime_error("Failed to load model: " + std::string(error));
 
     model_->opt.timestep = task_.dt;
-
-    // Mirrors RTWholeBodyMPPI's base_controller.py:33-34 (enableflags=1 is
-    // mjENBL_OVERRIDE; o_solref=[0.02,1.0] from every mppi_gait_config_*.yml).
-    // Forces every contact in this model_ — used only for MPPI cost-evaluation
-    // rollouts — to use the global o_solref/o_solimp/o_friction/o_margin
-    // instead of each geom's own tuning. o_solref already equals MuJoCo's
-    // compiled default, so that assignment is itself a no-op; the real effect
-    // is that o_solimp/o_friction (left unset, as RTWholeBodyMPPI leaves them)
-    // fall back to global defaults, discarding go2.xml's per-geom foot tuning
-    // for planning purposes. Deliberately NOT applied to mppi_sim.cpp's
-    // separate "real world" model — RTWholeBodyMPPI's own real-world stepper
-    // (interface/simulator.py:51) leaves this commented out, so only the
-    // planner sees it. Matches pd_mppi/control/base_mppi_pd.cpp.
-    model_->opt.enableflags |= mjENBL_OVERRIDE;
-    model_->opt.o_solref[0] = 0.02;
-    model_->opt.o_solref[1] = 1.0;
 
     data_.resize(task_.n_samples + 1);
     for (int i = 0; i <= task_.n_samples; ++i)
@@ -203,22 +181,6 @@ void BaseMPPI::sample_noise() {
         }
 }
 
-// Mirrors RTWholeBodyMPPI's perturb_action() cubic branch (base_controller.py):
-// the spline is fit through trajectory_[knot] + noise at just n_knots points
-// and evaluated over the WHOLE horizon, so each sample's entire action curve
-// is re-projected onto a low-dimensional (n_knots-point) cubic-spline basis
-// every iteration — not just the noise. That is a real regularizer on the mean
-// trajectory itself: however jagged trajectory_ has become from repeated
-// weighted-averaging, only n_knots values per muscle survive into the next
-// rollout batch. Splining the noise alone and adding it to the raw, unsplined
-// trajectory_ (the previous behavior here) drops that smoothing and lets
-// trajectory_ accumulate per-timestep artifacts across iterations.
-//
-// Callers still consume this as an additive perturbation
-// (trajectory_[idx] + noise_[idx], in MPPILocomotion::rollout()/update()), so
-// what is stored is the splined action MINUS trajectory_ — the delta that
-// makes that sum come out equal to the reprojected curve. Keeps the buffer's
-// contract unchanged; only its content is now reprojection-aware.
 void BaseMPPI::sample_noise_cubic() {
     const int H = task_.horizon;
     const int K = task_.n_knots;
@@ -231,15 +193,10 @@ void BaseMPPI::sample_noise_cubic() {
             const double sigma = task_.noise_sigma_act[j];
             for (int side = 0; side < 2; ++side) {
                 const int m = 2 * j + side;
-                for (int k = 0; k < K; ++k) {
-                    const int t_idx = static_cast<int>(knot_x_[k]);
-                    knot_y[k] = trajectory_[t_idx * NUM_MUSCLES + m]
-                              + sigma * normal_(rng_);
-                }
+                for (int k = 0; k < K; ++k) knot_y[k] = sigma * normal_(rng_);
                 not_a_knot_cubic_spline(knot_x_, knot_y, yt.data(), H);
                 for (int t = 0; t < H; ++t)
-                    noise_[s * H * NUM_MUSCLES + t * NUM_MUSCLES + m] =
-                        yt[t] - trajectory_[t * NUM_MUSCLES + m];
+                    noise_[s * H * NUM_MUSCLES + t * NUM_MUSCLES + m] = yt[t];
             }
         }
     }

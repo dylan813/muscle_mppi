@@ -32,17 +32,15 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     TaskConfig cfg;
 
     cfg.model_path    = t["model_path"].as<std::string>();
+    cfg.height_target = t["height_target"] ? t["height_target"].as<double>() : 0.0;
     cfg.n_samples     = t["n_samples"].as<int>();
     cfg.horizon       = t["horizon"].as<int>();
     cfg.lambda        = t["lambda"].as<double>();
     cfg.dt            = t["dt"].as<double>();
     cfg.sample_type   = t["sample_type"] ? t["sample_type"].as<std::string>() : "normal";
     cfg.n_knots       = t["n_knots"]     ? t["n_knots"].as<int>()             : 4;
-    cfg.seed          = t["seed"]        ? t["seed"].as<int>()                : 42;
     cfg.num_threads   = t["num_threads"] ? t["num_threads"].as<int>()        : 0;
     cfg.sim_duration  = t["sim_duration"] ? t["sim_duration"].as<double>()   : 10.0;
-    cfg.spawn_height_offset =
-        t["spawn_height_offset"] ? t["spawn_height_offset"].as<double>()    : 0.0;
 
     load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     if (t["noise_sigma_act"])

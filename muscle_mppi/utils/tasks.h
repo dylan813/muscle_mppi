@@ -65,6 +65,7 @@ struct TaskConfig {
     // non-locomotion tasks (e.g. "reach", driven by SingleLegReach instead).
     std::vector<TaskPhase> phases;
 
+    double       height_target            = 0.0;
     double       nominal_pose[NUM_JOINTS] = {};
     MuscleParams muscle;
     int          n_samples    = 16;
@@ -77,13 +78,6 @@ struct TaskConfig {
     // time to complete (e.g. a longer walk distance) than the 10s default covers.
     double       sim_duration = 10.0;
 
-    // World-frame z of the ground under the robot's spawn point. mppi_sim's
-    // stand-up placement assumes flat ground at z=0 and drops the robot so its
-    // lowest foot lands there; set this to the actual terrain/platform height
-    // at spawn (e.g. an elevated starting platform) so the robot lands on top
-    // of it instead of spawning with its feet embedded in it.
-    double       spawn_height_offset = 0.0;
-
     // OpenMP thread count for the parallel rollout loop. 0 (default) leaves the
     // OpenMP runtime default in place (typically all available cores).
     int          num_threads  = 0;
@@ -94,13 +88,6 @@ struct TaskConfig {
     // spline-parameterized sampling (smoother, lower-dimensional search).
     std::string  sample_type  = "normal";
     int          n_knots      = 4;
-
-    // RNG seed for noise sampling. RTWholeBodyMPPI seeds deterministically
-    // (`seed: 42` in every mppi_gait_config_*.yml -> np.random.default_rng),
-    // so runs are reproducible; matched here and in pd_mppi so run-to-run
-    // spread is comparable between the two variants. Set seed: -1 to draw a
-    // nondeterministic seed from std::random_device (the previous behavior).
-    int          seed         = 42;
 
     // Per-joint noise sigma. Both muscles of each antagonistic pair receive the
     // same draw, scaled by this value. Used by BaseMPPI::sample_noise().
