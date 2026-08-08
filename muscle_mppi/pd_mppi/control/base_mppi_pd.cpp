@@ -124,21 +124,18 @@ BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
     model_->opt.timestep = task_.dt;
 
     // Mirrors RTWholeBodyMPPI's base_controller.py:33-34 (enableflags=1 is
-    // mjENBL_OVERRIDE; o_solref=[0.02,1.0] from every mppi_gait_config_*.yml,
-    // consistently across all of RTWholeBodyMPPI's tasks). This forces every
-    // contact in this model_ (used only for MPPI cost-evaluation rollouts) to
-    // use o_solref/o_solimp/o_friction/o_margin instead of each geom's own
-    // per-geom tuning. o_solref already equals MuJoCo's compiled default, so
-    // this line alone is a no-op; the actual effect is that
-    // o_solimp/o_friction/o_margin (left unset here, same as RTWholeBodyMPPI
-    // leaves them) fall back to MuJoCo's global defaults too — silently
-    // discarding go2.xml's own foot friction/solimp tuning for planning
-    // purposes, the same way this override silently discards RTWholeBodyMPPI's
-    // own go1 foot tuning in base_controller.py. Deliberately NOT applied to
-    // pd_mppi_sim.cpp's separate "real world" simulated model — RTWholeBodyMPPI's
-    // own real-world stepper (interface/simulator.py:51) leaves this same
-    // override commented out, so only the planner sees it, not the simulated
-    // robot's actual dynamics. See pd_mppi_sim.cpp's matching comment.
+    // mjENBL_OVERRIDE; o_solref=[0.02,1.0] from every mppi_gait_config_*.yml).
+    // Forces every contact in this model_ — used only for MPPI cost-evaluation
+    // rollouts — to use the global o_solref/o_solimp/o_friction/o_margin
+    // instead of each geom's own tuning. o_solref already equals MuJoCo's
+    // compiled default, so that assignment is itself a no-op; the real effect
+    // is that o_solimp/o_friction (left unset, as RTWholeBodyMPPI leaves them)
+    // fall back to global defaults, discarding go2.xml's per-geom foot tuning
+    // for planning purposes. Deliberately NOT applied to pd_mppi_sim.cpp's
+    // separate "real world" model — RTWholeBodyMPPI's own real-world stepper
+    // (interface/simulator.py:51) leaves this commented out, so only the
+    // planner sees it. NOTE: the muscle variant (control/base_mppi.cpp) does
+    // not do this; the two must agree before a controlled comparison.
     model_->opt.enableflags |= mjENBL_OVERRIDE;
     model_->opt.o_solref[0] = 0.02;
     model_->opt.o_solref[1] = 1.0;
@@ -217,10 +214,12 @@ void BaseMPPIPD::sample_actions() {
 // mechanism on top of the mean trajectory itself: no matter how jagged
 // trajectory_ has become from repeated weighted-averaging, only n_knots
 // values per joint survive into each rollout batch. Splining the noise alone
-// and adding it to the raw, unsplined trajectory_ (the previous version of
-// this function) drops that regularization and lets trajectory_ accumulate
-// per-timestep artifacts across iterations — a likely source of visible
-// jitter distinct from ordinary MPPI sample-to-sample variance.
+// and adding it to the raw, unsplined trajectory_ drops that regularization
+// and lets trajectory_ accumulate per-timestep artifacts across iterations.
+//
+// NOTE: the muscle variant's sample_noise_cubic() (control/base_mppi.cpp)
+// still does the noise-only form, so the two explore differently; they must
+// agree before a controlled comparison.
 void BaseMPPIPD::sample_actions_cubic() {
     const int H = task_.horizon;
     const int K = task_.n_knots;

@@ -52,8 +52,13 @@ default_muscle: &default_muscle
   FVmax:         [1.33, 1.33, 1.33]
 
   # MuJoCo joint damping (N·m·s/rad) written directly to simulation DOFs at startup.
-  # Overrides the go2.xml default of 0.1. Values should match Go2 motor driver kd gains.
-  kd_sim:        [2.0, 3.5, 3.5]
+  # Overrides the go2.xml default of 0.1. Set to RTWholeBodyMPPI's go1_mppi.xml
+  # values (1.0 abduction/hip, 2.0 thigh+calf) so this variant simulates the
+  # same plant as pd_mppi (see pd_mppi/utils/tasks_pd.yaml joint_damping) —
+  # joint damping is a property of the robot, not the controller, so the two
+  # must agree for a controlled muscle-vs-PD comparison. Previously
+  # [2.0, 3.5, 3.5], chosen to match Go2 motor driver kd gains.
+  kd_sim:        [1.0, 2.0, 2.0]
 
 # -----------------------------------------------------------------------
 # FL foot target: world frame (x, y, z). Base fixed at z≈0.8.
@@ -104,7 +109,7 @@ default_muscle_quad: &default_muscle_quad
   pFLmax:      [0.4673, 0.7802, 0.3263,  0.4673, 0.7802, 0.3263,  0.4673, 0.7802, 0.3263,  0.4673, 0.7802, 0.3263]
   vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
   FVmax:       [1.3941, 1.3715, 1.0516,  1.3941, 1.3715, 1.0516,  1.3941, 1.3715, 1.0516,  1.3941, 1.3715, 1.0516]
-  kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
+  kd_sim:      [1.0, 2.0, 2.0,  1.0, 2.0, 2.0,  1.0, 2.0, 2.0,  1.0, 2.0, 2.0]
 
 # -----------------------------------------------------------------------
 # Locomotion task
@@ -310,10 +315,10 @@ guinea_fowl:
   n_knots:       4
 
   cost:
-    pos_x:         2000.0
-    pos_y:         2000.0
-    pos_z:         5000.0
-    orientation:   200000.0
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
     vel_x:         1.0
     vel_y:         0.0001
     vel_z:         0.0001
@@ -324,12 +329,12 @@ guinea_fowl:
   sim_duration: 15.0
   spawn_height_offset: 0.06
   phases:
-    - goal_pos:     [1.9, 0.0, 0.33]
-      cmd_vel:      [0.5, 0.0]
+    - goal_pos:     [1.9, 0.0, 0.4]
+      cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.9, 0.0, 0.33]
+    - goal_pos:     [1.9, 0.0, 0.4]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

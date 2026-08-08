@@ -38,6 +38,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     cfg.dt            = t["dt"].as<double>();
     cfg.sample_type   = t["sample_type"] ? t["sample_type"].as<std::string>() : "normal";
     cfg.n_knots       = t["n_knots"]     ? t["n_knots"].as<int>()             : 4;
+    cfg.seed          = t["seed"]        ? t["seed"].as<int>()                : 42;
     cfg.num_threads   = t["num_threads"] ? t["num_threads"].as<int>()        : 0;
     cfg.sim_duration  = t["sim_duration"] ? t["sim_duration"].as<double>()   : 10.0;
     cfg.spawn_height_offset =

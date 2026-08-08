@@ -165,7 +165,14 @@ void MPPILocomotion::advance_phase(const RobotState& state)
     // through, and is never reset on a failed check. Kept running even after
     // task_success_ (matches the original driver still calling next_goal()
     // every in-threshold tick forever) so dwelling_ keeps tracking correctly.
-    if (++dwell_ticks_ < cur.waiting_time) {
+    //
+    // <= (not <): RTWholeBodyMPPI's Timer.increment() only flips `done` once
+    // elapsed_time (pre-incremented) reaches end_time, and that `done` check
+    // happens inside the SAME next_goal() call that performed the increment —
+    // so it takes waiting_time+1 in-threshold calls to advance a phase, not
+    // waiting_time. Matches pd_mppi. No effect on any task with
+    // waiting_time: 0 (i.e. every task except guinea_fowl).
+    if (++dwell_ticks_ <= cur.waiting_time) {
         dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
         return;
     }

@@ -153,8 +153,10 @@ void MPPILocomotionPD::advance_phase(const RobotState& state)
     // elapsed_time (pre-incremented) reaches end_time, and that `done` check
     // happens inside the SAME next_goal() call that performed the increment —
     // so it takes waiting_time+1 in-threshold calls to advance a phase, not
-    // waiting_time. Advancing on `dwell_ticks_ < waiting_time` (the previous
-    // version of this line) fires one tick early on every phase transition.
+    // waiting_time. Advancing on `dwell_ticks_ < waiting_time` fires one tick
+    // early on every phase transition. NOTE: the muscle variant still uses
+    // `<`; the two must agree before a controlled comparison. No effect on
+    // any task with waiting_time: 0 (i.e. every task except guinea_fowl).
     if (++dwell_ticks_ <= cur.waiting_time) {
         dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
         return;

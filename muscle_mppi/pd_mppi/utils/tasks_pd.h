@@ -93,6 +93,8 @@ struct TaskConfig {
     // (`seed: 42` in every mppi_gait_config_*.yml -> np.random.default_rng),
     // so runs are reproducible; matched here. Set seed: -1 to draw a
     // nondeterministic seed from std::random_device instead.
+    // NOTE: the muscle variant always uses std::random_device; the two must
+    // agree before comparing run-to-run variance.
     int          seed         = 42;
 
     // Per-joint noise sigma (radians) applied to the sampled desired joint

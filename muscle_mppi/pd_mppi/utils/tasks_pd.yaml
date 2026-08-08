@@ -16,6 +16,8 @@ default_pd_quad: &default_pd_quad
   # go1_mppi.xml: 1.0 for the hip/abduction joint, 2.0 for thigh/calf — go2.xml's
   # own default (0.1 for every joint) is much lighter and under-damps this
   # task's stiff kp=55 PD law, showing up as visible bouncing/jitter.
+  # NOTE: the muscle variant uses kd_sim [2.0, 3.5, 3.5] instead; the two must
+  # agree before any controlled muscle-vs-PD comparison.
   joint_damping: [1,2,2,  1,2,2,  1,2,2,  1,2,2]
 
 # RTWholeBodyMPPI's Q_diag[25:37] (joint-velocity gait tracking) and R_diag
@@ -209,10 +211,10 @@ guinea_fowl:
   n_knots:       4
 
   cost:
-    pos_x:         2000.0
-    pos_y:         2000.0
-    pos_z:         5000.0
-    orientation:   200000.0
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
     vel_x:         1.0
     vel_y:         0.0001
     vel_z:         0.0001
@@ -224,12 +226,12 @@ guinea_fowl:
   sim_duration: 15.0
   spawn_height_offset: 0.06
   phases:
-    - goal_pos:     [1.9, 0.0, 0.33]   # 0.27 gait-implied height + 0.06 platform top
-      cmd_vel:      [0.5, 0.0]
+    - goal_pos:     [1.9, 0.0, 0.40]
+      cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.9, 0.0, 0.33]   # 0.27 gait-implied height + 0.06 platform top
+    - goal_pos:     [1.9, 0.0, 0.40]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
