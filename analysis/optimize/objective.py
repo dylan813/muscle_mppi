@@ -59,16 +59,39 @@ BASE_YAML  = os.path.join(REPO_ROOT, "muscle_mppi", "utils", "tasks.yaml")
 
 SIM_TIMEOUT = 120  # seconds before killing a runaway mppi_sim
 
-# Per infeasible phase penalty — must dominate any feasible fitness value so
-# CMA-ES always prefers feasible candidates. mppi_sim is skipped entirely.
-INFEASIBLE_PENALTY_PER_PHASE = 5e4
+# Gaits every candidate must be able to realize, as name -> (tier, vel, height).
+# These are three of the four canonical gaits mppi_locomotion.cpp resolves
+# desired_gait against (kNamedGaits); the walk task itself only ever *runs*
+# SIM_GAIT, but a candidate whose muscle params cannot produce the in_place or
+# walk activations is not viable for the other tasks that select them (e.g.
+# guinea_fowl's second phase holds in_place). Checking them here keeps the
+# optimizer from converging on params that only work for one gait and fail
+# the moment a different task is run. `trot` (MED 0_5 15cm) is deliberately
+# not included — add it here if a task starts using it.
+FEASIBILITY_GAITS = {
+    "walk_fast": ("FAST", "0_1", "10cm"),
+    "walk":      ("MED",  "0_1", "10cm"),
+    "in_place":  ("FAST", "0_0", "10cm"),
+}
+# Which of the above is handed to mppi_sim as the walk task's gait_path.
+SIM_GAIT = "walk_fast"
 
-# Number of phases in the gait trajectory (rows of the source gait TSV).
+# Flat penalty for a candidate that cannot realize the gaits. Deliberately a
+# single fixed value — NOT scaled by how many gaits fail, nor by how many
+# joint-phases fail within them. Infeasible is infeasible: the candidate is
+# rejected without running mppi_sim either way, so there is nothing to gain
+# from grading it. Scaling by violation count would also silently weight gaits
+# by their length (the FAST gaits are 100 phases vs MED's 74, i.e. 12*100 vs
+# 12*74 chances to accumulate cost). Must dominate any feasible fitness value
+# (those run ~1e3, see _compute_fitness) so CMA-ES always prefers feasible
+# candidates.
+INFEASIBLE_PENALTY = 5e4
+
 # Candidates that never produce a scorable rollout at all (gait generation
-# error, sim timeout, unreadable/empty CSV) are scored as maximally
-# infeasible — every phase failed — rather than as a separate cost bucket.
-N_PHASES = 100
-MAX_INFEASIBLE_PENALTY = INFEASIBLE_PENALTY_PER_PHASE * N_PHASES
+# error, sim timeout, unreadable/empty CSV) get this — strictly worse than
+# merely-infeasible, so a crash never outranks a candidate we could at least
+# evaluate the gaits for.
+MAX_INFEASIBLE_PENALTY = INFEASIBLE_PENALTY * 2
 
 # Discard this many seconds of transient at the start of the log
 TRANSIENT_SECS = 2.0
@@ -271,23 +294,35 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
     muscle_params = _build_muscle_params(x, quad_base)
 
     with tempfile.TemporaryDirectory(prefix=f"cmaes_w{worker_id}_") as tmp_dir:
-        # Generate single gait file
-        gait_out = os.path.join(tmp_dir, "gaits", "FAST",
-                                "activation_gait_FAST_0_1_10cm.tsv")
+        # Generate every gait this candidate must be able to realize, counting
+        # infeasible phases across all of them (see FEASIBILITY_GAITS).
+        gait_paths  = {}
+        inf_by_gait = {}
         try:
-            n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=walk_cfg["cost"]["gait_stiffness"])
+            for name, (tier, vel, height) in FEASIBILITY_GAITS.items():
+                out = os.path.join(tmp_dir, "gaits", tier,
+                                   f"activation_gait_{tier}_{vel}_{height}.tsv")
+                inf_by_gait[name] = generate_gait(
+                    tier, vel, height, out, muscle_params,
+                    stiffness=walk_cfg["cost"]["gait_stiffness"])
+                gait_paths[name] = out
         except Exception as e:
             if verbose:
                 print(f"  [w{worker_id}] gait generation failed: {e}")
             return MAX_INFEASIBLE_PENALTY
 
-        # Feasibility pre-check — skip mppi_sim entirely if any phases are infeasible
-        if n_inf > 0:
-            penalty = INFEASIBLE_PENALTY_PER_PHASE * n_inf
+        # Feasibility pre-check — skip mppi_sim entirely if ANY checked gait is
+        # unrealizable. One flat INFEASIBLE_PENALTY regardless of how many
+        # gaits (or joint-phases) failed; the counts below are diagnostics only.
+        failed = [name for name, n in inf_by_gait.items() if n > 0]
+        if failed:
             if verbose:
-                print(f"  [w{worker_id}] INFEASIBLE ({n_inf} phases) → penalty={penalty:.0f}, skipping sim")
-            return penalty
+                detail = ", ".join(f"{k}({inf_by_gait[k]} viol)" for k in failed)
+                print(f"  [w{worker_id}] INFEASIBLE [{detail}] "
+                      f"→ penalty={INFEASIBLE_PENALTY:.0f}, skipping sim")
+            return INFEASIBLE_PENALTY
+
+        gait_out = gait_paths[SIM_GAIT]
 
         # Recompute the posture constraint-line seed for this candidate's muscle params
         posture = compute_posture(muscle_params, walk_cfg["nominal_pose"])
@@ -322,8 +357,9 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
             f"lce=[{x[1]:.3f},{x[4]:.3f}] pFL={x[7]:.3f} FV={x[10]:.3f}",
             f"lce=[{x[2]:.3f},{x[5]:.3f}] pFL={x[8]:.3f} FV={x[11]:.3f}",
         )
+        # Reached only when every FEASIBILITY_GAITS gait was realizable.
         print(f"  [w{worker_id}] hip:{hip}  thigh:{thigh}  calf:{calf}"
-              f"  → cost={cost:.1f}  inf_phases={n_inf}")
+              f"  → cost={cost:.1f}  (all {len(FEASIBILITY_GAITS)} gaits feasible)")
 
     return cost
 
@@ -352,10 +388,14 @@ def render_rollout(x, fps=RENDER_FPS):
     muscle_params = _build_muscle_params(x, quad_base)
 
     with tempfile.TemporaryDirectory(prefix="cmaes_render_") as tmp_dir:
-        gait_out = os.path.join(tmp_dir, "gaits", "FAST",
-                                "activation_gait_FAST_0_1_10cm.tsv")
+        # Only the gait the sim actually runs is needed here — a candidate
+        # reaching this point already passed the full FEASIBILITY_GAITS check
+        # in _locomotion_cost().
+        tier, vel, height = FEASIBILITY_GAITS[SIM_GAIT]
+        gait_out = os.path.join(tmp_dir, "gaits", tier,
+                                f"activation_gait_{tier}_{vel}_{height}.tsv")
         try:
-            n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
+            n_inf = generate_gait(tier, vel, height, gait_out, muscle_params,
                                   stiffness=walk_cfg["cost"]["gait_stiffness"])
         except Exception:
             return None

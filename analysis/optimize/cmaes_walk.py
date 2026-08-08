@@ -111,7 +111,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test",    action="store_true",
                         help="Evaluate initial point only (smoke test)")
-    parser.add_argument("--maxiter", type=int,   default=10)
+    parser.add_argument("--maxiter", type=int,   default=15)
     parser.add_argument("--workers", type=int,   default=8)
     parser.add_argument("--sigma",   type=float, default=None,
                         help="Override initial sigma (scalar); default: per-param")
