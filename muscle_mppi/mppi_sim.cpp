@@ -110,7 +110,7 @@ int main(int argc, char** argv)
     int rr = mj_name2id(m, mjOBJ_BODY, "RR_foot");
     double min_z = 1e9;
     for (int b : {fl, fr, rl, rr}) if (b >= 0) min_z = std::min(min_z, d->xpos[3*b+2]);
-    d->qpos[2] -= min_z;
+    d->qpos[2] += task.spawn_height_offset - min_z;
     mj_forward(m, d);
 
     // ── output files ─────────────────────────────────────────────────────────

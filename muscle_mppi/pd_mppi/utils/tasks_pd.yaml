@@ -223,7 +223,7 @@ guinea_fowl:
     joint_vel_weights: *default_joint_vel_weights
     control_effort_weights: *default_control_effort_weights
 
-  sim_duration: 15.0
+  sim_duration: 20.0
   spawn_height_offset: 0.06
   phases:
     - goal_pos:     [1.9, 0.0, 0.40]

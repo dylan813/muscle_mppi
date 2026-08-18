@@ -419,3 +419,74 @@ climb_box:
                 0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
 
   muscle: *default_muscle_quad
+
+# -----------------------------------------------------------------------
+# guinea_fowl: gap-crossing task -- two flat platforms of equal height
+# (0.1m, see scene_guinea_fowl.xml) with a 0.2m gap between them. The robot
+# spawns on platform A and must cross the gap to land on platform B at the
+# same elevation -- a pure horizontal negotiation task, distinct from
+# climb_box/big_box's step-up-and-descend obstacles (no climbing involved,
+# both platforms are the same height).
+#
+# spawn_height_offset matches the platform height (0.1) so mppi_sim lands
+# the robot on top of platform A instead of at z=0; goal_pos z is likewise
+# 0.44 (0.34 nominal standing height + 0.1 elevation) throughout, since the
+# robot never returns to the base floor level. Phases: walk up to and across
+# the gap, then hold on platform B. Cost weights reused from climb_box's
+# obstacle-negotiation tuning (tighter position/orientation tracking than
+# the plain walk tasks).
+#
+# Muscle parameters come from *default_muscle_quad, i.e. the pre-"align with
+# pd control" values this file was reverted to -- this task was originally
+# authored against the later re-tuned muscle set, so its cost/phase tuning
+# may need a revisit under these parameters.
+guinea_fowl:
+  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
+  height_target: 0.44
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   14
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    joint_vel:     0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    gait_stiffness: 0.75
+
+  sim_duration: 20.0
+  spawn_height_offset: 0.06
+  phases:
+    - goal_pos:     [1.9, 0.0, 0.4]
+      cmd_vel:      [0.5, 0.0]
+      desired_gait: "walk_fast"
+      goal_thresh:  0.2
+      waiting_time: 0
+    - goal_pos:     [1.9, 0.0, 0.4]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 50
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  posture_bias: [-0.013492, -0.139178, -0.237088,  0.013492, -0.139179, -0.237088,
+                 -0.036156, -0.157226, -0.266074,  0.036156, -0.157226, -0.266074]
+
+  posture_FL1: [0.840162, 0.668695, 0.350412,  0.843239, 0.668695, 0.350412,
+                0.832209, 0.666395, 0.454089,  0.851119, 0.666395, 0.454089]
+  posture_FL2: [0.843239, 0.93456, 0.500727,  0.840162, 0.93456, 0.500727,
+                0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
+
+  muscle: *default_muscle_quad
