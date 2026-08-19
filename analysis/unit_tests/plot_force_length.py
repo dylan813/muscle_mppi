@@ -105,8 +105,7 @@ half_range = 0.4
 axes[0].set_xlim(1.0 - half_range, 1.0 + half_range)
 axes[0].set_ylim(-0.05, 2.4)
 
-fig.suptitle("Force–Length Curves (default_muscle_quad, per joint type)", fontsize=16)
-fig.tight_layout(rect=[0, 0, 1, 0.93])
+fig.tight_layout()
 
 out_path = os.path.join(os.path.dirname(__file__), "force_length.png")
 fig.savefig(out_path, dpi=150)

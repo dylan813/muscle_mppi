@@ -73,8 +73,7 @@ axes[0].legend(fontsize=8, loc="upper left")
 axes[0].set_xlim(-1.5, 2.0)
 axes[0].set_ylim(-0.05, max(FVmax_list) * 1.15)
 
-fig.suptitle("Force–Velocity Curves (default_muscle_quad, per joint type)", fontsize=16)
-fig.tight_layout(rect=[0, 0, 1, 0.93])
+fig.tight_layout()
 
 out_path = os.path.join(os.path.dirname(__file__), "force_velocity.png")
 fig.savefig(out_path, dpi=150)
