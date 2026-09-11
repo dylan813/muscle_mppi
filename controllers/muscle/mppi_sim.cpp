@@ -3,13 +3,15 @@
 // local mjData simulation. Useful for verifying the controller works before
 // worrying about latency.
 //
-// Run from controllers/build/:
+// Run from any directory (e.g. controllers/build/):
 //   ./mppi_sim [task] [yaml] [output.csv] [--save <name>]
-// Defaults write to ../../analysis/data/mppi_sim/mppi_sim.csv, created on
-// first run if missing.
+// Defaults read controllers/muscle/utils/tasks.yaml and write to
+// analysis/data/mppi_sim/mppi_sim.csv (created on first run if missing), both
+// resolved against the repo root (common/paths.h). An explicit [yaml] or
+// [output.csv] is relative to the current directory, as usual.
 //
 // --save copies this run's CSVs, once it finishes, into
-// ../../analysis/log/trials/<name>/trial_NNN/ — one directory per run, so
+// analysis/log/trials/<name>/trial_NNN/ — one directory per run, so
 // repeated trials of the same task accumulate instead of overwriting.
 //
 // Output CSV columns:
@@ -80,8 +82,9 @@ int main(int argc, char** argv)
     const size_t nargs = args.size();
 
     const std::string task_name = (nargs >= 2) ? args[1] : "walk";
-    const std::string yaml_path = (nargs >= 3) ? args[2] : "../muscle/utils/tasks.yaml";
-    const std::string csv_path  = (nargs >= 4) ? args[3] : "../../analysis/data/mppi_sim/mppi_sim.csv";
+    const std::string yaml_path = (nargs >= 3) ? args[2] : kDefaultTasksYaml;
+    const std::string csv_path  = (nargs >= 4) ? args[3]
+                                               : repo_path("analysis/data/mppi_sim/mppi_sim.csv");
 
     printf("Task: %s  |  YAML: %s  |  CSV: %s\n",
            task_name.c_str(), yaml_path.c_str(), csv_path.c_str());

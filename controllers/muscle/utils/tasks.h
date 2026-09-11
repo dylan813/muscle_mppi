@@ -3,6 +3,11 @@
 #include <string>
 #include <vector>
 
+#include "../../common/paths.h"
+
+// Default task file for every muscle-variant binary (absolute, see common/paths.h).
+inline const std::string kDefaultTasksYaml = repo_path("controllers/muscle/utils/tasks.yaml");
+
 static constexpr int NUM_JOINTS  = 12;              // 4 legs × 3 joints (FR, FL, RR, RL)
 static constexpr int NUM_MUSCLES = 2 * NUM_JOINTS;  // antagonistic pair per joint
 
@@ -51,7 +56,7 @@ struct TaskPhase {
 };
 
 struct TaskConfig {
-    std::string  model_path;
+    std::string  model_path;   // absolute; a relative YAML value is resolved against the repo root
 
     // Ordered waypoint sequence for locomotion tasks (MPPILocomotion).
     std::vector<TaskPhase> phases;
@@ -107,4 +112,4 @@ struct MotionCommand {
 };
 
 TaskConfig load_task(const std::string& task_name,
-                     const std::string& yaml_path = "../muscle/utils/tasks.yaml");
+                     const std::string& yaml_path = kDefaultTasksYaml);

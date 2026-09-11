@@ -44,7 +44,7 @@ uint32_t crc32_core(uint32_t* ptr, uint32_t len) {
 class MPPIController {
 public:
     explicit MPPIController(const std::string& task      = "walk",
-                            const std::string& yaml_path = "../muscle/utils/tasks.yaml")
+                            const std::string& yaml_path = kDefaultTasksYaml)
         : mppi_(task, yaml_path) {}
 
     void Init() {
@@ -257,7 +257,7 @@ int main(int argc, const char** argv) {
     std::cin.get();
 
     const std::string task      = (argc >= 3) ? argv[2] : "walk";
-    const std::string yaml_path = (argc >= 4) ? argv[3] : "../muscle/utils/tasks.yaml";
+    const std::string yaml_path = (argc >= 4) ? argv[3] : kDefaultTasksYaml;
 
     std::cout << "Loading task '" << task << "' from " << yaml_path << "\n";
     MPPIController controller(task, yaml_path);

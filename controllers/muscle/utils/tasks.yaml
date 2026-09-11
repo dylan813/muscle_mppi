@@ -1,5 +1,5 @@
 # muscle_mppi task configuration — edit here, no rebuild needed.
-# Run the binary from build/: model_path is relative to the working directory.
+# model_path (and any phase gait_path) is relative to the repo root; absolute paths also work.
 #
 # Joint order (NUM_JOINTS=12):
 #   0-2:  FR_hip, FR_thigh, FR_calf
@@ -63,7 +63,7 @@ default_muscle_quad: &default_muscle_quad
 # overrides desired_gait (used by the CMA-ES sweep in analysis/optimize/ to point
 # at a per-candidate regenerated gait file).
 walk:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   height_target: 0.34
   n_samples:     30
   horizon:       40
@@ -127,7 +127,7 @@ walk:
 # rather than spawning embedded in it. goal_pos below is set past the far
 # edge of the field so the walk phase actually crosses it.
 walk_rough:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene_rough.xml"
   height_target: 0.34
   n_samples:     30
   horizon:       40
@@ -180,7 +180,7 @@ walk_rough:
 # stall — the Hill-muscle gait reference is a fixed forward-walking pattern
 # with no mechanism to turn/walk diagonally. Not a bug to fix here.
 walk_octagon:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   height_target: 0.34
   n_samples:     30
   horizon:       40
@@ -290,7 +290,7 @@ walk_octagon:
 # (smaller climb), including keeping vel_x at full strength (1.0, vs
 # big_box's near-zero) and standard (not doubled) exploration noise.
 climb_box:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_climb_box.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene_climb_box.xml"
   height_target: 0.34
   n_samples:     30
   horizon:       40
@@ -384,7 +384,7 @@ climb_box:
 # authored against the later re-tuned muscle set, so its cost/phase tuning
 # may need a revisit under these parameters.
 guinea_fowl:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
   height_target: 0.44
   n_samples:     30
   horizon:       40

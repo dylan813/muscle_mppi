@@ -31,7 +31,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     const YAML::Node& t = root[task_name];
     TaskConfig cfg;
 
-    cfg.model_path    = t["model_path"].as<std::string>();
+    cfg.model_path    = repo_path(t["model_path"].as<std::string>());
     cfg.n_samples     = t["n_samples"].as<int>();
     cfg.horizon       = t["horizon"].as<int>();
     cfg.lambda        = t["lambda"].as<double>();
@@ -57,7 +57,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
             if (p["cmd_vel"])
                 load_doubles(p["cmd_vel"], phase.cmd_vel, 2, "phases[].cmd_vel");
             phase.desired_gait = p["desired_gait"] ? p["desired_gait"].as<std::string>() : "";
-            phase.gait_path    = p["gait_path"]    ? p["gait_path"].as<std::string>()    : "";
+            phase.gait_path    = p["gait_path"]    ? repo_path(p["gait_path"].as<std::string>()) : "";
             if (phase.desired_gait.empty() && phase.gait_path.empty())
                 throw std::runtime_error("phases[]: needs desired_gait or gait_path");
             phase.goal_thresh  = p["goal_thresh"]  ? p["goal_thresh"].as<double>()  : 0.2;

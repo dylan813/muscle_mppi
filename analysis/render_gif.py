@@ -34,9 +34,10 @@ from PIL import Image
 _DIR                = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL_PATH  = os.path.join(_DIR, "../unitree_mujoco/unitree_robots/go2/scene.xml")
 DEFAULT_TASKS_YAML  = os.path.join(_DIR, "../controllers/muscle/utils/tasks.yaml")
-# model_path values inside tasks.yaml are relative to controllers/build/
-# (mppi_sim's own working directory) -- resolve against that, not this script's dir.
-TASKS_YAML_BASE_DIR = os.path.join(_DIR, "../controllers/build")
+# model_path values inside tasks.yaml are relative to the repo root (the same
+# rule mppi_sim applies, see controllers/common/paths.h) -- resolve against that,
+# not this script's dir.
+TASKS_YAML_BASE_DIR = os.path.join(_DIR, "..")
 
 qpos_path  = sys.argv[1] if len(sys.argv) > 1 else "mppi_sim_qpos.csv"
 gif_path   = sys.argv[2] if len(sys.argv) > 2 else "mppi_sim.gif"

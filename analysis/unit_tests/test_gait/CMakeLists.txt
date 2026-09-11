@@ -7,6 +7,11 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fPIC")
 
 set(MUSCLE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../controllers/muscle")
 
+# Repo root for controllers/common/paths.h (pulled in via tasks.h) — same
+# definition as controllers/CMakeLists.txt.
+get_filename_component(MUSCLE_MPPI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+add_compile_definitions(MUSCLE_MPPI_ROOT="${MUSCLE_MPPI_ROOT}")
+
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
 find_package(yaml-cpp REQUIRED)

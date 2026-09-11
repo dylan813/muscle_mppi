@@ -3,6 +3,11 @@
 #include <string>
 #include <vector>
 
+#include "../../common/paths.h"
+
+// Default task file for every PD-variant binary (absolute, see common/paths.h).
+inline const std::string kDefaultTasksPdYaml = repo_path("controllers/pd/utils/tasks_pd.yaml");
+
 static constexpr int NUM_JOINTS = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 
 // Direct joint-space PD gains — replaces MuscleParams in the muscle-actuated
@@ -49,7 +54,7 @@ struct TaskPhase {
 };
 
 struct TaskConfig {
-    std::string  model_path;
+    std::string  model_path;   // absolute; a relative YAML value is resolved against the repo root
 
     // Ordered waypoint sequence for locomotion tasks (MPPILocomotionPD).
     std::vector<TaskPhase> phases;
@@ -96,4 +101,4 @@ struct MotionCommand {
 };
 
 TaskConfig load_task(const std::string& task_name,
-                     const std::string& yaml_path = "../pd/utils/tasks_pd.yaml");
+                     const std::string& yaml_path = kDefaultTasksPdYaml);

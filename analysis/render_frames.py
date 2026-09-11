@@ -36,7 +36,7 @@ _REPO = os.path.normpath(os.path.join(_DIR, ".."))
 
 TASK = "guinea_fowl"
 TASKS_YAML = os.path.join(_REPO, "controllers", "muscle", "utils", "tasks.yaml")
-MODEL_BASE = os.path.join(_REPO, "controllers", "build")
+MODEL_BASE = _REPO   # model_path in tasks.yaml is repo-relative
 
 TRIALS = {
     "pd": (os.path.join(_DIR, "log", "trials", "workshop", "7pd", "trial_070",

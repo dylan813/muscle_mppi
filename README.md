@@ -31,6 +31,8 @@ export CYCLONEDDS_URI='<CycloneDDS><Domain><SharedMemory><Enable>false</Enable><
 
 Controller code lives in `controllers/`: `muscle/` is the muscle-actuated controller, `pd/` is the PD-actuated baseline, and `common/` holds code shared by both. One CMake project builds every binary into `controllers/build/`.
 
+The binaries can be run from any directory. CMake compiles in the repo's absolute path, and the default task YAML, the gait files, the default output CSVs and every `model_path` inside a task YAML are resolved against it (`controllers/common/paths.h`). Paths you pass on the command line stay relative to your current directory. If you move or re-clone the repo, re-run `cmake` so the compiled-in path is updated.
+
 Build implementations
 ```bash
 cd muscle_mppi/controllers/

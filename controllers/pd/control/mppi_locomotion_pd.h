@@ -38,7 +38,7 @@ struct CostWeights {
 class MPPILocomotionPD : public BaseMPPIPD {
 public:
     explicit MPPILocomotionPD(const std::string& task_name,
-                              const std::string& yaml_path = "../pd/utils/tasks_pd.yaml");
+                              const std::string& yaml_path = kDefaultTasksPdYaml);
 
     // Run one MPPI solve; returns PD torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);

@@ -50,7 +50,7 @@ default_control_effort_weights: &default_control_effort_weights
 # reference (joint angle in radians), so they are not "muscle-variant numbers
 # awaiting a re-tune" — they are the reference's own tuned values.
 walk:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -113,7 +113,7 @@ walk:
 # rather than spawning embedded in it. goal_pos below is set past the far
 # edge of the field so the walk phase actually crosses it.
 walk_rough:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene_rough.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -160,7 +160,7 @@ walk_rough:
 # standing height + the 0.1 terrain elevation) so the height cost tracks
 # correctly while the robot is up on the platform/field.
 walk_rough_2:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_rough_2.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene_rough_2.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -201,7 +201,7 @@ walk_rough_2:
 # guinea_fowl: walk forward then hold in place (2 phases) over
 # scene_guinea_fowl.xml's terrain.
 guinea_fowl:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1

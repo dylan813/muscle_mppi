@@ -17,6 +17,11 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags,-r
 
 set(COMMON_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
 
+# Absolute repo root, compiled into every binary so default config, gait and
+# output paths resolve the same from any working directory (common/paths.h).
+get_filename_component(MUSCLE_MPPI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+add_compile_definitions(MUSCLE_MPPI_ROOT="${MUSCLE_MPPI_ROOT}")
+
 # Layout: muscle/ (muscle-actuated controller), pd/ (PD-actuated baseline),
 # common/ (code shared by both).
 

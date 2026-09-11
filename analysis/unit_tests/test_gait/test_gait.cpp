@@ -3,8 +3,8 @@
 // same torque mode — replacing MPPI with a fixed activation gait cycle.
 //
 // Terminal 1: cd muscle_mppi/unitree_mujoco/simulate/build && ./unitree_mujoco -r go2 -s scene.xml
-// Terminal 2 (from controllers/muscle/):
-//   ../../analysis/unit_tests/test_gait/build/test_gait <gait.tsv> [yaml] [net_interface]
+// Terminal 2 (from the repo root; [yaml] defaults to controllers/muscle/utils/tasks.yaml):
+//   analysis/unit_tests/test_gait/build/test_gait <gait.tsv> [yaml] [net_interface]
 
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
@@ -253,7 +253,7 @@ int main(int argc, char** argv)
         return 1;
     }
     const std::string gait_path = argv[1];
-    const std::string yaml_path = (argc >= 3) ? argv[2] : "utils/tasks.yaml";
+    const std::string yaml_path = (argc >= 3) ? argv[2] : kDefaultTasksYaml;
     const std::string net_iface = (argc >= 4) ? argv[3] : "lo";
 
     TaskConfig task;

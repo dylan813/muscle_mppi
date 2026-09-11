@@ -18,14 +18,15 @@
 // joint-angle gait TSV (position rows only, extracted from RTWholeBodyMPPI's
 // original joint-space gait library — see pd/gaits/ and
 // analysis/unit_tests/generate_pd_gaits.py) from the FAST/MED library in
-// ../pd/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
+// controllers/pd/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
 // or, as an escape hatch, an explicit TSV path (TaskPhase::gait_path) — see
 // resolve_gait_key() below. Same 4-gait mapping as the muscle variant
-// (muscle/control/mppi_locomotion.cpp's kNamedGaits).
-static const char* GAIT_INPLACE_PATH   = "../pd/gaits/FAST/gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH      = "../pd/gaits/MED/gait_MED_0_1_10cm.tsv";
-static const char* GAIT_WALK_FAST_PATH = "../pd/gaits/FAST/gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH      = "../pd/gaits/MED/gait_MED_0_5_15cm.tsv";
+// (muscle/control/mppi_locomotion.cpp's kNamedGaits). Paths are repo-relative
+// and resolved with repo_path() at load time.
+static const char* GAIT_INPLACE_PATH   = "controllers/pd/gaits/FAST/gait_FAST_0_0_10cm.tsv";
+static const char* GAIT_WALK_PATH      = "controllers/pd/gaits/MED/gait_MED_0_1_10cm.tsv";
+static const char* GAIT_WALK_FAST_PATH = "controllers/pd/gaits/FAST/gait_FAST_0_1_10cm.tsv";
+static const char* GAIT_TROT_PATH      = "controllers/pd/gaits/MED/gait_MED_0_5_15cm.tsv";
 
 static const std::unordered_map<std::string, const char*> kNamedGaits = {
     {"in_place",  GAIT_INPLACE_PATH},
@@ -91,7 +92,7 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
 
     // Load the 4 canonical named gaits up front, plus any per-phase gait_path
     // override not already covered.
-    for (const auto& kv : kNamedGaits) gaits_[kv.first].load(kv.second);
+    for (const auto& kv : kNamedGaits) gaits_[kv.first].load(repo_path(kv.second));
     for (const auto& p : task_.phases)
         if (!p.gait_path.empty() && !gaits_.count(p.gait_path))
             gaits_[p.gait_path].load(p.gait_path);

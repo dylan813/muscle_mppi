@@ -16,13 +16,14 @@
 //
 // Mirrors RTWholeBodyMPPI's GAIT_*_PATH constants (mppi_locomotion.py): a fixed
 // set of categorical gaits, each backed by one pre-generated activation-gait TSV
-// from the FAST/MED/SLOW library in ../muscle/gaits/. A phase selects a gait by name
+// from the FAST/MED/SLOW library in controllers/muscle/gaits/. A phase selects a gait by name
 // (TaskPhase::desired_gait) or, as an escape hatch, an explicit TSV path
-// (TaskPhase::gait_path) — see resolve_gait_key() below.
-static const char* GAIT_INPLACE_PATH   = "../muscle/gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH      = "../muscle/gaits/MED/activation_gait_MED_0_1_10cm.tsv";
-static const char* GAIT_WALK_FAST_PATH = "../muscle/gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH      = "../muscle/gaits/MED/activation_gait_MED_0_5_15cm.tsv";
+// (TaskPhase::gait_path) — see resolve_gait_key() below. Paths are repo-relative
+// and resolved with repo_path() at load time.
+static const char* GAIT_INPLACE_PATH   = "controllers/muscle/gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
+static const char* GAIT_WALK_PATH      = "controllers/muscle/gaits/MED/activation_gait_MED_0_1_10cm.tsv";
+static const char* GAIT_WALK_FAST_PATH = "controllers/muscle/gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
+static const char* GAIT_TROT_PATH      = "controllers/muscle/gaits/MED/activation_gait_MED_0_5_15cm.tsv";
 
 static const std::unordered_map<std::string, const char*> kNamedGaits = {
     {"in_place",  GAIT_INPLACE_PATH},
@@ -86,7 +87,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 
     // Load the 4 canonical named gaits up front (mirrors RTWholeBodyMPPI's
     // self.gaits dict), plus any per-phase gait_path override not already covered.
-    for (const auto& kv : kNamedGaits) gaits_[kv.first].load(kv.second);
+    for (const auto& kv : kNamedGaits) gaits_[kv.first].load(repo_path(kv.second));
     for (const auto& p : task_.phases)
         if (!p.gait_path.empty() && !gaits_.count(p.gait_path))
             gaits_[p.gait_path].load(p.gait_path);
