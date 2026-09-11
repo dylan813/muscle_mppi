@@ -223,19 +223,19 @@ guinea_fowl:
     joint_vel_weights: *default_joint_vel_weights
     control_effort_weights: *default_control_effort_weights
 
-  sim_duration: 20.0
-  spawn_height_offset: 0.06
+  sim_duration: 30.0
+  spawn_height_offset: 0.05
   phases:
-    - goal_pos:     [1.9, 0.0, 0.40]
-      cmd_vel:      [0.2, 0.0]
+    - goal_pos:     [1.9, 0.0, 0.39]
+      cmd_vel:      [0.5, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.9, 0.0, 0.40]
-      cmd_vel:      [0.0, 0.0]
-      desired_gait: "in_place"
-      goal_thresh:  0.2
-      waiting_time: 50
+    # - goal_pos:     [1.9, 0.0, 0.40]
+    #   cmd_vel:      [0.0, 0.0]
+    #   desired_gait: "in_place"
+    #   goal_thresh:  0.2
+    #   waiting_time: 50
 
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 

@@ -23,6 +23,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 import yaml
 
 JOINT_NAMES = ["Hip", "Thigh", "Calf"]   # column order; tagged (a)/(b)/(c) in the figure
@@ -36,14 +37,20 @@ LW_CURVE = 3
 # Dashed annotation lines share one weight across both rows.
 LW_DASH = 1.5
 
-# One legend size for both rows.
-LEGEND_FS = 10
+# One type scale for the whole figure. Each panel is FIG_W/3 = 5 in wide, so
+# these sizes give roughly the same points-per-panel-inch as the box-height
+# sweep figures (17 pt on a 5.6 in canvas) -- i.e. the text reads at a
+# comparable size once a single panel is placed at column width.
+LEGEND_FS = 14
+FS_AXIS   = 23
+FS_TICK   = 19
+FS_TAG    = 27   # the (a)/(b)/(c) subfigure tags
 
 FIG_W = 15.0   # inches of figure width
-FIG_H = 9.0    # inches of figure height
+FIG_H = 7.5    # inches of figure height
 
 # Left margin, in inches, holding the leftmost panel's ylabel and tick labels.
-AXES_LEFT_IN = 0.75
+AXES_LEFT_IN = 1.11
 
 
 # ---------------------------------------------------------------------------
@@ -117,13 +124,21 @@ def plot_force_length_row(axes, lce_min, lce_max, fpmax):
         # Optimal fiber length only; the lce_min/lce_max rules are left off.
         ax.axvline(1.0, color="gray", linewidth=0.8, linestyle="-", alpha=0.6)
 
-        ax.grid(True, alpha=0.3)
-        ax.set_xlabel("$l_{ce} / l_{opt}$", fontsize=11)
+        ax.grid(True, which="major", alpha=0.3)
+        ax.grid(True, which="minor", alpha=0.28, linewidth=0.7)
+        ax.tick_params(labelsize=FS_TICK)
+        ax.tick_params(which="minor", length=4)
+        ax.set_xlabel("$l_{ce} / l_{opt}$", fontsize=FS_AXIS)
 
-    axes[0].set_ylabel("$F / F_{max}$", fontsize=11)
-    axes[0].legend(fontsize=LEGEND_FS, loc="upper right")
+    axes[0].set_ylabel("$F / F_{max}$", fontsize=FS_AXIS)
+    axes[0].legend(fontsize=LEGEND_FS, loc="upper right", framealpha=1.0,
+                   labelspacing=0.3, handlelength=1.8, borderpad=0.4)
     axes[0].set_xlim(0.6, 1.4)
     axes[0].set_ylim(-0.05, 2.4)
+    axes[0].xaxis.set_major_locator(MultipleLocator(0.2))
+    axes[0].xaxis.set_minor_locator(MultipleLocator(0.1))
+    axes[0].yaxis.set_major_locator(MultipleLocator(0.5))
+    axes[0].yaxis.set_minor_locator(MultipleLocator(0.25))
 
 
 def plot_force_velocity_row(axes, FVmax_list):
@@ -142,13 +157,21 @@ def plot_force_velocity_row(axes, FVmax_list):
         ax.axhline(1.0, color="gray", linewidth=0.8, linestyle="-", alpha=0.6)
         ax.axhline(FVmax, color="#E53935", linewidth=LW_DASH, linestyle="--", label="$F_{v,max}$")
 
-        ax.grid(True, alpha=0.3)
-        ax.set_xlabel("$\\dot{l}_{ce} / v_{max}$", fontsize=11)
+        ax.grid(True, which="major", alpha=0.3)
+        ax.grid(True, which="minor", alpha=0.28, linewidth=0.7)
+        ax.tick_params(labelsize=FS_TICK)
+        ax.tick_params(which="minor", length=4)
+        ax.set_xlabel("$\\dot{l}_{ce} / v_{max}$", fontsize=FS_AXIS)
 
-    axes[0].set_ylabel("$F / F_{max}$", fontsize=11)
-    axes[0].legend(fontsize=LEGEND_FS, loc="upper right")
+    axes[0].set_ylabel("$F / F_{max}$", fontsize=FS_AXIS)
+    axes[0].legend(fontsize=LEGEND_FS, loc="upper right", framealpha=1.0,
+                   labelspacing=0.3, handlelength=1.8, borderpad=0.4)
     axes[0].set_xlim(-1.5, 2.0)
-    axes[0].set_ylim(-0.05, max(FVmax_list) * 1.15)
+    axes[0].set_ylim(-0.05, max(FVmax_list) * 1.30)
+    axes[0].xaxis.set_major_locator(MultipleLocator(1.0))
+    axes[0].xaxis.set_minor_locator(MultipleLocator(0.5))
+    axes[0].yaxis.set_major_locator(MultipleLocator(0.4))
+    axes[0].yaxis.set_minor_locator(MultipleLocator(0.2))
 
 
 def main():
@@ -172,22 +195,16 @@ def main():
                           muscle["pFLmax"][:3])
     plot_force_velocity_row(axes[1], muscle["FVmax"][:3])
 
-    fig.subplots_adjust(left=AXES_LEFT_IN / FIG_W, right=0.985,
-                        top=1 - 0.40 / FIG_H, bottom=0.90 / FIG_H,
-                        hspace=0.28, wspace=0.08)
-
-    # One title centred over each row, rather than repeated per panel. The joint
-    # each column belongs to is carried by the (a)/(b)/(c) tags along the bottom.
-    for row, label in zip(axes, ("Force–Length Relationship",
-                                 "Force–Velocity Relationship")):
-        left, right = row[0].get_position(), row[-1].get_position()
-        fig.text(0.5 * (left.x0 + right.x1), left.y1 + 0.10 / FIG_H, label,
-                 ha="center", va="bottom", fontsize=14)
+    # No row titles, so the top margin only clears the topmost tick label and
+    # the inter-row gap only has to hold the upper x-label plus the lower ticks.
+    fig.subplots_adjust(left=AXES_LEFT_IN / FIG_W, right=0.974,
+                        top=1 - 0.15 / FIG_H, bottom=1.39 / FIG_H,
+                        hspace=0.29, wspace=0.20)
 
     for ax, tag in zip(axes[-1], SUBFIG_TAGS):
         box = ax.get_position()
         fig.text(0.5 * (box.x0 + box.x1), 0.20 / FIG_H, tag,
-                 ha="center", va="center", fontsize=13)
+                 ha="center", va="center", fontsize=FS_TAG)
 
     out_path = os.path.join(os.path.dirname(__file__), "hill_curves.png")
     fig.savefig(out_path, dpi=150)

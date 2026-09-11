@@ -6,10 +6,14 @@
 // worrying about latency.
 //
 // Run from muscle_mppi/muscle_mppi/build/:
-//   ./pd_mppi_sim [task] [yaml] [output.csv]
+//   ./pd_mppi_sim [task] [yaml] [output.csv] [--save <name>]
 // Defaults write to ../pd_mppi_sim/pd_mppi_sim.csv (a dedicated output
 // directory, mirroring ../mppi_sim/ for the muscle-actuated mppi_sim binary
 // — kept separate from ../pd_mppi/, which holds only source/config).
+//
+// --save copies this run's CSVs, once it finishes, into
+// ../../analysis/log/trials/<name>/trial_NNN/ — one directory per run, so
+// repeated trials of the same task accumulate instead of overwriting.
 //
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, qdes_j0..qdes_j{NUM_JOINTS-1}
@@ -33,8 +37,10 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "control/mppi_locomotion_pd.h"
+#include "../utils/trial_log.h"
 
 // ── stand-up parameters (mirror ../mppi_sim.cpp) ─────────────────────────────
 static const double STAND_DOWN[NUM_JOINTS] = {
@@ -72,12 +78,19 @@ static RobotState read_state(const mjModel* m, const mjData* d,
 // ── main ──────────────────────────────────────────────────────────────────────
 int main(int argc, char** argv)
 {
-    const std::string task_name = (argc >= 2) ? argv[1] : "walk";
-    const std::string yaml_path = (argc >= 3) ? argv[2] : "../pd_mppi/utils/tasks_pd.yaml";
-    const std::string csv_path  = (argc >= 4) ? argv[3] : "../pd_mppi_sim/pd_mppi_sim.csv";
+    // --save is pulled out first so it can sit anywhere on the command line
+    // without shifting the positional [task] [yaml] [output.csv] arguments.
+    std::string trial_name;
+    const std::vector<std::string> args = trial_log::parse_args(argc, argv, trial_name);
+    const size_t nargs = args.size();
+
+    const std::string task_name = (nargs >= 2) ? args[1] : "walk";
+    const std::string yaml_path = (nargs >= 3) ? args[2] : "../pd_mppi/utils/tasks_pd.yaml";
+    const std::string csv_path  = (nargs >= 4) ? args[3] : "../pd_mppi_sim/pd_mppi_sim.csv";
 
     printf("Task: %s  |  YAML: %s  |  CSV: %s\n",
            task_name.c_str(), yaml_path.c_str(), csv_path.c_str());
+    if (!trial_name.empty()) printf("Saving trial under: %s\n", trial_name.c_str());
 
     // ── load MPPI (also loads the model internally) ──────────────────────────
     MPPILocomotionPD mppi(task_name, yaml_path);
@@ -248,6 +261,14 @@ int main(int argc, char** argv)
     printf("Done. Logged to %s and %s\n", csv_path.c_str(), qpos_path.c_str());
     printf("Avg MPPI solve: %.1f ms over %d solves\n",
            solve_sum_ms / solve_count, solve_count);
+
+    // Flush before copying — a run that fell still gets its partial logs saved.
+    csv.close();
+    qpos_log.close();
+    if (!trial_name.empty()) {
+        const std::string trial_dir = trial_log::save(trial_name, {csv_path, qpos_path});
+        if (!trial_dir.empty()) printf("Trial saved to %s\n", trial_dir.c_str());
+    }
 
     mj_deleteData(d);
     mj_deleteModel(m);

@@ -107,10 +107,13 @@ static void not_a_knot_cubic_spline(const std::vector<double>& xk, const std::ve
     }
 }
 
+// Nondeterministically seeded, matching control/base_mppi.cpp's muscle
+// variant. RTWholeBodyMPPI seeds its sampler deterministically (`seed: 42` in
+// every mppi_gait_config_*.yml), which this once mirrored — but a fixed seed
+// makes every run of a task bit-for-bit identical, so repeated trials measure
+// no sampling variance at all. Both variants now draw a fresh seed per run.
 BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
-    : task_(task),
-      rng_(task.seed >= 0 ? static_cast<std::mt19937::result_type>(task.seed)
-                          : std::random_device{}())
+    : task_(task), rng_(std::random_device{}())
 {
     mju_user_warning = mujoco_warning_noop;
 
