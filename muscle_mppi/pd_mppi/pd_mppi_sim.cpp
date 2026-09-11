@@ -7,9 +7,9 @@
 //
 // Run from muscle_mppi/muscle_mppi/build/:
 //   ./pd_mppi_sim [task] [yaml] [output.csv] [--save <name>]
-// Defaults write to ../pd_mppi_sim/pd_mppi_sim.csv (a dedicated output
-// directory, mirroring ../mppi_sim/ for the muscle-actuated mppi_sim binary
-// — kept separate from ../pd_mppi/, which holds only source/config).
+// Defaults write to ../../analysis/data/pd_mppi_sim/pd_mppi_sim.csv (a
+// dedicated output directory, mirroring analysis/data/mppi_sim/ for the
+// muscle-actuated mppi_sim binary), created on first run if missing.
 //
 // --save copies this run's CSVs, once it finishes, into
 // ../../analysis/log/trials/<name>/trial_NNN/ — one directory per run, so
@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -86,7 +87,7 @@ int main(int argc, char** argv)
 
     const std::string task_name = (nargs >= 2) ? args[1] : "walk";
     const std::string yaml_path = (nargs >= 3) ? args[2] : "../pd_mppi/utils/tasks_pd.yaml";
-    const std::string csv_path  = (nargs >= 4) ? args[3] : "../pd_mppi_sim/pd_mppi_sim.csv";
+    const std::string csv_path  = (nargs >= 4) ? args[3] : "../../analysis/data/pd_mppi_sim/pd_mppi_sim.csv";
 
     printf("Task: %s  |  YAML: %s  |  CSV: %s\n",
            task_name.c_str(), yaml_path.c_str(), csv_path.c_str());
@@ -156,7 +157,15 @@ int main(int argc, char** argv)
     mj_forward(m, d);
 
     // ── output files ─────────────────────────────────────────────────────────
+    // The output directory only holds gitignored CSVs, so a fresh checkout may
+    // not have it — create it rather than let ofstream fail silently.
+    const std::filesystem::path csv_dir = std::filesystem::path(csv_path).parent_path();
+    if (!csv_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(csv_dir, ec);
+    }
     std::ofstream csv(csv_path);
+    if (!csv) { fprintf(stderr, "Cannot open %s for writing\n", csv_path.c_str()); return 1; }
     csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg";
     for (int j = 0; j < NUM_JOINTS; ++j) csv << ",dq_j" << j;
     for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_j" << j;

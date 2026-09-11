@@ -74,14 +74,16 @@ python3 plot_force_velocity.py
 ```bash
 cd muscle_mppi/muscle_mppi/build
 ./mppi_sim
-MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/test.gif
+MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../../analysis/data/mppi_sim/mppi_sim_qpos.csv ../../analysis/data/mppi_sim/test.gif
 python3 ../../analysis/log/plot_walk_leg.py <name>
 ```
 
 ```bash
 ./mppi_sim walk_rough
- MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../mppi_sim/mppi_sim_qpos.csv ../mppi_sim/walk_rough_test.gif walk_rough
+ MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../../analysis/data/mppi_sim/mppi_sim_qpos.csv ../../analysis/data/mppi_sim/walk_rough_test.gif walk_rough
 ```
+
+Working output (CSVs, GIFs, figures) goes to `analysis/data/`: `mppi_sim` writes `analysis/data/mppi_sim/mppi_sim.csv` + `mppi_sim_qpos.csv`, and `pd_mppi_sim` writes `analysis/data/pd_mppi_sim/pd_mppi_sim.csv` + `pd_mppi_sim_qpos.csv`. The directories are created on first run if missing.
 
 # Saving Trials
 
@@ -102,7 +104,7 @@ analysis/log/trials/walk_baseline/
   trial_002/mppi_sim.csv, mppi_sim_qpos.csv
 ```
 
-The flag works alongside the positional arguments in any order (`./mppi_sim walk ../utils/tasks.yaml out.csv --save <name>`), and the working CSVs are still written to their usual location, so `render_gif.py` and `plot_walk_leg.py` keep operating on the latest run unchanged.
+The flag works alongside the positional arguments in any order (`./mppi_sim walk ../utils/tasks.yaml out.csv --save <name>`), and the working CSVs are still written to their usual location under `analysis/data/`, so `render_gif.py` and `plot_walk_leg.py` keep operating on the latest run unchanged.
 
 To plot or render a specific saved trial, point the scripts at that trial directory instead (run from `muscle_mppi/muscle_mppi/build/`):
 

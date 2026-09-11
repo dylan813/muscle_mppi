@@ -1,7 +1,8 @@
 // Trial log saving for the standalone sims (mppi_sim, pd_mppi_sim).
 //
 // By default both sims overwrite a single working CSV pair each run
-// (../mppi_sim/mppi_sim.csv + _qpos.csv, and the pd_mppi_sim equivalents).
+// (analysis/data/mppi_sim/mppi_sim.csv + _qpos.csv, and the pd_mppi_sim
+// equivalents under analysis/data/pd_mppi_sim/).
 // That is fine for a one-off look, but destroys the previous run — no good for
 // running the same task N times and analysing the spread.
 //

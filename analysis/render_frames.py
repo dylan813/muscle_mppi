@@ -57,7 +57,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ms", type=int, nargs="+", default=DEFAULT_MS)
     ap.add_argument("--outdir", default=os.path.join(
-        _REPO, "muscle_mppi", "mppi_sim", "summer_results", "workshop", "frames"))
+        _REPO, "analysis", "data", "mppi_sim", "summer_results", "workshop", "frames"))
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
