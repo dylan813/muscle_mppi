@@ -23,7 +23,7 @@ import mujoco
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 _DIR       = os.path.dirname(os.path.abspath(__file__))
-YAML_PATH  = os.path.join(_DIR, "../../muscle_mppi/utils/tasks.yaml")
+YAML_PATH  = os.path.join(_DIR, "../../controllers/muscle/utils/tasks.yaml")
 MODEL_PATH = os.path.join(_DIR, "../../unitree_mujoco/unitree_robots/go2/scene.xml")
 
 # ── load parameters ────────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ import os
 # ---------------------------------------------------------------------------
 # Load parameters from tasks.yaml
 # ---------------------------------------------------------------------------
-yaml_path = os.path.join(os.path.dirname(__file__), "../../muscle_mppi/utils/tasks.yaml")
+yaml_path = os.path.join(os.path.dirname(__file__), "../../controllers/muscle/utils/tasks.yaml")
 with open(yaml_path) as f:
     cfg = yaml.safe_load(f)
 

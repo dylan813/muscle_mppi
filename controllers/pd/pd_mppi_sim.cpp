@@ -1,25 +1,31 @@
-// Standalone MuJoCo simulation test for MPPILocomotion.
+// Standalone MuJoCo simulation test for MPPILocomotionPD (direct joint-space
+// PD actuation — the PD-actuated mirror of ../muscle/mppi_sim.cpp, which drives the
+// muscle-actuated MPPILocomotion instead).
 // No DDS, no real-time constraint — MPPI runs as fast as possible against a
 // local mjData simulation. Useful for verifying the controller works before
 // worrying about latency.
 //
-// Run from muscle_mppi/muscle_mppi/build/:
-//   ./mppi_sim [task] [yaml] [output.csv] [--save <name>]
-// Defaults write to ../../analysis/data/mppi_sim/mppi_sim.csv, created on
-// first run if missing.
+// Run from controllers/build/:
+//   ./pd_mppi_sim [task] [yaml] [output.csv] [--save <name>]
+// Defaults write to ../../analysis/data/pd_mppi_sim/pd_mppi_sim.csv (a
+// dedicated output directory, mirroring analysis/data/mppi_sim/ for the
+// muscle-actuated mppi_sim binary), created on first run if missing.
 //
 // --save copies this run's CSVs, once it finishes, into
 // ../../analysis/log/trials/<name>/trial_NNN/ — one directory per run, so
 // repeated trials of the same task accumulate instead of overwriting.
 //
 // Output CSV columns:
-//   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, act_m0..act_m{NUM_MUSCLES-1}
-//   px/py/pz are the whole-robot (trunk + legs) center of mass, i.e. the base
-//   body's subtree_com — matching what step_cost() scores against goal_pos
-//   in mppi_locomotion.cpp, not the trunk frame origin.
+//   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, qdes_j0..qdes_j{NUM_JOINTS-1}
+//   px/py/pz are the trunk frame origin (free-joint qpos[0:3]) — matching
+//   what step_cost() scores against goal_pos in mppi_locomotion_pd.cpp, and
+//   matching RTWholeBodyMPPI's own position cost reference.
 //   vx/vy/vz are body-frame linear velocity (rotated from the free joint's
 //   world-frame qvel[0:3]), matching the body-frame convention step_cost()
-//   uses when comparing against cmd_.vx/vy in mppi_locomotion.cpp.
+//   uses when comparing against cmd_.vx/vy in mppi_locomotion_pd.cpp.
+//   qdes_j* are the commanded joint targets (trajectory_[0..NUM_JOINTS-1]
+//   after each solve) — the PD-variant analogue of the muscle variant's
+//   act_m* activation columns.
 
 #include <mujoco/mujoco.h>
 
@@ -34,10 +40,10 @@
 #include <string>
 #include <vector>
 
-#include "control/mppi_locomotion.h"
-#include "utils/trial_log.h"
+#include "control/mppi_locomotion_pd.h"
+#include "../common/trial_log.h"
 
-// ── stand-up parameters (mirror mppi_controller.cpp) ─────────────────────────
+// ── stand-up parameters (mirror ../muscle/mppi_sim.cpp) ──────────────────────
 static const double STAND_DOWN[NUM_JOINTS] = {
      0.0473455,  1.22187, -2.44375,
     -0.0473455,  1.22187, -2.44375,
@@ -80,25 +86,46 @@ int main(int argc, char** argv)
     const size_t nargs = args.size();
 
     const std::string task_name = (nargs >= 2) ? args[1] : "walk";
-    const std::string yaml_path = (nargs >= 3) ? args[2] : "../utils/tasks.yaml";
-    const std::string csv_path  = (nargs >= 4) ? args[3] : "../../analysis/data/mppi_sim/mppi_sim.csv";
+    const std::string yaml_path = (nargs >= 3) ? args[2] : "../pd/utils/tasks_pd.yaml";
+    const std::string csv_path  = (nargs >= 4) ? args[3] : "../../analysis/data/pd_mppi_sim/pd_mppi_sim.csv";
 
     printf("Task: %s  |  YAML: %s  |  CSV: %s\n",
            task_name.c_str(), yaml_path.c_str(), csv_path.c_str());
     if (!trial_name.empty()) printf("Saving trial under: %s\n", trial_name.c_str());
 
     // ── load MPPI (also loads the model internally) ──────────────────────────
-    MPPILocomotion mppi(task_name, yaml_path);
+    MPPILocomotionPD mppi(task_name, yaml_path);
 
     // ── load a separate sim model/data ───────────────────────────────────────
-    const TaskConfig& task = mppi.task_ref();   // public accessor we'll add
+    const TaskConfig& task = mppi.task_ref();
     char err[1000];
     mjModel* m = mj_loadXML(task.model_path.c_str(), nullptr, err, sizeof(err));
     if (!m) { fprintf(stderr, "mj_loadXML: %s\n", err); return 1; }
     m->opt.timestep = task.dt;
+
+    // Deliberately NOT applying the mjENBL_OVERRIDE contact override here.
+    // RTWholeBodyMPPI's own interface/simulator.py (the "real world" stepper,
+    // this model's counterpart) sets o_solref but leaves
+    // `self.model.opt.enableflags = 1` commented out (simulator.py:51) — so
+    // the override is inert there and the real simulated robot uses each
+    // geom's own contact tuning, unmodified. Only RTWholeBodyMPPI's MPPI
+    // planner (base_controller.py, ported in BaseMPPIPD's constructor) has
+    // the override actually active, since it's only used for cost-evaluation
+    // rollouts. Applying it here too (an earlier version of this file did)
+    // would make the actually-simulated robot's contacts diverge from
+    // RTWholeBodyMPPI's, not match it.
+
+    // Note: go2.xml's foot geoms keep their own contact tuning here, on
+    // purpose. RTWholeBodyMPPI's go1_mppi.xml uses a much softer foot
+    // (solimp="0.015 1 0.031", friction 0.8) than go2's MuJoCo-default
+    // solimp/0.4 friction, but that is a property of *their robot model*, not
+    // of the MPPI code being ported — and an A/B of go1's values on this robot
+    // showed no measurable change in body bounce or roll. Left alone so the
+    // simulated robot stays the Go2 that Unitree's model describes.
+
     mjData* d = mj_makeData(m);
 
-    // Resolve the base body (mirrors MPPILocomotion::base_bid_ resolution)
+    // Resolve the base body (mirrors MPPILocomotionPD::base_bid_ resolution)
     // so logged position matches the whole-robot CoM the cost function scores.
     int base_bid = 1;
     for (const char* name : {"trunk", "base", "base_link"}) {
@@ -112,7 +139,7 @@ int main(int argc, char** argv)
         int jid = m->actuator_trnid[2 * j];
         qa[j]   = m->jnt_qposadr[jid];
         qv[j]   = m->jnt_dofadr[jid];
-        m->dof_damping[qv[j]] = task.muscle.kd_sim[j];
+        m->dof_damping[qv[j]] = task.pd.joint_damping[j];
     }
 
     // place robot feet on ground
@@ -141,13 +168,13 @@ int main(int argc, char** argv)
     if (!csv) { fprintf(stderr, "Cannot open %s for writing\n", csv_path.c_str()); return 1; }
     csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg";
     for (int j = 0; j < NUM_JOINTS; ++j) csv << ",dq_j" << j;
-    for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;
+    for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_j" << j;
     csv << "\n";
 
     const std::string qpos_path = csv_path.substr(0, csv_path.rfind('.')) + "_qpos.csv";
     std::ofstream qpos_log(qpos_path);
 
-    // ── stand-up phase (PD, mirrors mppi_controller.cpp) ─────────────────────
+    // ── stand-up phase (software PD, mirrors ../muscle/mppi_sim.cpp) ─────────
     printf("Standing up (%.1f s)...\n", STANDUP_SECS + HOLD_SECS);
     const double total_standup = STANDUP_SECS + HOLD_SECS;
     for (double t = 0.0; t < total_standup; t += task.dt) {
@@ -155,8 +182,8 @@ int main(int argc, char** argv)
         const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
         for (int j = 0; j < NUM_JOINTS; ++j) {
             const double q_des = phase * STAND_UP[j] + (1.0 - phase) * STAND_DOWN[j];
-            d->ctrl[j] =
-                kp * (q_des - d->qpos[qa[j]]) + 3.5 * (-d->qvel[qv[j]]);
+            d->ctrl[j] = unitree_pd_torque(
+                kp, /*kd=*/3.5, q_des, d->qpos[qa[j]], /*dq_des=*/0.0, d->qvel[qv[j]], /*tau_ff=*/0.0);
         }
         mj_step(m, d);
     }
@@ -213,15 +240,13 @@ int main(int argc, char** argv)
             const double vy_body = vwx * xmat[1] + vwy * xmat[4] + vwz * xmat[7];
             const double vz_body = vwx * xmat[2] + vwy * xmat[5] + vwz * xmat[8];
 
-            const double* com = d->subtree_com + base_bid * 3;
-
             csv << sim_t << ","
-                << com[0] << "," << com[1] << "," << com[2] << ","
+                << d->qpos[0] << "," << d->qpos[1] << "," << d->qpos[2] << ","
                 << vx_body << "," << vy_body << "," << vz_body << ","
                 << qw << "," << roll;
             for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
-            const double* act = mppi.activation();
-            for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
+            const double* qdes = mppi.q_des();
+            for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qdes[j];
             csv << "\n";
 
             // save full qpos for GIF rendering
@@ -236,10 +261,6 @@ int main(int argc, char** argv)
         }
 
         // --- stop once the task's final phase has been reached and held ---
-        // Mirrors pd_mppi_sim.cpp. Without this the muscle variant ran out the
-        // full sim_duration on every success while the PD variant stopped, so
-        // the two recorded different spans and any per-run average was taken
-        // over a different window per controller.
         if (converged && mppi.task_success()) {
             printf("Task complete at t=%.2f s — stopping.\n", sim_t);
             break;

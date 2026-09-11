@@ -3,8 +3,8 @@
 // same torque mode — replacing MPPI with a fixed activation gait cycle.
 //
 // Terminal 1: cd muscle_mppi/unitree_mujoco/simulate/build && ./unitree_mujoco -r go2 -s scene.xml
-// Terminal 2 (from muscle_mppi/muscle_mppi/):
-//   ../analysis/unit_tests/test_gait/build/test_gait <gait.tsv> [yaml] [net_interface]
+// Terminal 2 (from controllers/muscle/):
+//   ../../analysis/unit_tests/test_gait/build/test_gait <gait.tsv> [yaml] [net_interface]
 
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>

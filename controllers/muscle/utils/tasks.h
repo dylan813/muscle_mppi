@@ -107,4 +107,4 @@ struct MotionCommand {
 };
 
 TaskConfig load_task(const std::string& task_name,
-                     const std::string& yaml_path = "../utils/tasks.yaml");
+                     const std::string& yaml_path = "../muscle/utils/tasks.yaml");

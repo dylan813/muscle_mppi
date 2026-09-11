@@ -6,7 +6,7 @@
 static constexpr int NUM_JOINTS = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 
 // Direct joint-space PD gains — replaces MuscleParams in the muscle-actuated
-// variant (see control/muscle.h / utils/tasks.h). tau[j] = kp[j]*(q_des[j]-q[j])
+// variant (see muscle/control/muscle.h / muscle/utils/tasks.h). tau[j] = kp[j]*(q_des[j]-q[j])
 // - kd[j]*dq[j], matching RTWholeBodyMPPI's actuator-level PD law.
 struct PDParams {
     double kp[NUM_JOINTS] = {};
@@ -96,4 +96,4 @@ struct MotionCommand {
 };
 
 TaskConfig load_task(const std::string& task_name,
-                     const std::string& yaml_path = "../pd_mppi/utils/tasks_pd.yaml");
+                     const std::string& yaml_path = "../pd/utils/tasks_pd.yaml");

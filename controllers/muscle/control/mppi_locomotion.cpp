@@ -16,13 +16,13 @@
 //
 // Mirrors RTWholeBodyMPPI's GAIT_*_PATH constants (mppi_locomotion.py): a fixed
 // set of categorical gaits, each backed by one pre-generated activation-gait TSV
-// from the FAST/MED/SLOW library in ../gaits/. A phase selects a gait by name
+// from the FAST/MED/SLOW library in ../muscle/gaits/. A phase selects a gait by name
 // (TaskPhase::desired_gait) or, as an escape hatch, an explicit TSV path
 // (TaskPhase::gait_path) — see resolve_gait_key() below.
-static const char* GAIT_INPLACE_PATH   = "../gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH      = "../gaits/MED/activation_gait_MED_0_1_10cm.tsv";
-static const char* GAIT_WALK_FAST_PATH = "../gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH      = "../gaits/MED/activation_gait_MED_0_5_15cm.tsv";
+static const char* GAIT_INPLACE_PATH   = "../muscle/gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
+static const char* GAIT_WALK_PATH      = "../muscle/gaits/MED/activation_gait_MED_0_1_10cm.tsv";
+static const char* GAIT_WALK_FAST_PATH = "../muscle/gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
+static const char* GAIT_TROT_PATH      = "../muscle/gaits/MED/activation_gait_MED_0_5_15cm.tsv";
 
 static const std::unordered_map<std::string, const char*> kNamedGaits = {
     {"in_place",  GAIT_INPLACE_PATH},

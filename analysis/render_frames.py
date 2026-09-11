@@ -35,8 +35,8 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.normpath(os.path.join(_DIR, ".."))
 
 TASK = "guinea_fowl"
-TASKS_YAML = os.path.join(_REPO, "muscle_mppi", "utils", "tasks.yaml")
-MODEL_BASE = os.path.join(_REPO, "muscle_mppi", "build")
+TASKS_YAML = os.path.join(_REPO, "controllers", "muscle", "utils", "tasks.yaml")
+MODEL_BASE = os.path.join(_REPO, "controllers", "build")
 
 TRIALS = {
     "pd": (os.path.join(_DIR, "log", "trials", "workshop", "7pd", "trial_070",

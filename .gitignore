@@ -1,5 +1,5 @@
 # Build output
-muscle_mppi/build/
+controllers/build/
 ref_free_mppi/build/
 
 # Third-party repos

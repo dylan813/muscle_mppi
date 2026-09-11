@@ -16,16 +16,16 @@
 //
 // A fixed set of categorical gaits, each backed by one pre-generated
 // joint-angle gait TSV (position rows only, extracted from RTWholeBodyMPPI's
-// original joint-space gait library — see pd_mppi/gaits/ and
+// original joint-space gait library — see pd/gaits/ and
 // analysis/unit_tests/generate_pd_gaits.py) from the FAST/MED library in
-// ../pd_mppi/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
+// ../pd/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
 // or, as an escape hatch, an explicit TSV path (TaskPhase::gait_path) — see
 // resolve_gait_key() below. Same 4-gait mapping as the muscle variant
-// (control/mppi_locomotion.cpp's kNamedGaits).
-static const char* GAIT_INPLACE_PATH   = "../pd_mppi/gaits/FAST/gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH      = "../pd_mppi/gaits/MED/gait_MED_0_1_10cm.tsv";
-static const char* GAIT_WALK_FAST_PATH = "../pd_mppi/gaits/FAST/gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH      = "../pd_mppi/gaits/MED/gait_MED_0_5_15cm.tsv";
+// (muscle/control/mppi_locomotion.cpp's kNamedGaits).
+static const char* GAIT_INPLACE_PATH   = "../pd/gaits/FAST/gait_FAST_0_0_10cm.tsv";
+static const char* GAIT_WALK_PATH      = "../pd/gaits/MED/gait_MED_0_1_10cm.tsv";
+static const char* GAIT_WALK_FAST_PATH = "../pd/gaits/FAST/gait_FAST_0_1_10cm.tsv";
+static const char* GAIT_TROT_PATH      = "../pd/gaits/MED/gait_MED_0_5_15cm.tsv";
 
 static const std::unordered_map<std::string, const char*> kNamedGaits = {
     {"in_place",  GAIT_INPLACE_PATH},

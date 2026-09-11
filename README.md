@@ -29,9 +29,11 @@ export CYCLONEDDS_URI='<CycloneDDS><Domain><SharedMemory><Enable>false</Enable><
 
 # Running the MPPI Controller Implementations
 
+Controller code lives in `controllers/`: `muscle/` is the muscle-actuated controller, `pd/` is the PD-actuated baseline, and `common/` holds code shared by both. One CMake project builds every binary into `controllers/build/`.
+
 Build implementations
 ```bash
-cd muscle_mppi/muscle_mppi/
+cd muscle_mppi/controllers/
 mkdir build && cd build
 cmake ..
 make -j$(nproc)
@@ -52,7 +54,7 @@ cd muscle_mppi/unitree_mujoco/simulate/build
 
 Terminal 2: Run muscle-inspired torque-level MPPI controller
 ```bash
-cd muscle_mppi/muscle_mppi/build
+cd muscle_mppi/controllers/build
 ./muscle_mppi_controller
 ```
 
@@ -72,7 +74,7 @@ python3 plot_force_velocity.py
 ```
 
 ```bash
-cd muscle_mppi/muscle_mppi/build
+cd muscle_mppi/controllers/build
 ./mppi_sim
 MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../../analysis/data/mppi_sim/mppi_sim_qpos.csv ../../analysis/data/mppi_sim/test.gif
 python3 ../../analysis/log/plot_walk_leg.py <name>
@@ -90,7 +92,7 @@ Working output (CSVs, GIFs, figures) goes to `analysis/data/`: `mppi_sim` writes
 By default `mppi_sim` and `pd_mppi_sim` overwrite their working CSVs every run. Pass `--save <name>` to also copy that run's logs into a numbered trial directory, so repeated runs accumulate for analysis:
 
 ```bash
-cd muscle_mppi/muscle_mppi/build
+cd muscle_mppi/controllers/build
 ./mppi_sim walk --save walk_baseline
 ./mppi_sim walk --save walk_baseline
 ./pd_mppi_sim walk --save walk_baseline_pd
@@ -104,9 +106,9 @@ analysis/log/trials/walk_baseline/
   trial_002/mppi_sim.csv, mppi_sim_qpos.csv
 ```
 
-The flag works alongside the positional arguments in any order (`./mppi_sim walk ../utils/tasks.yaml out.csv --save <name>`), and the working CSVs are still written to their usual location under `analysis/data/`, so `render_gif.py` and `plot_walk_leg.py` keep operating on the latest run unchanged.
+The flag works alongside the positional arguments in any order (`./mppi_sim walk ../muscle/utils/tasks.yaml out.csv --save <name>`), and the working CSVs are still written to their usual location under `analysis/data/`, so `render_gif.py` and `plot_walk_leg.py` keep operating on the latest run unchanged.
 
-To plot or render a specific saved trial, point the scripts at that trial directory instead (run from `muscle_mppi/muscle_mppi/build/`):
+To plot or render a specific saved trial, point the scripts at that trial directory instead (run from `muscle_mppi/controllers/build/`):
 
 ```bash
 TRIAL=../../analysis/log/trials/walk_baseline/trial_001

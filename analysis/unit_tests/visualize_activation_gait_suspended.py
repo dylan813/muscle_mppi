@@ -19,7 +19,7 @@ Usage (run from anywhere; paths are relative to this file):
     gait_key = "{TIER}_{vel}_{height}", e.g. FAST_0_1_10cm (default)
                Must have a matching source gait TSV under RTWholeBodyMPPI's
                gait_scheduler/gaits/ and a generated activation_gait_*.tsv
-               under muscle_mppi/gaits/ (run generate_activation_gaits.py first).
+               under controllers/muscle/gaits/ (run generate_activation_gaits.py first).
 
 Defaults:
     gait_key = FAST_0_1_10cm
@@ -37,7 +37,7 @@ _DIR       = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_DIR, "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml")
 SRC_GAIT_DIR = os.path.join(_DIR, "../../../RTWholeBodyMPPI/legged_mppi/"
                                    "whole_body_mppi/control/gait_scheduler/gaits")
-ACT_GAIT_DIR = os.path.join(_DIR, "../../muscle_mppi/gaits")
+ACT_GAIT_DIR = os.path.join(_DIR, "../../controllers/muscle/gaits")
 
 gait_key = sys.argv[1] if len(sys.argv) > 1 else "FAST_0_1_10cm"
 gif_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(

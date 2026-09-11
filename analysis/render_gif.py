@@ -6,14 +6,14 @@ velocity and per-muscle activation columns for FR-leg plotting via
 analysis/log/plot_walk_leg.py — this script only reads the qpos companion and
 ignores that file.
 
-Usage (from muscle_mppi/muscle_mppi/):
+Usage (from controllers/build/):
     python3 ../../analysis/render_gif.py [qpos_csv] [output.gif] [task_name] [tasks_yaml]
 
 Defaults:
     qpos_csv   = mppi_sim_qpos.csv
     output     = mppi_sim.gif
     task_name  = none -> renders against the flat go2/scene.xml (old behavior)
-    tasks_yaml = ../muscle_mppi/utils/tasks.yaml (relative to this script)
+    tasks_yaml = ../controllers/muscle/utils/tasks.yaml (relative to this script)
 
 task_name must match whichever task the qpos_csv was actually generated from
 (the same name passed to mppi_sim) — its model_path is looked up in
@@ -33,10 +33,10 @@ from PIL import Image
 # ── paths ──────────────────────────────────────────────────────────────────────
 _DIR                = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL_PATH  = os.path.join(_DIR, "../unitree_mujoco/unitree_robots/go2/scene.xml")
-DEFAULT_TASKS_YAML  = os.path.join(_DIR, "../muscle_mppi/utils/tasks.yaml")
-# model_path values inside tasks.yaml are relative to muscle_mppi/muscle_mppi/build/
+DEFAULT_TASKS_YAML  = os.path.join(_DIR, "../controllers/muscle/utils/tasks.yaml")
+# model_path values inside tasks.yaml are relative to controllers/build/
 # (mppi_sim's own working directory) -- resolve against that, not this script's dir.
-TASKS_YAML_BASE_DIR = os.path.join(_DIR, "../muscle_mppi/build")
+TASKS_YAML_BASE_DIR = os.path.join(_DIR, "../controllers/build")
 
 qpos_path  = sys.argv[1] if len(sys.argv) > 1 else "mppi_sim_qpos.csv"
 gif_path   = sys.argv[2] if len(sys.argv) > 2 else "mppi_sim.gif"

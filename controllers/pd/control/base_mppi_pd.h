@@ -33,7 +33,7 @@ struct RobotState {
 
 // PD-actuated variant of BaseMPPI: action space is one desired joint position
 // per joint (NUM_JOINTS-wide), not an interleaved antagonistic muscle pair
-// (NUM_MUSCLES-wide). See control/base_mppi.h for the muscle-actuated original.
+// (NUM_MUSCLES-wide). See muscle/control/base_mppi.h for the muscle-actuated original.
 class BaseMPPIPD {
 public:
     explicit BaseMPPIPD(const TaskConfig& task);

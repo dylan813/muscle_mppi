@@ -176,7 +176,7 @@ def plot_force_velocity_row(axes, FVmax_list):
 
 def main():
     yaml_path = os.path.join(os.path.dirname(__file__),
-                             "../../muscle_mppi/utils/tasks.yaml")
+                             "../../controllers/muscle/utils/tasks.yaml")
     with open(yaml_path) as f:
         cfg = yaml.safe_load(f)
     muscle = cfg["default_muscle_quad"]

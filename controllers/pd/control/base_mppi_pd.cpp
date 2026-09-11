@@ -107,7 +107,7 @@ static void not_a_knot_cubic_spline(const std::vector<double>& xk, const std::ve
     }
 }
 
-// Nondeterministically seeded, matching control/base_mppi.cpp's muscle
+// Nondeterministically seeded, matching muscle/control/base_mppi.cpp's muscle
 // variant. RTWholeBodyMPPI seeds its sampler deterministically (`seed: 42` in
 // every mppi_gait_config_*.yml), which this once mirrored — but a fixed seed
 // makes every run of a task bit-for-bit identical, so repeated trials measure
@@ -137,7 +137,7 @@ BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
     // for planning purposes. Deliberately NOT applied to pd_mppi_sim.cpp's
     // separate "real world" model — RTWholeBodyMPPI's own real-world stepper
     // (interface/simulator.py:51) leaves this commented out, so only the
-    // planner sees it. NOTE: the muscle variant (control/base_mppi.cpp) does
+    // planner sees it. NOTE: the muscle variant (muscle/control/base_mppi.cpp) does
     // not do this; the two must agree before a controlled comparison.
     model_->opt.enableflags |= mjENBL_OVERRIDE;
     model_->opt.o_solref[0] = 0.02;
@@ -219,7 +219,7 @@ void BaseMPPIPD::sample_actions() {
 // and adding it to the raw, unsplined trajectory_ drops that regularization
 // and lets trajectory_ accumulate per-timestep artifacts across iterations.
 //
-// NOTE: the muscle variant's sample_noise_cubic() (control/base_mppi.cpp)
+// NOTE: the muscle variant's sample_noise_cubic() (muscle/control/base_mppi.cpp)
 // still does the noise-only form, so the two explore differently; they must
 // agree before a controlled comparison.
 void BaseMPPIPD::sample_actions_cubic() {

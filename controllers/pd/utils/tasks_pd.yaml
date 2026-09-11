@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------
-# Task definitions for the PD-actuated MPPI variant (pd_mppi/).
+# Task definitions for the PD-actuated MPPI variant (pd/).
 #
-# Independent of ../../utils/tasks.yaml (the muscle-actuated variant's task
+# Independent of ../../muscle/utils/tasks.yaml (the muscle-actuated variant's task
 # file) by design — the two variants' action spaces differ (desired joint
 # angle in radians here vs. muscle activation in [0,1] there), so weights
 # and noise scales are not interchangeable.
@@ -80,7 +80,7 @@ walk:
     control_effort_weights: *default_control_effort_weights
 
   # goal_pos z = 0.27: the standing height the gait references actually
-  # produce. Forward-kinematicking any of the pd_mppi/gaits TSVs onto this
+  # produce. Forward-kinematicking any of the pd/gaits TSVs onto this
   # robot puts the trunk at 0.2715 m with the stance foot on the ground, and
   # RTWholeBodyMPPI uses exactly 0.27 for every walking goal (utils/tasks.py).
   # The 0.34 this task previously carried over from the muscle variant is ~7cm

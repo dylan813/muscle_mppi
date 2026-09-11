@@ -35,7 +35,7 @@ struct CostWeights {
 class MPPILocomotion : public BaseMPPI {
 public:
     explicit MPPILocomotion(const std::string& task_name,
-                            const std::string& yaml_path = "../utils/tasks.yaml");
+                            const std::string& yaml_path = "../muscle/utils/tasks.yaml");
 
     // Run one MPPI solve; returns Hill-model torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);

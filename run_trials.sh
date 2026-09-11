@@ -32,7 +32,7 @@ set -uo pipefail
 
 # ── locate the repo from this script, not the CWD ────────────────────────────
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$REPO_ROOT/muscle_mppi/build"
+BUILD_DIR="$REPO_ROOT/controllers/build"
 TRIALS_DIR="$REPO_ROOT/analysis/log/trials"
 
 # ── defaults ─────────────────────────────────────────────────────────────────
@@ -42,8 +42,8 @@ BATCH_NAME="workshop"
 RUN_MUSCLE=1
 RUN_PD=1
 TEE=0
-MUSCLE_YAML="../utils/tasks.yaml"
-PD_YAML="../pd_mppi/utils/tasks_pd.yaml"
+MUSCLE_YAML="../muscle/utils/tasks.yaml"
+PD_YAML="../pd/utils/tasks_pd.yaml"
 
 usage() {
     sed -n '2,/^$/s/^# \?//p' "${BASH_SOURCE[0]}"
@@ -188,7 +188,7 @@ run_one() {
         echo "# controller : $label"
         echo "# run index  : $idx of $N_RUNS"
         echo "# trial      : $trial_id"
-        echo "# command    : (cd muscle_mppi/build && $cmd)"
+        echo "# command    : (cd controllers/build && $cmd)"
         echo "# started    : $(date -Is -d "@$((t0 / 1000000000))")"
         echo "# wall time  : ${wall_s}s"
         echo "# exit code  : $rc"

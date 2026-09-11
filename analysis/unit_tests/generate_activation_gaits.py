@@ -17,7 +17,7 @@ where:
 The midpoint of the feasible segment of this line on [0,1]² gives the nominal
 activation pair (a1*(t), a2*(t)) for each joint at each gait phase.
 
-Output: 24 × N TSV files saved to muscle_mppi/muscle_mppi/gaits/
+Output: 24 × N TSV files saved to controllers/muscle/gaits/
     rows  0-11 = a1 (agonist)  per joint  [FR_hip, FR_thigh, FR_calf, FL..., RR..., RL...]
     rows 12-23 = a2 (antagonist) per joint (same order)
 
@@ -39,9 +39,9 @@ import mujoco
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _DIR       = os.path.dirname(os.path.abspath(__file__))
-YAML_PATH  = os.path.join(_DIR,  "../../muscle_mppi/utils/tasks.yaml")
+YAML_PATH  = os.path.join(_DIR,  "../../controllers/muscle/utils/tasks.yaml")
 MODEL_PATH = os.path.join(_DIR,  "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml")
-OUT_DIR    = os.path.join(_DIR,  "../../muscle_mppi/gaits")
+OUT_DIR    = os.path.join(_DIR,  "../../controllers/muscle/gaits")
 GAIT_DIR   = os.path.join(_DIR,  "../../../RTWholeBodyMPPI/legged_mppi/"
                                   "whole_body_mppi/control/gait_scheduler/gaits")
 

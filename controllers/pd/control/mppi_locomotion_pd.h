@@ -25,7 +25,7 @@ struct CostWeights {
 };
 
 // Direct joint-space PD MPPI locomotion controller — the PD-actuated mirror of
-// control/mppi_locomotion.h's muscle-actuated MPPILocomotion.
+// muscle/control/mppi_locomotion.h's muscle-actuated MPPILocomotion.
 //
 // Search space: q_des[j] per joint per horizon step (NUM_JOINTS × horizon),
 // bounded by each joint's actual MJCF range (see BaseMPPIPD::action_lo_/hi_).
@@ -38,7 +38,7 @@ struct CostWeights {
 class MPPILocomotionPD : public BaseMPPIPD {
 public:
     explicit MPPILocomotionPD(const std::string& task_name,
-                              const std::string& yaml_path = "../pd_mppi/utils/tasks_pd.yaml");
+                              const std::string& yaml_path = "../pd/utils/tasks_pd.yaml");
 
     // Run one MPPI solve; returns PD torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);

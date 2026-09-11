@@ -17,30 +17,33 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags,-r
 
 set(COMMON_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
 
+# Layout: muscle/ (muscle-actuated controller), pd/ (PD-actuated baseline),
+# common/ (code shared by both).
+
 # --- Quadruped locomotion controller ---
 add_executable(muscle_mppi_controller
-    mppi_controller.cpp
-    control/base_mppi.cpp
-    control/mppi_locomotion.cpp
-    utils/tasks.cpp
+    muscle/mppi_controller.cpp
+    muscle/control/base_mppi.cpp
+    muscle/control/mppi_locomotion.cpp
+    muscle/utils/tasks.cpp
 )
 target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
 
 # --- Standalone MuJoCo simulation test (no DDS, no real-time constraint) ---
 add_executable(mppi_sim
-    mppi_sim.cpp
-    control/base_mppi.cpp
-    control/mppi_locomotion.cpp
-    utils/tasks.cpp
+    muscle/mppi_sim.cpp
+    muscle/control/base_mppi.cpp
+    muscle/control/mppi_locomotion.cpp
+    muscle/utils/tasks.cpp
 )
 target_link_libraries(mppi_sim ${COMMON_LIBS})
 
 # --- PD-actuated standalone MuJoCo simulation test (mirrors mppi_sim, but ---
 # --- with direct joint-space PD control instead of the muscle model)     ---
 add_executable(pd_mppi_sim
-    pd_mppi/pd_mppi_sim.cpp
-    pd_mppi/control/base_mppi_pd.cpp
-    pd_mppi/control/mppi_locomotion_pd.cpp
-    pd_mppi/utils/tasks_pd.cpp
+    pd/pd_mppi_sim.cpp
+    pd/control/base_mppi_pd.cpp
+    pd/control/mppi_locomotion_pd.cpp
+    pd/utils/tasks_pd.cpp
 )
 target_link_libraries(pd_mppi_sim ${COMMON_LIBS})
