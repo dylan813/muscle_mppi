@@ -90,8 +90,8 @@ private:
         const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
         for (int i = 0; i < NUM_JOINTS; ++i) {
-            state_.q[i]  = s->motor_state()[JOINT_OFFSET + i].q();
-            state_.dq[i] = s->motor_state()[JOINT_OFFSET + i].dq();
+            state_.q[i]  = s->motor_state()[i].q();
+            state_.dq[i] = s->motor_state()[i].dq();
         }
         state_.quat[0] = s->imu_state().quaternion()[0];
         state_.quat[1] = s->imu_state().quaternion()[1];
@@ -124,11 +124,11 @@ private:
             const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
             for (int i = 0; i < NUM_JOINTS; ++i) {
                 const double q_des = phase * stand_pos_[i] + (1.0 - phase) * stand_down_pos_[i];
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = q_des;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = kp;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = 3.5;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = 0.0;
+                low_cmd_.motor_cmd()[i].q()   = q_des;
+                low_cmd_.motor_cmd()[i].kp()  = kp;
+                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
         } else {
             double tau_cmd[NUM_JOINTS];
@@ -137,11 +137,11 @@ private:
                 std::copy(cached_tau_, cached_tau_ + NUM_JOINTS, tau_cmd);
             }
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].q()   = PosStopF;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kp()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].kd()  = kd_[i];
-                low_cmd_.motor_cmd()[JOINT_OFFSET + i].tau() = tau_cmd[i];
+                low_cmd_.motor_cmd()[i].q()   = PosStopF;
+                low_cmd_.motor_cmd()[i].kp()  = 0.0;
+                low_cmd_.motor_cmd()[i].dq()  = 0.0;
+                low_cmd_.motor_cmd()[i].kd()  = kd_[i];
+                low_cmd_.motor_cmd()[i].tau() = tau_cmd[i];
             }
         }
 

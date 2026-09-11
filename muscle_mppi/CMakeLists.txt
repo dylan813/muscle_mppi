@@ -17,7 +17,7 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags,-r
 
 set(COMMON_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
 
-# --- Quadruped locomotion controller (NUM_JOINTS=12, JOINT_OFFSET=0) ---
+# --- Quadruped locomotion controller ---
 add_executable(muscle_mppi_controller
     mppi_controller.cpp
     control/base_mppi.cpp
@@ -34,18 +34,6 @@ add_executable(mppi_sim
     utils/tasks.cpp
 )
 target_link_libraries(mppi_sim ${COMMON_LIBS})
-
-# --- Single-leg reach controller (direct per-muscle, 2 per joint) ---
-# NUM_MUSCLES=6: independent agonist/antagonist command per joint,
-add_executable(single_leg_controller
-    single_leg_controller.cpp
-    control/base_mppi.cpp
-    control/single_leg_reach.cpp
-    utils/tasks.cpp
-)
-target_compile_definitions(single_leg_controller PRIVATE
-    NUM_JOINTS=3 JOINT_OFFSET=3 NUM_MUSCLES=6)
-target_link_libraries(single_leg_controller ${COMMON_LIBS})
 
 # --- PD-actuated standalone MuJoCo simulation test (mirrors mppi_sim, but ---
 # --- with direct joint-space PD control instead of the muscle model)     ---

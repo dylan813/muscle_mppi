@@ -128,9 +128,9 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     // Detect freejoint (freejoint adds 1 extra qpos DOF via quaternion, so nq != nv).
     has_freejoint_ = (model_->nq != model_->nv);
 
-    // Build actuator → DOF mapping for the controlled joints starting at JOINT_OFFSET.
+    // Build actuator → DOF mapping for the controlled joints.
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        int jid = model_->actuator_trnid[2 * (JOINT_OFFSET + j)];
+        int jid = model_->actuator_trnid[2 * j];
         act_qpos_adr_[j] = model_->jnt_qposadr[jid];
         act_qvel_adr_[j] = model_->jnt_dofadr[jid];
     }

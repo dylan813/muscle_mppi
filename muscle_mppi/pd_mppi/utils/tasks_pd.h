@@ -3,12 +3,7 @@
 #include <string>
 #include <vector>
 
-// These are overridable at compile time via -DNUM_JOINTS=N -DJOINT_OFFSET=N.
-// Defaults: full quadruped (12 joints, offset 0).
-#ifndef NUM_JOINTS
-static constexpr int NUM_JOINTS   = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
-static constexpr int JOINT_OFFSET = 0;    // actuators start at index 0
-#endif
+static constexpr int NUM_JOINTS = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 
 // Direct joint-space PD gains — replaces MuscleParams in the muscle-actuated
 // variant (see control/muscle.h / utils/tasks.h). tau[j] = kp[j]*(q_des[j]-q[j])

@@ -3,16 +3,8 @@
 #include <string>
 #include <vector>
 
-// These are overridable at compile time via -DNUM_JOINTS=N -DJOINT_OFFSET=N.
-// Defaults: full quadruped (12 joints, offset 0).
-// Single-leg build: -DNUM_JOINTS=3 -DJOINT_OFFSET=3
-#ifndef NUM_JOINTS
-static constexpr int NUM_JOINTS   = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
-static constexpr int JOINT_OFFSET = 0;    // actuators start at index 0
-#endif
-#ifndef NUM_MUSCLES
-static constexpr int NUM_MUSCLES  = 2 * NUM_JOINTS;
-#endif  // antagonistic pair per joint
+static constexpr int NUM_JOINTS  = 12;              // 4 legs × 3 joints (FR, FL, RR, RL)
+static constexpr int NUM_MUSCLES = 2 * NUM_JOINTS;  // antagonistic pair per joint
 
 struct MuscleParams {
     double act_bandwidth = 100.0;              // activation filter bandwidth (Hz)
@@ -61,8 +53,7 @@ struct TaskPhase {
 struct TaskConfig {
     std::string  model_path;
 
-    // Ordered waypoint sequence for locomotion tasks (MPPILocomotion). Empty for
-    // non-locomotion tasks (e.g. "reach", driven by SingleLegReach instead).
+    // Ordered waypoint sequence for locomotion tasks (MPPILocomotion).
     std::vector<TaskPhase> phases;
 
     double       height_target            = 0.0;

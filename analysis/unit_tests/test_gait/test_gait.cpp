@@ -162,8 +162,8 @@ private:
         const auto* s = static_cast<const unitree_go::msg::dds_::LowState_*>(msg);
         std::lock_guard<std::mutex> lk(state_mutex_);
         for (int j = 0; j < NUM_JOINTS; ++j) {
-            q_[j]  = s->motor_state()[JOINT_OFFSET + j].q();
-            dq_[j] = s->motor_state()[JOINT_OFFSET + j].dq();
+            q_[j]  = s->motor_state()[j].q();
+            dq_[j] = s->motor_state()[j].dq();
         }
         state_valid_ = true;
     }
@@ -172,11 +172,11 @@ private:
         if (!gait_ready_) {
             // PD stand-up: hold STAND_POS until settled — mirrors mppi_controller.cpp
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].q()   = STAND_POS[j];
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].kp()  = 50.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].dq()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].kd()  = 3.5;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].tau() = 0.0;
+                low_cmd_.motor_cmd()[j].q()   = STAND_POS[j];
+                low_cmd_.motor_cmd()[j].kp()  = 50.0;
+                low_cmd_.motor_cmd()[j].dq()  = 0.0;
+                low_cmd_.motor_cmd()[j].kd()  = 3.5;
+                low_cmd_.motor_cmd()[j].tau() = 0.0;
             }
 
             if (++standup_tick_ >= STANDUP_TICKS) {
@@ -200,11 +200,11 @@ private:
             hill_compute_torques(act_cmd, q, dq, muscle_, 0.002, activation_, tau);
 
             for (int j = 0; j < NUM_JOINTS; ++j) {
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].q()   = PosStopF;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].kp()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].dq()  = 0.0;
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].kd()  = KD_GAIT[j];
-                low_cmd_.motor_cmd()[JOINT_OFFSET + j].tau() = tau[j];
+                low_cmd_.motor_cmd()[j].q()   = PosStopF;
+                low_cmd_.motor_cmd()[j].kp()  = 0.0;
+                low_cmd_.motor_cmd()[j].dq()  = 0.0;
+                low_cmd_.motor_cmd()[j].kd()  = KD_GAIT[j];
+                low_cmd_.motor_cmd()[j].tau() = tau[j];
             }
 
             // Advance gait phase at 100 Hz (every 5 ticks at 500 Hz)

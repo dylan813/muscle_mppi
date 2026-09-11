@@ -135,7 +135,7 @@ int main(int argc, char** argv)
     // set joint damping to match MPPI's internal model
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
     for (int j = 0; j < NUM_JOINTS; ++j) {
-        int jid = m->actuator_trnid[2 * (JOINT_OFFSET + j)];
+        int jid = m->actuator_trnid[2 * j];
         qa[j]   = m->jnt_qposadr[jid];
         qv[j]   = m->jnt_dofadr[jid];
         m->dof_damping[qv[j]] = task.pd.joint_damping[j];
@@ -173,7 +173,7 @@ int main(int argc, char** argv)
         const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
         for (int j = 0; j < NUM_JOINTS; ++j) {
             const double q_des = phase * STAND_UP[j] + (1.0 - phase) * STAND_DOWN[j];
-            d->ctrl[JOINT_OFFSET + j] = unitree_pd_torque(
+            d->ctrl[j] = unitree_pd_torque(
                 kp, /*kd=*/3.5, q_des, d->qpos[qa[j]], /*dq_des=*/0.0, d->qvel[qv[j]], /*tau_ff=*/0.0);
         }
         mj_step(m, d);
@@ -212,7 +212,7 @@ int main(int argc, char** argv)
 
         // --- apply torques for one control step ---
         for (int j = 0; j < NUM_JOINTS; ++j)
-            d->ctrl[JOINT_OFFSET + j] = tau[j];
+            d->ctrl[j] = tau[j];
         mj_step(m, d);
         sim_t += task.dt;
 

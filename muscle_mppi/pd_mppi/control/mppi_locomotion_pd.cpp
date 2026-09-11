@@ -206,7 +206,7 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
         }
 
         for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
-        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
+        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = tau_out[j];
 
         mj_step(model_, d);
 
@@ -422,7 +422,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
                                              /*dq_des=*/0.0, dq_l[j], /*tau_ff=*/0.0);
             }
             for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
-            for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[JOINT_OFFSET + j] = tau_l[j];
+            for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[j] = tau_l[j];
             mj_step(model_, dl);
 
             double lpos[3], lvel[3];

@@ -10,11 +10,11 @@
 // Unitree's PD+feedforward-torque law, ported verbatim from unitree_mujoco's
 // Go2Bridge::run() (unitree_mujoco/simulate/src/unitree_sdk2_bridge.h:183-185)
 // — the same computation the real Go2's onboard motor firmware performs in
-// mode 0x01, and what mppi_controller.cpp/single_leg_controller.cpp already
-// drive via DDS LowCmd_ q/kp/dq/kd/tau fields. Callers pass dq_des=0,
-// tau_ff=0 unless they have a specific feedforward term, matching how this
-// repo's own DDS controllers already use it (e.g. single_leg_controller.cpp
-// sets dq()=0.0) — not a simplification specific to this port.
+// mode 0x01, and what mppi_controller.cpp already drives via DDS LowCmd_
+// q/kp/dq/kd/tau fields. Callers pass dq_des=0, tau_ff=0 unless they have a
+// specific feedforward term, matching how this repo's own DDS controller
+// already uses it (mppi_controller.cpp sets dq()=0.0) — not a simplification
+// specific to this port.
 inline double unitree_pd_torque(double kp, double kd, double q_des, double q,
                                 double dq_des, double dq, double tau_ff)
 {
@@ -85,7 +85,7 @@ protected:
     double action_lo_[NUM_JOINTS] = {};
     double action_hi_[NUM_JOINTS] = {};
 
-    // Actuator → MuJoCo DOF addresses (built from JOINT_OFFSET — no hardcoded mapping)
+    // Actuator → MuJoCo DOF addresses (built from the model — no hardcoded mapping)
     int  act_qpos_adr_[NUM_JOINTS] = {};
     int  act_qvel_adr_[NUM_JOINTS] = {};
     bool has_freejoint_ = false;

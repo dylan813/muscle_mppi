@@ -43,12 +43,6 @@ cd muscle_mppi/unitree_mujoco/simulate/build
 ./unitree_mujoco -r go2 -s scene.xml
 ```
 
-Or, run scene_suspended for single leg task
-```bash
-cd muscle_mppi/unitree_mujoco/simulate/build
-./unitree_mujoco -r go2 -s scene_suspended.xml
-```
-
 For recording rollout,
 ```bash
 sudo apt install ffmpeg
@@ -60,12 +54,6 @@ Terminal 2: Run muscle-inspired torque-level MPPI controller
 ```bash
 cd muscle_mppi/muscle_mppi/build
 ./muscle_mppi_controller
-```
-
-Or, run single leg task with scene_suspended
-```bash
-cd muscle_mppi/muscle_mppi/build
-./single_leg_controller
 ```
 
 <!-- record headless

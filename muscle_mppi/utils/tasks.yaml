@@ -1,110 +1,53 @@
 # muscle_mppi task configuration — edit here, no rebuild needed.
 # Run the binary from build/: model_path is relative to the working directory.
 #
-# --- Single-leg tasks (reach) ---
-# Joint order (NUM_JOINTS=3, JOINT_OFFSET=3):
-#   0: FL_hip   1: FL_thigh   2: FL_calf
-#
-# --- Quadruped tasks (walk) ---
-# Joint order (NUM_JOINTS=12, JOINT_OFFSET=0):
+# Joint order (NUM_JOINTS=12):
 #   0-2:  FR_hip, FR_thigh, FR_calf
 #   3-5:  FL_hip, FL_thigh, FL_calf
 #   6-8:  RR_hip, RR_thigh, RR_calf
 #   9-11: RL_hip, RL_thigh, RL_calf
 
 # -----------------------------------------------------------------------
-# Single-leg muscle parameters (3 joints).
-default_muscle: &default_muscle
+# Quadruped muscle parameters (12 joints: (hip/thigh/calf)x(FR/FL/RR/RL))
+default_muscle_quad: &default_muscle_quad
 
   # Activation filter bandwidth (Hz). First-order filter: act += bandwidth * dt * (ctrl - act).
   # alpha = bandwidth * dt = 10 * 0.02 = 0.2, preserving the original 10 ms effective time constant
   # (was 100 Hz at dt=0.002; scaled down to match dt=0.02 so filter behaviour is unchanged).
-  act_bandwidth: 10.0
+  act_bandwidth: 20.0
 
   # Peak isometric force per joint (N). Maximum force when FL=1, FV=1, act=1.
   # Determined by: peak_force = tau_max / r
   #   r = (lce_max - lce_min) / (phi_max - phi_min)  [moment arm, dimensionless]
   #   tau_max from go2.xml ctrlrange: hip=23.7 Nm, thigh=23.7 Nm, calf=45.43 Nm
   #   r values: hip=0.1584, thigh=0.0617, calf=0.1781
-  peak_force:    [149.7, 384.1, 255.1]
+  peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
 
   # Joint angle range (rad) mapped linearly to [lce_min, lce_max] for the agonist muscle.
   # Taken from go2.xml joint limits, 0.1 rad inside the hard stops to avoid singularities at limits.
   # go2.xml limits — hip: [-1.0472, 1.0472], thigh: [-1.5708, 3.4907], calf: [-2.7227, -0.83776]
-  phi_min:       [-0.9472, -1.4708, -2.6227]
-  phi_max:       [0.9472,  3.3907,  -0.9378]
+  phi_min:     [-0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227]
+  phi_max:     [ 0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378]
 
   # Fiber length range normalized by optimal isometric length (l_opt).
   # Both muscles in the antagonistic pair span [lce_min, lce_max] as the joint sweeps phi_min→phi_max.
-  lce_min:       [0.75, 0.75, 0.75]
-  lce_max:       [1.05, 1.05, 1.05]
+  lce_min:     [0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667]
+  lce_max:     [1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446]
 
   # Passive parallel elasticity scale. Force at maximum extension relative to peak_force.
-  pFLmax:        [1.3, 1.3, 1.3]
+  pFLmax:      [0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589]
 
   # Maximum fiber contraction velocity (fiber lengths / s). FV curve → 0 at lce_dot = -vmax.
   # Determined by: vmax = r * dq_max
   #   dq_max from Go2 URDF file found in Unitree documentation: hip=30.1 rad/s, thigh=30.1 rad/s, calf=15.70 rad/s
   #   r values: hip=0.1584, thigh=0.0617, calf=0.1781
-  vmax:          [4.77, 1.86, 2.80]
+  vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
 
   # Eccentric force amplification plateau. FV saturates at FVmax when the muscle is lengthening.
-  FVmax:         [1.33, 1.33, 1.33]
+  FVmax:       [1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597]
 
   # MuJoCo joint damping (N·m·s/rad) written directly to simulation DOFs at startup.
   # Overrides the go2.xml default of 0.1. Values should match Go2 motor driver kd gains.
-  kd_sim:        [2.0, 3.5, 3.5]
-
-# -----------------------------------------------------------------------
-# FL foot target: world frame (x, y, z). Base fixed at z≈0.8.
-# FL hip at (0.193, 0.142, 0.8). Max leg reach ~0.64m.
-# Action space: act[m] ∈ [0, 1] per muscle (NUM_MUSCLES=6, two per joint).
-reach:
-  model_path:    "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml"
-  height_target: 0.0
-  foot_targets:
-    - [0.5,  0.1, 0.6 ]
-    - [0.25, 0.1, 0.55]
-    - [0.25, 0.3, 0.6 ]
-  n_samples:     64
-  horizon:       10
-  lambda:        0.1
-  dt:            0.02
-
-  # OpenMP threads for the parallel rollout loop (one rollout per sample).
-  # Omit or set to 0 to use the OpenMP default (all available cores).
-  num_threads:   0
-
-  # Spline-parameterized noise sampling: draw noise at
-  # n_knots points spread across the horizon and cubic-interpolate the rest,
-  # instead of independent per-timestep noise. Smoother action trajectories.
-  sample_type:   "cubic"
-  n_knots:       4
-
-  cost:
-    terminal:      500.0
-    foot_pos:      10.0
-    joint_vel:     0.05
-
-  nominal_pose: [0.00571868, 0.608813, -1.21763]
-
-  # Per-joint noise sigma (NUM_JOINTS=3). Both muscles of each pair share the same draw.
-  noise_sigma_act: [0.02, 0.02, 0.02]
-
-  muscle: *default_muscle
-
-# -----------------------------------------------------------------------
-# Quadruped muscle parameters (12 joints: (hip/thigh/calf)x(FR/FL/RR/RL))
-default_muscle_quad: &default_muscle_quad
-  act_bandwidth: 20.0
-  peak_force:  [149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1,  149.7, 384.1, 255.1]
-  phi_min:     [-0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227,  -0.9472, -1.4708, -2.6227]
-  phi_max:     [ 0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378,   0.9472,  3.3907, -0.9378]
-  lce_min:     [0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667]
-  lce_max:     [1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446]
-  pFLmax:      [0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589]
-  vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
-  FVmax:       [1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597]
   kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
 
 # -----------------------------------------------------------------------

@@ -223,7 +223,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
         hill_compute_torques(act_cmd, q_cur, dq_cur, muscle_, task_.dt, activation, tau_out);
 
         for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
-        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[JOINT_OFFSET + j] = tau_out[j];
+        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = tau_out[j];
 
         mj_step(model_, d);
 
@@ -413,7 +413,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
             double tau_l[NUM_JOINTS];
             hill_compute_torques(cmd, q_l, dq_l, muscle_, task_.dt, act_log, tau_l);
             for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
-            for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[JOINT_OFFSET + j] = tau_l[j];
+            for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[j] = tau_l[j];
             mj_step(model_, dl);
 
             double lpos[3], lvel[3];

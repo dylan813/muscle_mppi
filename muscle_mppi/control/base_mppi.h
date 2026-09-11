@@ -65,7 +65,7 @@ protected:
     double action_lo_[NUM_MUSCLES] = {};
     double action_hi_[NUM_MUSCLES] = {};
 
-    // Actuator → MuJoCo DOF addresses (built from JOINT_OFFSET — no hardcoded mapping)
+    // Actuator → MuJoCo DOF addresses (built from the model — no hardcoded mapping)
     int  act_qpos_adr_[NUM_JOINTS] = {};
     int  act_qvel_adr_[NUM_JOINTS] = {};
     bool has_freejoint_ = false;
