@@ -1,10 +1,10 @@
 #pragma once
 
 #include "../utils/tasks.h"
-#include "../../common/gait_table.h"
+#include "../../common/gait.h"
 
 // Cycles through a 24×N activation gait TSV (rows 0..11 = a1, rows 12..23 = a2).
-// Loading, advancing and thread-safety rules come from GaitTable (common/gait_table.h).
+// Loading, advancing and thread-safety rules come from GaitTable (common/gait.h).
 class GaitScheduler : public GaitTable {
 public:
     GaitScheduler() : GaitTable("GaitScheduler") {}

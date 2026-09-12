@@ -3,10 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "../../common/paths.h"
-#include "../../common/types.h"
+#include "../../common/task_config.h"
 
-// Default task file for every PD-variant binary (absolute, see common/paths.h).
+// Default task file for every PD-variant binary (absolute, see common/task_config.h).
 inline const std::string kDefaultTasksPdYaml = repo_path("controllers/pd/utils/tasks_pd.yaml");
 
 // Direct joint-space PD gains — replaces MuscleParams in the muscle-actuated
@@ -26,7 +25,7 @@ struct PDParams {
 };
 
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase
-// (common/types.h); this adds the PD variant's own parameters.
+// (common/task_config.h); this adds the PD variant's own parameters.
 struct TaskConfig : TaskConfigBase {
     PDParams     pd;
 };

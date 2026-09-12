@@ -3,10 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "../../common/paths.h"
-#include "../../common/types.h"
+#include "../../common/task_config.h"
 
-// Default task file for every muscle-variant binary (absolute, see common/paths.h).
+// Default task file for every muscle-variant binary (absolute, see common/task_config.h).
 inline const std::string kDefaultTasksYaml = repo_path("controllers/muscle/utils/tasks.yaml");
 
 static constexpr int NUM_MUSCLES = 2 * NUM_JOINTS;  // antagonistic pair per joint
@@ -25,7 +24,7 @@ struct MuscleParams {
 };
 
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase
-// (common/types.h); this adds the muscle variant's own parameters.
+// (common/task_config.h); this adds the muscle variant's own parameters.
 struct TaskConfig : TaskConfigBase {
     double       height_target = 0.0;
     MuscleParams muscle;

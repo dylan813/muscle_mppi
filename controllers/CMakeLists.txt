@@ -18,7 +18,7 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags,-r
 set(COMMON_LIBS unitree_sdk2 mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
 
 # Absolute repo root, compiled into every binary so default config, gait and
-# output paths resolve the same from any working directory (common/paths.h).
+# output paths resolve the same from any working directory (common/task_config.h).
 get_filename_component(MUSCLE_MPPI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 add_compile_definitions(MUSCLE_MPPI_ROOT="${MUSCLE_MPPI_ROOT}")
 
@@ -31,7 +31,7 @@ add_executable(muscle_mppi_controller
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
     muscle/utils/tasks.cpp
-    common/task_loader.cpp
+    common/task_config.cpp
 )
 target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
 
@@ -41,7 +41,7 @@ add_executable(mppi_sim
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
     muscle/utils/tasks.cpp
-    common/task_loader.cpp
+    common/task_config.cpp
 )
 target_link_libraries(mppi_sim ${COMMON_LIBS})
 
@@ -52,6 +52,6 @@ add_executable(pd_mppi_sim
     pd/control/base_mppi_pd.cpp
     pd/control/mppi_locomotion_pd.cpp
     pd/utils/tasks_pd.cpp
-    common/task_loader.cpp
+    common/task_config.cpp
 )
 target_link_libraries(pd_mppi_sim ${COMMON_LIBS})

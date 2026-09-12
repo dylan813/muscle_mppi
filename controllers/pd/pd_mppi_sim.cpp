@@ -11,7 +11,7 @@
 // analysis/data/pd_mppi_sim/pd_mppi_sim.csv (a dedicated output directory,
 // mirroring analysis/data/mppi_sim/ for the muscle-actuated mppi_sim binary,
 // created on first run if missing), both resolved against the repo root
-// (common/paths.h). An explicit [yaml] or [output.csv] is relative to the
+// (common/task_config.h). An explicit [yaml] or [output.csv] is relative to the
 // current directory, as usual.
 //
 // --save copies this run's CSVs, once it finishes, into
@@ -39,7 +39,7 @@
 #include <vector>
 
 #include "control/mppi_locomotion_pd.h"
-#include "../common/sim_harness.h"
+#include "../common/harness.h"
 #include "../common/trial_log.h"
 
 // ── main ──────────────────────────────────────────────────────────────────────

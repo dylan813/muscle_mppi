@@ -1,11 +1,44 @@
 #pragma once
 
-// Types shared by the muscle-actuated (controllers/muscle/) and PD-actuated
-// (controllers/pd/) variants. Variant-specific types (MuscleParams/NUM_MUSCLES,
-// PDParams, each variant's TaskConfig) stay in that variant's utils/.
+// Task description shared by the muscle-actuated (controllers/muscle/) and
+// PD-actuated (controllers/pd/) variants: core types, repo-relative path
+// resolution, and the YAML loading helpers each variant's load_task() builds on.
 
+#include <filesystem>
 #include <string>
 #include <vector>
+
+namespace YAML { class Node; }   // full definition only needed in .cpp files that parse YAML
+
+// ============================================================================
+// Repo paths
+// ============================================================================
+
+// Absolute path of the repo root, compiled in by CMake (see
+// controllers/CMakeLists.txt). Built-in defaults (task YAMLs, gait TSVs, sim
+// output CSVs) and relative paths inside a task YAML (model_path, gait_path)
+// all resolve against it, so the binaries behave the same from any working
+// directory. Paths given on the command line are left to the caller — they
+// stay relative to wherever the user ran the binary from.
+#ifndef MUSCLE_MPPI_ROOT
+#error "MUSCLE_MPPI_ROOT must be defined by the build (see controllers/CMakeLists.txt)"
+#endif
+
+// Repo-relative path -> absolute path. Absolute paths pass through unchanged,
+// so a YAML (e.g. analysis/optimize/objective.py's per-candidate temp copy)
+// can still point anywhere explicitly.
+inline std::string repo_path(const std::string& rel)
+{
+    if (rel.empty() || std::filesystem::path(rel).is_absolute()) return rel;
+    return (std::filesystem::path(MUSCLE_MPPI_ROOT) / rel).string();
+}
+
+// ============================================================================
+// Core types
+// ============================================================================
+
+// Variant-specific types (MuscleParams/NUM_MUSCLES, PDParams, each variant's
+// TaskConfig) stay in that variant's utils/.
 
 static constexpr int NUM_JOINTS = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 
@@ -59,7 +92,7 @@ struct MotionCommand {
 };
 
 // Task fields common to both variants, parsed by load_task_base()
-// (common/task_loader.h). Each variant's TaskConfig derives from this and adds
+// (below). Each variant's TaskConfig derives from this and adds
 // its own actuator parameters.
 struct TaskConfigBase {
     std::string  model_path;   // absolute; a relative YAML value is resolved against the repo root
@@ -102,3 +135,18 @@ struct TaskConfigBase {
     // PD: desired joint position in radians (BaseMPPIPD::sample_actions()).
     double noise_sigma_act[NUM_JOINTS]   = {};
 };
+
+// ============================================================================
+// YAML task loading (implemented in task_config.cpp)
+// ============================================================================
+
+// Read a length-n YAML sequence into dst; throws naming `field` if the node is
+// missing, not a sequence, or the wrong length.
+void load_doubles(const YAML::Node& node, double* dst, int n, const std::string& field);
+
+// Parse yaml_path and return its `task_name` entry; throws if the file can't
+// be parsed or the task isn't in it.
+YAML::Node load_task_node(const std::string& task_name, const std::string& yaml_path);
+
+// Fill the fields common to both variants (see TaskConfigBase) from a task node.
+void load_task_base(const YAML::Node& t, TaskConfigBase& cfg);

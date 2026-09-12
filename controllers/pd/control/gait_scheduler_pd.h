@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../utils/tasks_pd.h"
-#include "../../common/gait_table.h"
+#include "../../common/gait.h"
 
 // Cycles through a 2*NUM_JOINTS×N joint-space gait TSV (rows 0..NUM_JOINTS-1
 // = joint positions, rows NUM_JOINTS..2*NUM_JOINTS-1 = joint velocities —
@@ -11,7 +11,7 @@
 // for both position-space and velocity-space gait tracking (mirrors
 // RTWholeBodyMPPI's Q_diag[7:19] and Q_diag[25:37] terms).
 //
-// Loading, advancing and thread-safety rules come from GaitTable (common/gait_table.h).
+// Loading, advancing and thread-safety rules come from GaitTable (common/gait.h).
 class GaitSchedulerPD : public GaitTable {
 public:
     GaitSchedulerPD() : GaitTable("GaitSchedulerPD") {}

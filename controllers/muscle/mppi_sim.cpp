@@ -7,7 +7,7 @@
 //   ./mppi_sim [task] [yaml] [output.csv] [--save <name>]
 // Defaults read controllers/muscle/utils/tasks.yaml and write to
 // analysis/data/mppi_sim/mppi_sim.csv (created on first run if missing), both
-// resolved against the repo root (common/paths.h). An explicit [yaml] or
+// resolved against the repo root (common/task_config.h). An explicit [yaml] or
 // [output.csv] is relative to the current directory, as usual.
 //
 // --save copies this run's CSVs, once it finishes, into
@@ -32,7 +32,7 @@
 #include <vector>
 
 #include "control/mppi_locomotion.h"
-#include "../common/sim_harness.h"
+#include "../common/harness.h"
 #include "../common/trial_log.h"
 
 // ── main ──────────────────────────────────────────────────────────────────────

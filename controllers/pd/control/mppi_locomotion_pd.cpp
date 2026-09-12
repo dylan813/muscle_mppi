@@ -1,6 +1,5 @@
 #include "mppi_locomotion_pd.h"
-#include "../../common/mppi_math.h"
-#include "../../common/orientation.h"
+#include "../../common/control_utils.h"
 
 #include <cmath>
 #include <cstdio>
@@ -22,7 +21,7 @@
 // analysis/unit_tests/generate_pd_gaits.py) from the FAST/MED library in
 // controllers/pd/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
 // or, as an escape hatch, an explicit TSV path (TaskPhase::gait_path) — see
-// resolve_gait_key() in common/gait_table.h. Same 4-gait mapping as the muscle variant
+// resolve_gait_key() in common/gait.h. Same 4-gait mapping as the muscle variant
 // (muscle/control/mppi_locomotion.cpp's kNamedGaits). Paths are repo-relative
 // and resolved with repo_path() at load time.
 static const char* GAIT_INPLACE_PATH   = "controllers/pd/gaits/FAST/gait_FAST_0_0_10cm.tsv";
@@ -312,10 +311,10 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
     }
 
     // Goal-facing orientation target for this tick's cost, held fixed across
-    // the whole rollout batch below (see common/orientation.h).
+    // the whole rollout batch below (see common/control_utils.h).
     goal_facing_quat(cmd_.goal_pos, state.pos, dwelling_, goal_quat_);
 
-    // Warm-start: shift trajectory_ forward by 1 step (see common/mppi_math.h).
+    // Warm-start: shift trajectory_ forward by 1 step (see common/control_utils.h).
     const int stride = task_.horizon * NUM_JOINTS;
     shift_trajectory(trajectory_, task_.horizon, NUM_JOINTS);
 

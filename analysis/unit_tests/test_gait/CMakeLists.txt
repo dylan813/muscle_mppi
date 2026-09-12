@@ -7,7 +7,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fPIC")
 
 set(MUSCLE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../controllers/muscle")
 
-# Repo root for controllers/common/paths.h (pulled in via tasks.h) — same
+# Repo root for controllers/common/task_config.h (pulled in via tasks.h) — same
 # definition as controllers/CMakeLists.txt.
 get_filename_component(MUSCLE_MPPI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 add_compile_definitions(MUSCLE_MPPI_ROOT="${MUSCLE_MPPI_ROOT}")
@@ -27,7 +27,7 @@ set(CMAKE_EXE_LINKER_FLAGS
 add_executable(test_gait
     test_gait.cpp
     ${MUSCLE_ROOT}/utils/tasks.cpp
-    ${MUSCLE_ROOT}/../common/task_loader.cpp
+    ${MUSCLE_ROOT}/../common/task_config.cpp
 )
 target_link_libraries(test_gait
     unitree_sdk2

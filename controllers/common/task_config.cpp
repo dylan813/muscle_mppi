@@ -1,9 +1,10 @@
-#include "task_loader.h"
+#include "task_config.h"
+
+#include <yaml-cpp/yaml.h>
 
 #include <stdexcept>
 #include <utility>
 
-#include "paths.h"
 
 void load_doubles(const YAML::Node& node, double* dst, int n, const std::string& field)
 {

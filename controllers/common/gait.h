@@ -13,8 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "paths.h"
-#include "types.h"
+#include "task_config.h"
 
 // Thread-safety: reading the table (the derived get_phase()) is read-only and
 // safe to call from parallel MPPI rollouts. advance() must only be called from

@@ -16,7 +16,7 @@
 #include <unitree/common/thread/thread.hpp>
 
 #include "control/mppi_locomotion.h"
-#include "../common/standup.h"
+#include "../common/harness.h"
 
 using namespace unitree::common;
 using namespace unitree::robot;
@@ -199,7 +199,7 @@ private:
         }
     }
 
-    // Stand-up poses, timings and ramp come from common/standup.h.
+    // Stand-up poses, timings and ramp come from common/harness.h.
 
     // Damping gains applied after handover (one per joint: hip, thigh, calf × 4 legs).
     const double kd_[NUM_JOINTS] = {
@@ -209,7 +209,7 @@ private:
         2.0, 3.5, 3.5,   // RL
     };
 
-    // Stand-up ramp timer (poses in common/standup.h match stand_go2.cpp exactly).
+    // Stand-up ramp timer (poses in common/harness.h match stand_go2.cpp exactly).
     double running_time_ = 0.0;
 
     std::atomic<bool> mppi_ready_{false};

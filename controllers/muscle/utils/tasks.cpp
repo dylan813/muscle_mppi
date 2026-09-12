@@ -3,7 +3,7 @@
 #include <yaml-cpp/yaml.h>
 #include <string>
 
-#include "../../common/task_loader.h"
+#include "../../common/task_config.h"
 
 TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
 {
