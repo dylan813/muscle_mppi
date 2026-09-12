@@ -1,8 +1,8 @@
 #pragma once
 
-// Small stateless helpers the controllers (and sims) call every tick: the
-// Unitree PD law, frame rotation, the goal-facing orientation target, and the
-// MPPI warm-start / softmin update steps.
+// Small stateless helpers shared by the controllers (and sims): the Unitree PD
+// law, frame rotation, base-body lookup, the goal-facing orientation target,
+// and the MPPI warm-start / softmin update steps.
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +36,16 @@ inline void world_to_body(const double xmat[9], const double v_world[3], double 
     v_body[0] = v_world[0]*xmat[0] + v_world[1]*xmat[3] + v_world[2]*xmat[6];
     v_body[1] = v_world[0]*xmat[1] + v_world[1]*xmat[4] + v_world[2]*xmat[7];
     v_body[2] = v_world[0]*xmat[2] + v_world[1]*xmat[5] + v_world[2]*xmat[8];
+}
+
+// Base (trunk) body id, trying the names used across Unitree models; falls back to 1.
+inline int find_base_body(const mjModel* m)
+{
+    for (const char* name : {"trunk", "base", "base_link"}) {
+        int bid = mj_name2id(m, mjOBJ_BODY, name);
+        if (bid >= 0) return bid;
+    }
+    return 1;
 }
 
 // ============================================================================

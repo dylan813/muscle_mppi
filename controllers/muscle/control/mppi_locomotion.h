@@ -22,7 +22,8 @@ struct CostWeights {
     double gait_ref_weights[NUM_JOINTS] = {};  // per-joint activation tracking (replaces Q[7:19])
 };
 
-// Reference-free MPPI with direct per-muscle activation (co-contraction capable). this is wrong
+// MPPI locomotion with direct per-muscle activation (co-contraction capable),
+// tracking the active phase's activation-gait reference in step_cost().
 //
 // Search space: act[m] ∈ [0, 1] per muscle per horizon step (NUM_MUSCLES × horizon).
 // Layout: [agonist_j0, antagonist_j0, agonist_j1, ...] interleaved per joint.
@@ -41,7 +42,9 @@ public:
 
     // Call once per control tick, before update(). Advances through the task's
     // phases (see PhaseSequencer::advance() in common/gait.h).
-    void advance_phase(const RobotState& state) { phases_.advance(state); }
+    void advance_phase(const RobotState& state) {
+        if (phases_.advance(state)) apply_phase_noise();
+    }
 
     void set_command(const MotionCommand& cmd) { phases_.set_command(cmd); }
     const MotionCommand& command() const { return phases_.command(); }
@@ -63,11 +66,20 @@ private:
     // which writes into d->subtree_linvel/subtree_angmom.
     void base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const;
 
+    // Write the active phase's noise_sigma_act override (or the YAML baseline,
+    // if it has none) into task_.noise_sigma_act, which sample_noise() reads.
+    void apply_phase_noise();
+
     MuscleParams   muscle_;
     CostWeights    cost_;
 
-    // Phase sequence, gaits, current command and per-phase noise override.
+    // Phase sequence, gaits and current command.
     PhaseSequencer<GaitScheduler> phases_;
+
+    // task_.noise_sigma_act as loaded from YAML, snapshotted before any phase
+    // override, so "no override" always restores the true baseline rather than
+    // whatever a previous phase left behind.
+    double base_noise_sigma_act_[NUM_JOINTS] = {};
 
     // Per-tick goal-facing orientation target used by step_cost(): identity
     // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built

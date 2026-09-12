@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <chrono>
 #include <omp.h>
-#include <stdexcept>
-#include <unordered_map>
 #include <yaml-cpp/yaml.h>
 
 // ============================================================================
@@ -36,6 +34,12 @@ static const NamedGaitPaths kNamedGaits = {
     {"trot",      GAIT_TROT_PATH},
 };
 
+// Cost-shaping PD gains for the control-effort term (RTWholeBodyMPPI's
+// hardcoded kp = 50, kd = 3 — see step_cost() for why these differ from the
+// actuator's own gains). Shared by step_cost() and the [cost] log in update().
+static constexpr double kCostKp = 50.0;
+static constexpr double kCostKd = 3.0;
+
 // ============================================================================
 // Constructor
 // ============================================================================
@@ -45,11 +49,7 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
 {
     pd_ = task_.pd;
 
-    // Find base body.
-    for (const char* name : {"trunk", "base", "base_link"}) {
-        int bid = mj_name2id(model_, mjOBJ_BODY, name);
-        if (bid >= 0) { base_bid_ = bid; break; }
-    }
+    base_bid_ = find_base_body(model_);
 
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
@@ -79,8 +79,11 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
         }
     }
 
-    // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()).
-    phases_.init(task_.phases, kNamedGaits, task_.noise_sigma_act, /*default_goal_z=*/0.0);
+    // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()),
+    // then apply phase 0's noise override against the YAML baseline.
+    std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
+    phases_.init(task_.phases, kNamedGaits, /*default_goal_z=*/0.0);
+    apply_phase_noise();
 
     // Seed trajectory_ and real_q_des_ with the task's nominal pose — sensible
     // cold-start for a joint-position action space (unlike the muscle variant,
@@ -90,6 +93,17 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
         for (int j = 0; j < NUM_JOINTS; ++j)
             trajectory_[t * NUM_JOINTS + j] = task_.nominal_pose[j];
     std::memcpy(real_q_des_, task_.nominal_pose, sizeof(real_q_des_));
+}
+
+void MPPILocomotionPD::apply_phase_noise()
+{
+    // Per-phase noise_sigma_act override, falling back to the task-level
+    // baseline.
+    const TaskPhase* p = phases_.current_phase();
+    if (p && p->has_noise_sigma_act)
+        std::memcpy(task_.noise_sigma_act, p->noise_sigma_act, sizeof(task_.noise_sigma_act));
+    else
+        std::memcpy(task_.noise_sigma_act, base_noise_sigma_act_, sizeof(task_.noise_sigma_act));
 }
 
 // ============================================================================
@@ -208,9 +222,8 @@ double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS
     // gain pair and we mirror it rather than "correcting" it; (2) x_joint /
     // v_joint are the POST-step joint state (Python scores the rollout state
     // recorded after the control was applied), which is what d holds here
-    // since step_cost() runs after mj_step().
-    static constexpr double kCostKp = 50.0;
-    static constexpr double kCostKd = 3.0;
+    // since step_cost() runs after mj_step(). kCostKp/kCostKd are defined at
+    // the top of this file so the [cost] log in update() uses the same pair.
     for (int j = 0; j < NUM_JOINTS; ++j) {
         if (w.control_effort_weights[j] == 0.0) continue;
         const double u_error = kCostKp * (q_des[j] - d->qpos[act_qpos_adr_[j]])
@@ -274,7 +287,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
         }
     trajectory_ = std::move(new_traj);
 
-    // Cost breakdown logging — runs once per second (every 50 updates at 50 Hz).
+    // Cost breakdown logging — every 50 updates (0.5 s of sim time at dt = 0.01).
     static constexpr int LOG_INTERVAL = 50;
     if (++log_counter_ % LOG_INTERVAL == 0) {
         mjData* dl = data_[task_.n_samples];
@@ -338,9 +351,9 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 if (cost_.control_effort_weights[j] == 0.0) continue;
                 // Same cost-shaping gains + post-step state as step_cost().
-                const double u_error = 50.0 * (trajectory_[t * NUM_JOINTS + j]
-                                               - dl->qpos[act_qpos_adr_[j]])
-                                     - 3.0 * dl->qvel[act_qvel_adr_[j]];
+                const double u_error = kCostKp * (trajectory_[t * NUM_JOINTS + j]
+                                                  - dl->qpos[act_qpos_adr_[j]])
+                                     - kCostKd * dl->qvel[act_qvel_adr_[j]];
                 c_effort += cost_.control_effort_weights[j] * u_error * u_error;
             }
         }

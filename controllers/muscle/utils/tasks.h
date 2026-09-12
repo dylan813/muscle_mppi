@@ -34,8 +34,6 @@ struct TaskConfig : TaskConfigBase {
     double posture_bias[NUM_JOINTS] = {};
     double posture_FL1[NUM_JOINTS]  = {};
     double posture_FL2[NUM_JOINTS]  = {};
-
-    // Co-contraction sampling parameters (per joint type: hip=0, thigh=1, calf=2).
 };
 
 TaskConfig load_task(const std::string& task_name,

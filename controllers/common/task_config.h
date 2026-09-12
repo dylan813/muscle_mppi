@@ -53,10 +53,10 @@ struct RobotState {
 };
 
 // One waypoint in a task's phase sequence, matching RTWholeBodyMPPI's per-phase
-// goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays. Each variant's
-// locomotion controller (MPPILocomotion / MPPILocomotionPD) advances
-// phase_index_ once the robot has stayed within goal_thresh of the current
-// phase's goal_pos for waiting_time consecutive in-threshold ticks.
+// goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays. PhaseSequencer
+// (common/gait.h) moves on to the next phase once the robot has been within
+// goal_thresh of the current phase's goal_pos for waiting_time + 1 ticks
+// (cumulative — ticks spent back outside goal_thresh don't reset the count).
 struct TaskPhase {
     double goal_pos[3]  = {};
     double cmd_vel[2]   = {};  // [vx, vy] body-frame velocity command
@@ -73,7 +73,7 @@ struct TaskPhase {
     std::string gait_path;
 
     double goal_thresh  = 0.2;
-    int    waiting_time = 0;   // dwell ticks required within goal_thresh
+    int    waiting_time = 0;   // extra dwell ticks within goal_thresh before advancing
 
     // Optional per-phase override of TaskConfig::noise_sigma_act, applied while
     // this phase is active and reverted to the task-level baseline on the next
@@ -124,8 +124,9 @@ struct TaskConfigBase {
 
     // Noise sampling. "normal": iid Gaussian per timestep (default).
     // "cubic": draw n_knots iid Gaussians spread evenly across the horizon and
-    // natural-cubic-spline interpolate between them, matching RTWholeBodyMPPI's
-    // spline-parameterized sampling (smoother, lower-dimensional search).
+    // interpolate between them with a not-a-knot cubic spline (natural when
+    // n_knots is 3), matching RTWholeBodyMPPI's spline-parameterized sampling
+    // (scipy CubicSpline's default) — smoother, lower-dimensional search.
     std::string  sample_type  = "normal";
     int          n_knots      = 4;
 

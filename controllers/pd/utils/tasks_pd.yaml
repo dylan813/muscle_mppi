@@ -34,9 +34,9 @@ default_control_effort_weights: &default_control_effort_weights
 #
 # `phases:` is an ordered waypoint sequence (mirrors RTWholeBodyMPPI's per-phase
 # goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays). MPPILocomotionPD
-# advances to the next phase once the robot has stayed within goal_thresh of the
-# current phase's goal_pos for waiting_time consecutive in-threshold ticks (not
-# reset if it drifts back out in between — cumulative, matching RTWholeBodyMPPI).
+# advances to the next phase once the robot has been within goal_thresh of the
+# current phase's goal_pos for waiting_time + 1 in-threshold ticks (not reset if
+# it drifts back out in between — cumulative, matching RTWholeBodyMPPI).
 # desired_gait is one of: in_place, walk, walk_fast, trot (see mppi_locomotion_pd.cpp
 # GAIT_*_PATH constants) — or set gait_path directly to an explicit TSV, which
 # overrides desired_gait.

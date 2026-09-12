@@ -44,7 +44,9 @@ public:
 
     // Call once per control tick, before update(). Advances through the task's
     // phases (see PhaseSequencer::advance() in common/gait.h).
-    void advance_phase(const RobotState& state) { phases_.advance(state); }
+    void advance_phase(const RobotState& state) {
+        if (phases_.advance(state)) apply_phase_noise();
+    }
 
     void set_command(const MotionCommand& cmd) { phases_.set_command(cmd); }
     const MotionCommand& command() const { return phases_.command(); }
@@ -73,11 +75,20 @@ private:
     // definition in mppi_locomotion_pd.cpp.
     void base_state(mjData* d, double pos[3], double vel_body[3]) const;
 
+    // Write the active phase's noise_sigma_act override (or the YAML baseline,
+    // if it has none) into task_.noise_sigma_act, which sample_actions() reads.
+    void apply_phase_noise();
+
     PDParams       pd_;
     CostWeights    cost_;
 
-    // Phase sequence, gaits, current command and per-phase noise override.
+    // Phase sequence, gaits and current command.
     PhaseSequencer<GaitSchedulerPD> phases_;
+
+    // task_.noise_sigma_act as loaded from YAML, snapshotted before any phase
+    // override, so "no override" always restores the true baseline rather than
+    // whatever a previous phase left behind.
+    double base_noise_sigma_act_[NUM_JOINTS] = {};
 
     // Per-tick goal-facing orientation target used by step_cost(): identity
     // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built

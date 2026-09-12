@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <chrono>
 #include <omp.h>
-#include <stdexcept>
-#include <unordered_map>
 #include <yaml-cpp/yaml.h>
 
 // ============================================================================
@@ -46,11 +44,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     // sizes (horizon × NUM_MUSCLES). Activations are clamped to [0, 1] directly
     // in rollout() and update().
 
-    // Find base body.
-    for (const char* name : {"trunk", "base", "base_link"}) {
-        int bid = mj_name2id(model_, mjOBJ_BODY, name);
-        if (bid >= 0) { base_bid_ = bid; break; }
-    }
+    base_bid_ = find_base_body(model_);
 
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
@@ -71,10 +65,14 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         gait_stiffness_ = c["gait_stiffness"] ? c["gait_stiffness"].as<double>() : 0.75;
     }
 
-    // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()).
-    phases_.init(task_.phases, kNamedGaits, task_.noise_sigma_act, task_.height_target);
+    // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()),
+    // then apply phase 0's noise override against the YAML baseline.
+    std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
+    phases_.init(task_.phases, kNamedGaits, task_.height_target);
+    apply_phase_noise();
 
-    // Seed trajectory_, real_act_, predicted_activation_ with the constraint-line
+    // Seed trajectory_ and real_act_ with the posture constraint-line midpoint
+    // (the co-contraction solution holding the nominal pose against gravity).
     // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
     {
         bool has_posture = false;
@@ -100,6 +98,18 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
             std::memcpy(real_act_, nominal, NUM_MUSCLES * sizeof(double));
         }
     }
+}
+
+void MPPILocomotion::apply_phase_noise()
+{
+    // Per-phase noise_sigma_act override, falling back to the task-level
+    // baseline — mirrors RTWholeBodyMPPI's next_goal(), which doubles thigh/
+    // calf exploration noise specifically during trot phases.
+    const TaskPhase* p = phases_.current_phase();
+    if (p && p->has_noise_sigma_act)
+        std::memcpy(task_.noise_sigma_act, p->noise_sigma_act, sizeof(task_.noise_sigma_act));
+    else
+        std::memcpy(task_.noise_sigma_act, base_noise_sigma_act_, sizeof(task_.noise_sigma_act));
 }
 
 // ============================================================================
@@ -262,7 +272,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
     trajectory_ = std::move(new_traj);
 
-    // Cost breakdown logging — runs once per second (every 50 updates at 50 Hz).
+    // Cost breakdown logging — every 50 updates (0.5 s of sim time at dt = 0.01).
     static constexpr int LOG_INTERVAL = 50;
     if (++log_counter_ % LOG_INTERVAL == 0) {
         mjData* dl = data_[task_.n_samples];

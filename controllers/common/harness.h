@@ -71,20 +71,10 @@ inline void standup_targets(double t, double& kp, double q_des[NUM_JOINTS])
 
 // MuJoCo "real world" harness pieces shared by the standalone sims
 // (muscle/mppi_sim.cpp, pd/pd_mppi_sim.cpp): model setup, spawn placement,
-// stand-up, state readout and CSV logging.
+// running the stand-up, state readout and CSV logging.
 
 // The sims stop once the trunk drops below this height (m).
 static constexpr double kFallHeight = 0.1;
-
-// Base (trunk) body id, trying the names used across Unitree models; falls back to 1.
-inline int find_base_body(const mjModel* m)
-{
-    for (const char* name : {"trunk", "base", "base_link"}) {
-        int bid = mj_name2id(m, mjOBJ_BODY, name);
-        if (bid >= 0) return bid;
-    }
-    return 1;
-}
 
 // qpos/qvel addresses of the joint driven by each of the first NUM_JOINTS actuators.
 inline void joint_addresses(const mjModel* m, int qa[NUM_JOINTS], int qv[NUM_JOINTS])
