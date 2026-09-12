@@ -31,6 +31,7 @@ add_executable(muscle_mppi_controller
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
     muscle/utils/tasks.cpp
+    common/task_loader.cpp
 )
 target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
 
@@ -40,6 +41,7 @@ add_executable(mppi_sim
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
     muscle/utils/tasks.cpp
+    common/task_loader.cpp
 )
 target_link_libraries(mppi_sim ${COMMON_LIBS})
 
@@ -50,5 +52,6 @@ add_executable(pd_mppi_sim
     pd/control/base_mppi_pd.cpp
     pd/control/mppi_locomotion_pd.cpp
     pd/utils/tasks_pd.cpp
+    common/task_loader.cpp
 )
 target_link_libraries(pd_mppi_sim ${COMMON_LIBS})

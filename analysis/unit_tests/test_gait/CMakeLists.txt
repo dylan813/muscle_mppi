@@ -27,6 +27,7 @@ set(CMAKE_EXE_LINKER_FLAGS
 add_executable(test_gait
     test_gait.cpp
     ${MUSCLE_ROOT}/utils/tasks.cpp
+    ${MUSCLE_ROOT}/../common/task_loader.cpp
 )
 target_link_libraries(test_gait
     unitree_sdk2

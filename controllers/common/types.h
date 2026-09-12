@@ -5,6 +5,7 @@
 // PDParams, each variant's TaskConfig) stay in that variant's utils/.
 
 #include <string>
+#include <vector>
 
 static constexpr int NUM_JOINTS = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 
@@ -55,4 +56,49 @@ struct MotionCommand {
     double vx          = 0.0;
     double vy          = 0.0;
     double goal_pos[3] = {};  // world-frame position target [x, y, z]
+};
+
+// Task fields common to both variants, parsed by load_task_base()
+// (common/task_loader.h). Each variant's TaskConfig derives from this and adds
+// its own actuator parameters.
+struct TaskConfigBase {
+    std::string  model_path;   // absolute; a relative YAML value is resolved against the repo root
+
+    // Ordered waypoint sequence for locomotion tasks.
+    std::vector<TaskPhase> phases;
+
+    double       nominal_pose[NUM_JOINTS] = {};
+    int          n_samples    = 16;
+    int          horizon      = 25;
+    double       lambda       = 0.1;
+    double       dt           = 0.002;
+
+    // Seconds of MPPI control mppi_sim records after stand-up, before it stops
+    // and writes the CSV/qpos log. Bump this for tasks whose phases need more
+    // time to complete (e.g. a longer walk distance) than the 10s default covers.
+    double       sim_duration = 10.0;
+
+    // World-frame z of the ground under the robot's spawn point. mppi_sim's
+    // stand-up placement assumes flat ground at z=0 and drops the robot so its
+    // lowest foot lands there; set this to the actual terrain/platform height
+    // at spawn (e.g. an elevated starting platform) so the robot lands on top
+    // of it instead of spawning with its feet embedded in it.
+    double       spawn_height_offset = 0.0;
+
+    // OpenMP thread count for the parallel rollout loop. 0 (default) leaves the
+    // OpenMP runtime default in place (typically all available cores).
+    int          num_threads  = 0;
+
+    // Noise sampling. "normal": iid Gaussian per timestep (default).
+    // "cubic": draw n_knots iid Gaussians spread evenly across the horizon and
+    // natural-cubic-spline interpolate between them, matching RTWholeBodyMPPI's
+    // spline-parameterized sampling (smoother, lower-dimensional search).
+    std::string  sample_type  = "normal";
+    int          n_knots      = 4;
+
+    // Per-joint exploration noise sigma, in the variant's action units.
+    // Muscle: activation — both muscles of each antagonistic pair receive the
+    // same draw, scaled by this value (BaseMPPI::sample_noise()).
+    // PD: desired joint position in radians (BaseMPPIPD::sample_actions()).
+    double noise_sigma_act[NUM_JOINTS]   = {};
 };
