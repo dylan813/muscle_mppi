@@ -16,6 +16,7 @@
 #include <unitree/common/thread/thread.hpp>
 
 #include "control/mppi_locomotion.h"
+#include "../common/standup.h"
 
 using namespace unitree::common;
 using namespace unitree::robot;
@@ -118,16 +119,15 @@ private:
         if (!mppi_ready_.load()) {
             // Smooth stand-up: tanh ramp over 3 s, mirrors stand_go2.cpp exactly.
             running_time_ += 0.02;
-            if (running_time_ >= STANDUP_SECS + HOLD_SECS)
+            if (running_time_ >= kStandupSecs + kHoldSecs)
                 standup_done_.store(true, std::memory_order_relaxed);
-            const double phase = std::tanh(running_time_ / 1.2);
-            const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
+            double kp, q_des[NUM_JOINTS];
+            standup_targets(running_time_, kp, q_des);
             for (int i = 0; i < NUM_JOINTS; ++i) {
-                const double q_des = phase * stand_pos_[i] + (1.0 - phase) * stand_down_pos_[i];
-                low_cmd_.motor_cmd()[i].q()   = q_des;
+                low_cmd_.motor_cmd()[i].q()   = q_des[i];
                 low_cmd_.motor_cmd()[i].kp()  = kp;
                 low_cmd_.motor_cmd()[i].dq()  = 0.0;
-                low_cmd_.motor_cmd()[i].kd()  = 3.5;
+                low_cmd_.motor_cmd()[i].kd()  = kStandupKd;
                 low_cmd_.motor_cmd()[i].tau() = 0.0;
             }
         } else {
@@ -185,11 +185,11 @@ private:
             if (solve_count % 20 == 0)
                 std::cout << "Muscle MPPI avg solve: " << solve_sum_ms / solve_count << " ms\n";
 
-            // Wait for CONVERGENCE_SOLVES iterations AND the stand-up ramp to finish
+            // Wait for kConvergenceSolves iterations AND the stand-up ramp to finish
             // before handing over — otherwise handover can fire mid-crouch since this
             // thread starts solving (and counting) as soon as state is valid, well
             // before ControlLoop's tanh ramp has actually settled the robot.
-            if (!mppi_ready_.load() && solve_count >= CONVERGENCE_SOLVES &&
+            if (!mppi_ready_.load() && solve_count >= kConvergenceSolves &&
                 standup_done_.load(std::memory_order_relaxed)) {
                 std::cout << "MPPI converged after " << solve_count
                           << " solves (avg " << solve_sum_ms / solve_count
@@ -199,9 +199,7 @@ private:
         }
     }
 
-    static constexpr int    CONVERGENCE_SOLVES = 10;
-    static constexpr double STANDUP_SECS       = 3.0;
-    static constexpr double HOLD_SECS          = 1.0;
+    // Stand-up poses, timings and ramp come from common/standup.h.
 
     // Damping gains applied after handover (one per joint: hip, thigh, calf × 4 legs).
     const double kd_[NUM_JOINTS] = {
@@ -211,19 +209,7 @@ private:
         2.0, 3.5, 3.5,   // RL
     };
 
-    // Stand-up poses and ramp timer — matches stand_go2.cpp exactly.
-    const double stand_down_pos_[NUM_JOINTS] = {
-         0.0473455,  1.22187, -2.44375,
-        -0.0473455,  1.22187, -2.44375,
-         0.0473455,  1.22187, -2.44375,
-        -0.0473455,  1.22187, -2.44375,
-    };
-    const double stand_pos_[NUM_JOINTS] = {
-        0.0, 0.67, -1.3,   // FR
-        0.0, 0.67, -1.3,   // FL
-        0.0, 0.67, -1.3,   // RR
-        0.0, 0.67, -1.3,   // RL
-    };
+    // Stand-up ramp timer (poses in common/standup.h match stand_go2.cpp exactly).
     double running_time_ = 0.0;
 
     std::atomic<bool> mppi_ready_{false};

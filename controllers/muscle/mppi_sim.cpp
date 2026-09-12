@@ -25,53 +25,15 @@
 
 #include <mujoco/mujoco.h>
 
-#include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <vector>
 
 #include "control/mppi_locomotion.h"
-#include "../common/control_utils.h"
+#include "../common/sim_harness.h"
 #include "../common/trial_log.h"
-
-// ── stand-up parameters (mirror mppi_controller.cpp) ─────────────────────────
-static const double STAND_DOWN[NUM_JOINTS] = {
-     0.0473455,  1.22187, -2.44375,
-    -0.0473455,  1.22187, -2.44375,
-     0.0473455,  1.22187, -2.44375,
-    -0.0473455,  1.22187, -2.44375,
-};
-static const double STAND_UP[NUM_JOINTS] = {
-    0.0, 0.67, -1.3,   0.0, 0.67, -1.3,
-    0.0, 0.67, -1.3,   0.0, 0.67, -1.3,
-};
-static constexpr double STANDUP_SECS = 3.0;
-static constexpr double HOLD_SECS    = 1.0;   // hold pose before handing to MPPI
-static constexpr int    CONVERGENCE_SOLVES = 10;
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-static RobotState read_state(const mjModel* m, const mjData* d,
-                             const int qa[NUM_JOINTS], const int qv[NUM_JOINTS])
-{
-    RobotState s;
-    s.pos[0]  = d->qpos[0]; s.pos[1]  = d->qpos[1]; s.pos[2]  = d->qpos[2];
-    s.quat[0] = d->qpos[3]; s.quat[1] = d->qpos[4];
-    s.quat[2] = d->qpos[5]; s.quat[3] = d->qpos[6];
-    s.vel[0]  = d->qvel[0]; s.vel[1]  = d->qvel[1]; s.vel[2]  = d->qvel[2];
-    s.gyro[0] = d->qvel[3]; s.gyro[1] = d->qvel[4]; s.gyro[2] = d->qvel[5];
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        s.q[j]  = d->qpos[qa[j]];
-        s.dq[j] = d->qvel[qv[j]];
-    }
-    s.valid = true;
-    return s;
-}
 
 // ── main ──────────────────────────────────────────────────────────────────────
 int main(int argc, char** argv)
@@ -95,7 +57,7 @@ int main(int argc, char** argv)
     MPPILocomotion mppi(task_name, yaml_path);
 
     // ── load a separate sim model/data ───────────────────────────────────────
-    const TaskConfig& task = mppi.task_ref();   // public accessor we'll add
+    const TaskConfig& task = mppi.task_ref();
     char err[1000];
     mjModel* m = mj_loadXML(task.model_path.c_str(), nullptr, err, sizeof(err));
     if (!m) { fprintf(stderr, "mj_loadXML: %s\n", err); return 1; }
@@ -104,71 +66,34 @@ int main(int argc, char** argv)
 
     // Resolve the base body (mirrors MPPILocomotion::base_bid_ resolution)
     // so logged position matches the whole-robot CoM the cost function scores.
-    int base_bid = 1;
-    for (const char* name : {"trunk", "base", "base_link"}) {
-        int bid = mj_name2id(m, mjOBJ_BODY, name);
-        if (bid >= 0) { base_bid = bid; break; }
-    }
+    const int base_bid = find_base_body(m);
 
     // set joint damping to match MPPI's internal model
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        int jid = m->actuator_trnid[2 * j];
-        qa[j]   = m->jnt_qposadr[jid];
-        qv[j]   = m->jnt_dofadr[jid];
-        m->dof_damping[qv[j]] = task.muscle.kd_sim[j];
-    }
+    joint_addresses(m, qa, qv);
+    for (int j = 0; j < NUM_JOINTS; ++j) m->dof_damping[qv[j]] = task.muscle.kd_sim[j];
 
     // place robot feet on ground
-    mj_resetData(m, d);
-    d->qpos[2] = 0.5; d->qpos[3] = 1.0;
-    for (int j = 0; j < NUM_JOINTS; ++j) d->qpos[qa[j]] = STAND_DOWN[j];
-    mj_forward(m, d);
-    int fl = mj_name2id(m, mjOBJ_BODY, "FL_foot");
-    int fr = mj_name2id(m, mjOBJ_BODY, "FR_foot");
-    int rl = mj_name2id(m, mjOBJ_BODY, "RL_foot");
-    int rr = mj_name2id(m, mjOBJ_BODY, "RR_foot");
-    double min_z = 1e9;
-    for (int b : {fl, fr, rl, rr}) if (b >= 0) min_z = std::min(min_z, d->xpos[3*b+2]);
-    d->qpos[2] += task.spawn_height_offset - min_z;
-    mj_forward(m, d);
+    place_on_ground(m, d, qa, task.spawn_height_offset);
 
     // ── output files ─────────────────────────────────────────────────────────
-    // The output directory only holds gitignored CSVs, so a fresh checkout may
-    // not have it — create it rather than let ofstream fail silently.
-    const std::filesystem::path csv_dir = std::filesystem::path(csv_path).parent_path();
-    if (!csv_dir.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(csv_dir, ec);
-    }
-    std::ofstream csv(csv_path);
-    if (!csv) { fprintf(stderr, "Cannot open %s for writing\n", csv_path.c_str()); return 1; }
-    csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg";
-    for (int j = 0; j < NUM_JOINTS; ++j) csv << ",dq_j" << j;
+    std::ofstream csv;
+    if (!open_output(csv_path, csv)) return 1;
+    write_csv_header_base(csv);
     for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;
     csv << "\n";
 
-    const std::string qpos_path = csv_path.substr(0, csv_path.rfind('.')) + "_qpos.csv";
+    const std::string qpos_path = qpos_path_for(csv_path);
     std::ofstream qpos_log(qpos_path);
 
     // ── stand-up phase (PD, mirrors mppi_controller.cpp) ─────────────────────
-    printf("Standing up (%.1f s)...\n", STANDUP_SECS + HOLD_SECS);
-    const double total_standup = STANDUP_SECS + HOLD_SECS;
-    for (double t = 0.0; t < total_standup; t += task.dt) {
-        const double phase = std::tanh(t / 1.2);
-        const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            const double q_des = phase * STAND_UP[j] + (1.0 - phase) * STAND_DOWN[j];
-            d->ctrl[j] = unitree_pd_torque(
-                kp, /*kd=*/3.5, q_des, d->qpos[qa[j]], /*dq_des=*/0.0, d->qvel[qv[j]], /*tau_ff=*/0.0);
-        }
-        mj_step(m, d);
-    }
+    printf("Standing up (%.1f s)...\n", kStandupSecs + kHoldSecs);
+    run_standup(m, d, qa, qv, task.dt);
     printf("Stand-up complete. Body height: %.3f m\n", d->qpos[2]);
 
     // ── MPPI loop ─────────────────────────────────────────────────────────────
     printf("Running MPPI for %d convergence solves then logging...\n",
-           CONVERGENCE_SOLVES);
+           kConvergenceSolves);
 
     const double sim_duration = task.sim_duration;   // seconds of MPPI control to record
     double sim_t = 0.0;
@@ -178,7 +103,7 @@ int main(int argc, char** argv)
 
     while (sim_t < sim_duration) {
         // --- MPPI solve ---
-        RobotState state = read_state(m, d, qa, qv);
+        RobotState state = read_state(d, qa, qv);
 
         auto t0 = std::chrono::steady_clock::now();
         double tau[NUM_JOINTS] = {};
@@ -190,7 +115,7 @@ int main(int argc, char** argv)
         solve_sum_ms += ms;
         ++solve_count;
 
-        if (!converged && solve_count >= CONVERGENCE_SOLVES) {
+        if (!converged && solve_count >= kConvergenceSolves) {
             printf("Converged (avg solve %.1f ms). Starting trajectory logging.\n",
                    solve_sum_ms / solve_count);
             converged = true;
@@ -204,34 +129,17 @@ int main(int argc, char** argv)
 
         // --- log ---
         if (converged) {
-            const double qw  = d->qpos[3];
-            const double roll = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0))
-                                * 180.0 / M_PI;
-
-            // Rotate world-frame free-joint velocity into body frame (xmat
-            // is the body->world rotation, so its transpose maps world->body).
-            double xmat[9], v_body[3];
-            mju_quat2Mat(xmat, d->qpos + 3);
-            world_to_body(xmat, d->qvel, v_body);
-
-            const double* com = d->subtree_com + base_bid * 3;
-
-            csv << sim_t << ","
-                << com[0] << "," << com[1] << "," << com[2] << ","
-                << v_body[0] << "," << v_body[1] << "," << v_body[2] << ","
-                << qw << "," << roll;
-            for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
+            write_csv_row_base(csv, sim_t, d->subtree_com + base_bid * 3, d, qv);
             const double* act = mppi.activation();
             for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
             csv << "\n";
 
             // save full qpos for GIF rendering
-            for (int i = 0; i < m->nq; ++i)
-                qpos_log << d->qpos[i] << (i < m->nq - 1 ? "," : "\n");
+            write_qpos_row(qpos_log, m, d);
         }
 
         // --- safety: stop if robot falls ---
-        if (d->qpos[2] < 0.1) {
+        if (has_fallen(d)) {
             printf("Robot fell at t=%.2f s — stopping.\n", sim_t);
             break;
         }
