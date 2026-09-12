@@ -4,7 +4,6 @@
 #include <vector>
 #include <random>
 #include <string>
-#include <algorithm>
 #include "../utils/tasks.h"
 
 class BaseMPPI {
@@ -12,31 +11,12 @@ public:
     explicit BaseMPPI(const TaskConfig& task);
     virtual ~BaseMPPI();
 
-    void   set_height_target(double z) { height_target_ = z; }
-    double height_target()       const { return height_target_; }
-
-
-
-    double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
-    double cost_mean() const {
-        double s = 0.0;
-        for (auto c : costs_) s += c;
-        return s / static_cast<double>(costs_.size());
-    }
-
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
     void sample_noise();
     void sample_noise_cubic();
     void set_mj_state(mjData* d, const RobotState& state);
-
-    // Shift trajectory_ forward by n_skip steps, holding the tail constant.
-    void warm_start(int n_skip);
-
-    // Single MPPI pass: sample → parallel rollouts → softmin weighted-average update.
-    // Subclasses set action_lo_/action_hi_ in their constructor to define per-action clamping.
-    void run_mppi_step(const RobotState& state);
 
     TaskConfig task_;
 
@@ -51,16 +31,10 @@ protected:
     // task_.sample_type == "cubic". Built once in the constructor.
     std::vector<double> knot_x_;
 
-    // Per-muscle clamp bounds used by run_mppi_step(). Set by subclass constructors.
-    double action_lo_[NUM_MUSCLES] = {};
-    double action_hi_[NUM_MUSCLES] = {};
-
     // Actuator → MuJoCo DOF addresses (built from the model — no hardcoded mapping)
     int  act_qpos_adr_[NUM_JOINTS] = {};
     int  act_qvel_adr_[NUM_JOINTS] = {};
     bool has_freejoint_ = false;
-
-    double height_target_;
 
     std::mt19937 rng_;
     std::normal_distribution<double> normal_{0.0, 1.0};

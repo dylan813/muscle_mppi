@@ -130,8 +130,8 @@ struct TaskConfigBase {
     int          n_knots      = 4;
 
     // Per-joint exploration noise sigma, in the variant's action units.
-    // Muscle: activation — both muscles of each antagonistic pair receive the
-    // same draw, scaled by this value (BaseMPPI::sample_noise()).
+    // Muscle: activation — both muscles of each antagonistic pair use this
+    // joint's sigma, each with its own independent draw (BaseMPPI::sample_noise()).
     // PD: desired joint position in radians (BaseMPPIPD::sample_actions()).
     double noise_sigma_act[NUM_JOINTS]   = {};
 };

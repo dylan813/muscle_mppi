@@ -245,65 +245,6 @@ void BaseMPPIPD::sample_actions_cubic() {
     }
 }
 
-void BaseMPPIPD::warm_start(int n_skip)
-{
-    const int H = task_.horizon;
-    std::vector<double> shifted(H * NUM_JOINTS);
-    for (int t = 0; t < H - n_skip; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            shifted[t * NUM_JOINTS + j] = trajectory_[(t + n_skip) * NUM_JOINTS + j];
-    for (int t = H - n_skip; t < H; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            shifted[t * NUM_JOINTS + j] = trajectory_[(H - 1) * NUM_JOINTS + j];
-    trajectory_ = std::move(shifted);
-}
-
-void BaseMPPIPD::run_mppi_step(const RobotState& state)
-{
-    sample_actions();
-
-    #pragma omp parallel for schedule(dynamic)
-    for (int s = 0; s < task_.n_samples; ++s)
-        costs_[s] = rollout(s, state);
-
-    // Softmin weights over min-max normalised costs.
-    // Exclude fall-penalty outliers (≥1e5) from cmax so one falling sample
-    // doesn't collapse all non-falling weights to near-uniform.
-    static constexpr double kFallThreshold = 1e5;
-    double cmin = *std::min_element(costs_.begin(), costs_.end());
-    double cmax = cmin;
-    for (int s = 0; s < task_.n_samples; ++s)
-        if (costs_[s] < kFallThreshold)
-            cmax = std::max(cmax, costs_[s]);
-    double crange = cmax - cmin;
-
-    std::vector<double> weights(task_.n_samples);
-    double wsum = 0.0;
-    for (int s = 0; s < task_.n_samples; ++s) {
-        double s_hat = (crange > 1e-12)
-            ? std::min((costs_[s] - cmin) / crange, 1.0) : 0.0;
-        weights[s]   = std::exp(-s_hat / task_.lambda);
-        wsum        += weights[s];
-    }
-
-    std::vector<double> new_traj(task_.horizon * NUM_JOINTS, 0.0);
-    for (int s = 0; s < task_.n_samples; ++s) {
-        double w = weights[s] / wsum;
-        for (int t = 0; t < task_.horizon; ++t)
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                int idx = t * NUM_JOINTS + j;
-                new_traj[idx] += w * actions_[s * task_.horizon * NUM_JOINTS + idx];
-            }
-    }
-    for (int t = 0; t < task_.horizon; ++t)
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            int idx = t * NUM_JOINTS + j;
-            new_traj[idx] = std::clamp(new_traj[idx], action_lo_[j], action_hi_[j]);
-        }
-
-    trajectory_ = std::move(new_traj);
-}
-
 void BaseMPPIPD::set_mj_state(mjData* d, const RobotState& state) {
     mj_resetData(model_, d);
 

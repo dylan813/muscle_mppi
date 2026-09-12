@@ -42,12 +42,9 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 {
     muscle_ = task_.muscle;
 
-    // BaseMPPI already initializes trajectory_, noise_, costs_
-    // to the correct sizes (horizon × NUM_MUSCLES). Only action bounds need setting here.
-    for (int m = 0; m < NUM_MUSCLES; ++m) {
-        action_lo_[m] = 0.0;
-        action_hi_[m] = 1.0;
-    }
+    // BaseMPPI already initializes trajectory_, noise_, costs_ to the correct
+    // sizes (horizon × NUM_MUSCLES). Activations are clamped to [0, 1] directly
+    // in rollout() and update().
 
     // Find base body.
     for (const char* name : {"trunk", "base", "base_link"}) {

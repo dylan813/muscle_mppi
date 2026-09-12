@@ -16,13 +16,6 @@ public:
     explicit BaseMPPIPD(const TaskConfig& task);
     virtual ~BaseMPPIPD();
 
-    double cost_min()  const { return *std::min_element(costs_.begin(), costs_.end()); }
-    double cost_mean() const {
-        double s = 0.0;
-        for (auto c : costs_) s += c;
-        return s / static_cast<double>(costs_.size());
-    }
-
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
@@ -35,13 +28,6 @@ protected:
     void sample_actions();
     void sample_actions_cubic();
     void set_mj_state(mjData* d, const RobotState& state);
-
-    // Shift trajectory_ forward by n_skip steps, holding the tail constant.
-    void warm_start(int n_skip);
-
-    // Single MPPI pass: sample → parallel rollouts → softmin weighted-average update.
-    // Subclasses set action_lo_/action_hi_ in their constructor to define per-action clamping.
-    void run_mppi_step(const RobotState& state);
 
     TaskConfig task_;
 
@@ -56,7 +42,8 @@ protected:
     // task_.sample_type == "cubic". Built once in the constructor.
     std::vector<double> knot_x_;
 
-    // Per-joint clamp bounds used by run_mppi_step(). Set from model_->jnt_range
+    // Per-joint clamp bounds used by sample_actions() and MPPILocomotionPD::update().
+    // Set from model_->jnt_range
     // in the constructor (see base_mppi_pd.cpp) — desired joint positions must
     // stay within the robot's actual joint limits.
     double action_lo_[NUM_JOINTS] = {};
