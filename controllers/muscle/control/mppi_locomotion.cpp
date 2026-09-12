@@ -1,5 +1,6 @@
 #include "mppi_locomotion.h"
 #include "../../common/control_utils.h"
+#include "../../common/mppi_math.h"
 #include "../../common/orientation.h"
 
 #include <cmath>
@@ -325,16 +326,9 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     // the whole rollout batch below (see common/orientation.h).
     goal_facing_quat(cmd_.goal_pos, state.pos, dwelling_, goal_quat_);
 
-    // Warm-start: shift trajectory_ forward by 1 step (mirrors RTWholeBodyMPPI).
+    // Warm-start: shift trajectory_ forward by 1 step (see common/mppi_math.h).
     const int stride = task_.horizon * NUM_MUSCLES;
-    std::vector<double> shifted(stride);
-    for (int t = 0; t < task_.horizon - 1; ++t)
-        for (int m = 0; m < NUM_MUSCLES; ++m)
-            shifted[t * NUM_MUSCLES + m] = trajectory_[(t + 1) * NUM_MUSCLES + m];
-    for (int m = 0; m < NUM_MUSCLES; ++m)
-        shifted[(task_.horizon - 1) * NUM_MUSCLES + m] =
-            trajectory_[(task_.horizon - 1) * NUM_MUSCLES + m];
-    trajectory_ = shifted;
+    shift_trajectory(trajectory_, task_.horizon, NUM_MUSCLES);
 
     sample_noise();
 
@@ -342,23 +336,14 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     for (int s = 0; s < task_.n_samples; ++s)
         costs_[s] = rollout(s, state);
 
-    // Softmin weights.
-    double cmin   = *std::min_element(costs_.begin(), costs_.end());
-    double cmax   = *std::max_element(costs_.begin(), costs_.end());
-    double crange = cmax - cmin;  // cmin logged below as a diagnostic only
-
-    std::vector<double> weights(task_.n_samples);
-    double wsum = 0.0;
-    for (int s = 0; s < task_.n_samples; ++s) {
-        double s_hat = (crange > 1e-12) ? (costs_[s] - cmin) / crange : 0.0;
-        weights[s]   = std::exp(-s_hat / task_.lambda);
-        wsum        += weights[s];
-    }
+    // Softmin weights (normalised); cmin logged below as a diagnostic only.
+    std::vector<double> weights;
+    const double cmin = softmin_weights(costs_, task_.lambda, weights);
 
     // Weighted average update.
     std::vector<double> new_traj(stride, 0.0);
     for (int s = 0; s < task_.n_samples; ++s) {
-        const double w = weights[s] / wsum;
+        const double w = weights[s];
         for (int t = 0; t < task_.horizon; ++t)
             for (int m = 0; m < NUM_MUSCLES; ++m) {
                 const int idx = t * NUM_MUSCLES + m;
