@@ -1,4 +1,5 @@
 #include "mppi_locomotion_pd.h"
+#include "../../common/orientation.h"
 
 #include <cmath>
 #include <cstdio>
@@ -325,28 +326,8 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
     }
 
     // Goal-facing orientation target for this tick's cost, held fixed across
-    // the whole rollout batch below. Only active when far enough from the
-    // goal and not settled at a waypoint; otherwise the target is identity
-    // (upright, no yaw preference).
-    {
-        const double dx = cmd_.goal_pos[0] - state.pos[0];
-        const double dy = cmd_.goal_pos[1] - state.pos[1];
-        const double dz = cmd_.goal_pos[2] - state.pos[2];
-        const double goal_delta = std::sqrt(dx*dx + dy*dy + dz*dz);
-
-        if (goal_delta > 0.1 && !dwelling_) {
-            const double yaw   = std::atan2(dy, dx);
-            const double pitch = -std::atan2(dz, std::sqrt(dx*dx + dy*dy));
-            const double z_axis[3] = {0.0, 0.0, 1.0};
-            const double y_axis[3] = {0.0, 1.0, 0.0};
-            double q_yaw[4], q_pitch[4];
-            mju_axisAngle2Quat(q_yaw,   z_axis, yaw);
-            mju_axisAngle2Quat(q_pitch, y_axis, pitch);
-            mju_mulQuat(goal_quat_, q_yaw, q_pitch);  // matches scipy's yaw_quat * pitch_quat order
-        } else {
-            goal_quat_[0] = 1.0; goal_quat_[1] = 0.0; goal_quat_[2] = 0.0; goal_quat_[3] = 0.0;
-        }
-    }
+    // the whole rollout batch below (see common/orientation.h).
+    goal_facing_quat(cmd_.goal_pos, state.pos, dwelling_, goal_quat_);
 
     // Warm-start: shift trajectory_ forward by 1 step.
     const int stride = task_.horizon * NUM_JOINTS;
