@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <unordered_map>
 
 #include "base_mppi.h"
 #include "gait_scheduler.h"
@@ -40,25 +39,15 @@ public:
     // Run one MPPI solve; returns Hill-model torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
 
-    // Call once per control tick, before update(). Advances to the next task
-    // phase once the robot has stayed within the current phase's goal_thresh
-    // for waiting_time consecutive in-threshold ticks (not reset if it drifts
-    // back out in between — cumulative, matching RTWholeBodyMPPI's next_goal()).
-    // Keeps running (updating dwelling_) even after the task's final phase is
-    // reached — matches RTWholeBodyMPPI's next_goal(), which the driver keeps
-    // calling every in-threshold tick forever. No-op only if the task has no
-    // phases at all.
-    void advance_phase(const RobotState& state);
+    // Call once per control tick, before update(). Advances through the task's
+    // phases (see PhaseSequencer::advance() in common/gait.h).
+    void advance_phase(const RobotState& state) { phases_.advance(state); }
 
-    void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
-    const MotionCommand& command() const { return cmd_; }
+    void set_command(const MotionCommand& cmd) { phases_.set_command(cmd); }
+    const MotionCommand& command() const { return phases_.command(); }
 
     // True once the final phase's dwell gate has passed (see advance_phase()).
-    // Mirrors MPPILocomotionPD::task_success(); without it mppi_sim.cpp had no
-    // way to see a success the controller had already detected, and could only
-    // run out the clock while pd_mppi_sim.cpp stopped early — leaving the two
-    // variants recording different spans of the same task.
-    bool task_success() const { return task_success_; }
+    bool task_success() const { return phases_.task_success(); }
 
     const MuscleParams& muscle_params() const { return muscle_; }
     const TaskConfig&   task_ref()      const { return task_; }
@@ -69,9 +58,6 @@ private:
 
     double step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]);
 
-    // Point cmd_ and active_gait_ at task_.phases[idx].
-    void activate_phase(int idx);
-
     // Whole-robot (trunk + legs) CoM position (world frame) and CoM
     // velocity (body-frame axes). Non-const mjData*: calls mj_subtreeVel,
     // which writes into d->subtree_linvel/subtree_angmom.
@@ -79,40 +65,16 @@ private:
 
     MuscleParams   muscle_;
     CostWeights    cost_;
-    MotionCommand  cmd_;
 
-    // All named gaits are loaded up front (mirrors RTWholeBodyMPPI's self.gaits
-    // dict), keyed by their resolved TSV path so that both the 4 canonical
-    // names and any per-phase gait_path override share one map without key
-    // collisions. active_gait_ points at whichever entry the current phase uses.
-    std::unordered_map<std::string, GaitScheduler> gaits_;
-    GaitScheduler* active_gait_ = nullptr;
-
-    int  phase_index_  = 0;
-    int  dwell_ticks_  = 0;      // consecutive-ish ticks spent within goal_thresh
-    bool task_success_ = false;  // true once the final phase's dwell gate passes
-
-    // True while settled at a waypoint (mid-dwell, or holding after
-    // task_success_) — mirrors RTWholeBodyMPPI's Timer.waiting. Disables
-    // goal-facing heading tracking (see goal_quat_) while true, matching
-    // update()'s `not self.timer.waiting` check in the original.
-    bool dwelling_ = false;
+    // Phase sequence, gaits, current command and per-phase noise override.
+    PhaseSequencer<GaitScheduler> phases_;
 
     // Per-tick goal-facing orientation target used by step_cost(): identity
     // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built
-    // from the direction to cmd_.goal_pos (mirrors RTWholeBodyMPPI's
+    // from the direction to command().goal_pos (mirrors RTWholeBodyMPPI's
     // calculate_orientation_quaternion). Computed once per update() call,
     // held fixed across that tick's whole rollout batch.
     double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
-
-    // Snapshot of task_.noise_sigma_act as loaded from YAML, taken once in the
-    // constructor before any phase mutates task_.noise_sigma_act. activate_phase()
-    // writes the active phase's override (or this baseline, if the phase has
-    // none) into task_.noise_sigma_act, which is what BaseMPPI::sample_noise()/
-    // sample_noise_cubic() actually read — so "fall back to task-level value"
-    // always means the true original baseline, not whatever a previous phase
-    // left behind.
-    double base_noise_sigma_act_[NUM_JOINTS] = {};
 
     double gait_stiffness_  = 0.75;
     double last_compute_ms_ = 20.0;

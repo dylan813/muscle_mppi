@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <unordered_map>
 
 #include "base_mppi_pd.h"
 #include "gait_scheduler_pd.h"
@@ -43,19 +42,15 @@ public:
     // Run one MPPI solve; returns PD torques directly.
     void update(const RobotState& state, double tau_out[NUM_JOINTS]);
 
-    // Call once per control tick, before update(). Advances to the next task
-    // phase once the robot has stayed within the current phase's goal_thresh
-    // for waiting_time consecutive in-threshold ticks (not reset if it drifts
-    // back out in between — cumulative, matching RTWholeBodyMPPI's next_goal()).
-    // Keeps running (updating dwelling_) even after the task's final phase is
-    // reached. No-op only if the task has no phases at all.
-    void advance_phase(const RobotState& state);
+    // Call once per control tick, before update(). Advances through the task's
+    // phases (see PhaseSequencer::advance() in common/gait.h).
+    void advance_phase(const RobotState& state) { phases_.advance(state); }
 
-    void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
-    const MotionCommand& command() const { return cmd_; }
+    void set_command(const MotionCommand& cmd) { phases_.set_command(cmd); }
+    const MotionCommand& command() const { return phases_.command(); }
 
     // True once the final phase's dwell gate has passed (see advance_phase()).
-    bool task_success() const { return task_success_; }
+    bool task_success() const { return phases_.task_success(); }
 
     const PDParams&    pd_params() const { return pd_; }
     const TaskConfig&  task_ref()  const { return task_; }
@@ -73,9 +68,6 @@ private:
     double step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],
                      const double gait_ref_dq[NUM_JOINTS], const double q_des[NUM_JOINTS]);
 
-    // Point cmd_ and active_gait_ at task_.phases[idx].
-    void activate_phase(int idx);
-
     // Trunk-origin position (world frame) and trunk linear velocity
     // (body-frame axes), matching RTWholeBodyMPPI's cost reference — see the
     // definition in mppi_locomotion_pd.cpp.
@@ -83,37 +75,16 @@ private:
 
     PDParams       pd_;
     CostWeights    cost_;
-    MotionCommand  cmd_;
 
-    // All named gaits are loaded up front, keyed by their resolved TSV path so
-    // that both the 4 canonical names and any per-phase gait_path override
-    // share one map without key collisions. active_gait_ points at whichever
-    // entry the current phase uses.
-    std::unordered_map<std::string, GaitSchedulerPD> gaits_;
-    GaitSchedulerPD* active_gait_ = nullptr;
-
-    int  phase_index_  = 0;
-    int  dwell_ticks_  = 0;      // consecutive-ish ticks spent within goal_thresh
-    bool task_success_ = false;  // true once the final phase's dwell gate passes
-
-    // True while settled at a waypoint (mid-dwell, or holding after
-    // task_success_) — mirrors RTWholeBodyMPPI's Timer.waiting. Disables
-    // goal-facing heading tracking (see goal_quat_) while true.
-    bool dwelling_ = false;
+    // Phase sequence, gaits, current command and per-phase noise override.
+    PhaseSequencer<GaitSchedulerPD> phases_;
 
     // Per-tick goal-facing orientation target used by step_cost(): identity
     // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built
-    // from the direction to cmd_.goal_pos (mirrors RTWholeBodyMPPI's
+    // from the direction to command().goal_pos (mirrors RTWholeBodyMPPI's
     // calculate_orientation_quaternion). Computed once per update() call,
     // held fixed across that tick's whole rollout batch.
     double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
-
-    // Snapshot of task_.noise_sigma_act as loaded from YAML, taken once in the
-    // constructor before any phase mutates task_.noise_sigma_act. activate_phase()
-    // writes the active phase's override (or this baseline, if the phase has
-    // none) into task_.noise_sigma_act, which is what BaseMPPIPD::sample_actions()/
-    // sample_actions_cubic() actually read.
-    double base_noise_sigma_act_[NUM_JOINTS] = {};
 
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;

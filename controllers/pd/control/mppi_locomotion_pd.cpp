@@ -79,16 +79,8 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
         }
     }
 
-    // Load the 4 canonical named gaits up front, plus any per-phase gait_path
-    // override not already covered.
-    load_gaits(gaits_, kNamedGaits, task_.phases);
-
-    // Snapshot the YAML-loaded baseline before activate_phase() can overwrite
-    // task_.noise_sigma_act with a per-phase override.
-    std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
-
-    if (!task_.phases.empty())
-        activate_phase(0);
+    // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()).
+    phases_.init(task_.phases, kNamedGaits, task_.noise_sigma_act, /*default_goal_z=*/0.0);
 
     // Seed trajectory_ and real_q_des_ with the task's nominal pose — sensible
     // cold-start for a joint-position action space (unlike the muscle variant,
@@ -98,72 +90,6 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
         for (int j = 0; j < NUM_JOINTS; ++j)
             trajectory_[t * NUM_JOINTS + j] = task_.nominal_pose[j];
     std::memcpy(real_q_des_, task_.nominal_pose, sizeof(real_q_des_));
-}
-
-// ============================================================================
-// Phase sequencing
-// ============================================================================
-
-void MPPILocomotionPD::activate_phase(int idx)
-{
-    const TaskPhase& p = task_.phases[idx];
-    cmd_.goal_pos[0] = p.goal_pos[0];
-    cmd_.goal_pos[1] = p.goal_pos[1];
-    cmd_.goal_pos[2] = p.goal_pos[2];
-    cmd_.vx = p.cmd_vel[0];
-    cmd_.vy = p.cmd_vel[1];
-    active_gait_ = &gaits_.at(resolve_gait_key(p, kNamedGaits));
-
-    // Per-phase noise_sigma_act override, falling back to the task-level
-    // baseline.
-    if (p.has_noise_sigma_act)
-        std::memcpy(task_.noise_sigma_act, p.noise_sigma_act, sizeof(task_.noise_sigma_act));
-    else
-        std::memcpy(task_.noise_sigma_act, base_noise_sigma_act_, sizeof(task_.noise_sigma_act));
-}
-
-void MPPILocomotionPD::advance_phase(const RobotState& state)
-{
-    if (task_.phases.empty()) return;
-
-    const TaskPhase& cur = task_.phases[phase_index_];
-    const double dx = state.pos[0] - cur.goal_pos[0];
-    const double dy = state.pos[1] - cur.goal_pos[1];
-    const double dz = state.pos[2] - cur.goal_pos[2];
-    if (std::sqrt(dx*dx + dy*dy + dz*dz) >= cur.goal_thresh) return;  // distance gate; dwelling_ untouched
-
-    // Dwell gate: counts ticks spent within goal_thresh, not reset when the
-    // robot drifts back out in between. Kept running even after task_success_
-    // so dwelling_ keeps tracking correctly.
-    //
-    // <= (not <): RTWholeBodyMPPI's Timer.increment() only flips `done` once
-    // elapsed_time (pre-incremented) reaches end_time, and that `done` check
-    // happens inside the SAME next_goal() call that performed the increment —
-    // so it takes waiting_time+1 in-threshold calls to advance a phase, not
-    // waiting_time. Advancing on `dwell_ticks_ < waiting_time` fires one tick
-    // early on every phase transition. NOTE: the muscle variant still uses
-    // `<`; the two must agree before a controlled comparison. No effect on
-    // any task with waiting_time: 0 (i.e. every task except guinea_fowl).
-    if (++dwell_ticks_ <= cur.waiting_time) {
-        dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
-        return;
-    }
-
-    if (phase_index_ + 1 < static_cast<int>(task_.phases.size())) {
-        ++phase_index_;
-        activate_phase(phase_index_);
-        dwell_ticks_ = 0;
-        dwelling_ = false;  // resumed traveling toward the new phase's goal
-        const TaskPhase& next = task_.phases[phase_index_];
-        std::printf("[phase] -> %d (goal=%.2f,%.2f,%.2f gait=%s)\n",
-                    phase_index_, next.goal_pos[0], next.goal_pos[1], next.goal_pos[2],
-                    next.gait_path.empty() ? next.desired_gait.c_str() : next.gait_path.c_str());
-    } else if (!task_success_) {
-        task_success_ = true;  // dwelling_ untouched here
-        std::printf("[phase] task complete.\n");
-    } else {
-        dwelling_ = true;  // settled at the final goal, post-success
-    }
 }
 
 // ============================================================================
@@ -198,7 +124,7 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
         mj_step(model_, d);
 
         double gait_ref_q[NUM_JOINTS] = {}, gait_ref_dq[NUM_JOINTS] = {};
-        if (active_gait_) active_gait_->get_phase(t, gait_ref_q, gait_ref_dq);
+        if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref_q, gait_ref_dq);
         total_cost += step_cost(d, gait_ref_q, gait_ref_dq,
                                 &actions_[s * stride + t * NUM_JOINTS]);
     }
@@ -237,9 +163,9 @@ double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS
     double pos[3], vel_body[3];
     base_state(d, pos, vel_body);
 
-    cost += w.pos_x * std::abs(pos[0] - cmd_.goal_pos[0]);
-    cost += w.pos_y * std::abs(pos[1] - cmd_.goal_pos[1]);
-    cost += w.pos_z * std::abs(pos[2] - cmd_.goal_pos[2]);
+    cost += w.pos_x * std::abs(pos[0] - command().goal_pos[0]);
+    cost += w.pos_y * std::abs(pos[1] - command().goal_pos[1]);
+    cost += w.pos_z * std::abs(pos[2] - command().goal_pos[2]);
 
     const double q_dot  = d->qpos[3]*goal_quat_[0] + d->qpos[4]*goal_quat_[1]
                          + d->qpos[5]*goal_quat_[2] + d->qpos[6]*goal_quat_[3];
@@ -247,8 +173,8 @@ double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS
     cost += w.orientation * q_dist * q_dist;
 
     if (w.vel_x > 0.0 || w.vel_y > 0.0 || w.vel_z > 0.0) {
-        const double ex = vel_body[0] - cmd_.vx;
-        const double ey = vel_body[1] - cmd_.vy;
+        const double ex = vel_body[0] - command().vx;
+        const double ey = vel_body[1] - command().vy;
         cost += w.vel_x * ex*ex + w.vel_y * ey*ey + w.vel_z * vel_body[2]*vel_body[2];
     }
 
@@ -312,7 +238,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
 
     // Goal-facing orientation target for this tick's cost, held fixed across
     // the whole rollout batch below (see common/control_utils.h).
-    goal_facing_quat(cmd_.goal_pos, state.pos, dwelling_, goal_quat_);
+    goal_facing_quat(command().goal_pos, state.pos, phases_.dwelling(), goal_quat_);
 
     // Warm-start: shift trajectory_ forward by 1 step (see common/control_utils.h).
     const int stride = task_.horizon * NUM_JOINTS;
@@ -374,9 +300,9 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
 
             double lpos[3], lvel[3];
             base_state(dl, lpos, lvel);
-            c_pos += cost_.pos_x * std::abs(lpos[0] - cmd_.goal_pos[0]);
-            c_pos += cost_.pos_y * std::abs(lpos[1] - cmd_.goal_pos[1]);
-            c_pos += cost_.pos_z * std::abs(lpos[2] - cmd_.goal_pos[2]);
+            c_pos += cost_.pos_x * std::abs(lpos[0] - command().goal_pos[0]);
+            c_pos += cost_.pos_y * std::abs(lpos[1] - command().goal_pos[1]);
+            c_pos += cost_.pos_z * std::abs(lpos[2] - command().goal_pos[2]);
 
             const double q_dot_l  = dl->qpos[3]*goal_quat_[0] + dl->qpos[4]*goal_quat_[1]
                                    + dl->qpos[5]*goal_quat_[2] + dl->qpos[6]*goal_quat_[3];
@@ -384,8 +310,8 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
             c_orient += cost_.orientation * q_dist * q_dist;
 
             if (cost_.vel_x > 0.0 || cost_.vel_y > 0.0 || cost_.vel_z > 0.0) {
-                c_vel += cost_.vel_x * (lvel[0] - cmd_.vx)*(lvel[0] - cmd_.vx)
-                       + cost_.vel_y * (lvel[1] - cmd_.vy)*(lvel[1] - cmd_.vy)
+                c_vel += cost_.vel_x * (lvel[0] - command().vx)*(lvel[0] - command().vx)
+                       + cost_.vel_y * (lvel[1] - command().vy)*(lvel[1] - command().vy)
                        + cost_.vel_z * lvel[2]*lvel[2];
             }
 
@@ -394,9 +320,9 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
                 c_vel += cost_.ang_vel * (wx*wx + wy*wy + wz*wz);
             }
 
-            if (active_gait_) {
+            if (phases_.active_gait()) {
                 double gref_q[NUM_JOINTS] = {}, gref_dq[NUM_JOINTS] = {};
-                active_gait_->get_phase(t, gref_q, gref_dq);
+                phases_.active_gait()->get_phase(t, gref_q, gref_dq);
                 for (int j = 0; j < NUM_JOINTS; ++j) {
                     if (cost_.gait_ref_weights[j] == 0.0) continue;
                     const double e = q_l[j] - gref_q[j];
@@ -429,7 +355,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
         tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], real_q_des_[j], state.q[j],
                                        /*dq_des=*/0.0, state.dq[j], /*tau_ff=*/0.0);
 
-    if (active_gait_) active_gait_->advance();
+    if (phases_.active_gait()) phases_.active_gait()->advance();
 
     last_compute_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - t_start).count();

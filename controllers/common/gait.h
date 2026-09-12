@@ -1,11 +1,15 @@
 #pragma once
 
 // Gait-reference plumbing shared by both variants: reading and cycling through
-// a 2*NUM_JOINTS × N gait TSV, and resolving a task phase to the gait it uses.
-// What the rows mean is variant-specific, so each variant derives its own
-// scheduler with a get_phase() for its layout (muscle/control/gait_scheduler.h,
+// a 2*NUM_JOINTS × N gait TSV, resolving a task phase to the gait it uses, and
+// sequencing through a task's phases (PhaseSequencer). What the gait rows mean
+// is variant-specific, so each variant derives its own scheduler with a
+// get_phase() for its layout (muscle/control/gait_scheduler.h,
 // pd/control/gait_scheduler_pd.h).
 
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -100,3 +104,158 @@ void load_gaits(std::unordered_map<std::string, Gait>& gaits, const NamedGaitPat
         if (!p.gait_path.empty() && !gaits.count(p.gait_path))
             gaits[p.gait_path].load(p.gait_path);
 }
+
+// ============================================================================
+// Phase sequencing
+// ============================================================================
+
+// Walks a task's ordered phase (waypoint) sequence, matching RTWholeBodyMPPI's
+// next_goal(). Owns the task's gaits and exposes, for the controller's cost:
+// the current MotionCommand, the active gait, and whether the robot is dwelling
+// at a waypoint. Gait is the variant's scheduler (GaitScheduler / GaitSchedulerPD).
+//
+// Thread-safety: the accessors are read-only and safe from parallel rollouts;
+// advance() and set_command() must only be called from the main thread.
+template <class Gait>
+class PhaseSequencer {
+public:
+    // Load the gaits and activate phase 0. phases and noise_sigma_act must
+    // outlive the sequencer: noise_sigma_act is the controller's live
+    // TaskConfig::noise_sigma_act (what its sampler reads), snapshotted here as
+    // the baseline and overwritten by each phase's override. A task with no
+    // phases keeps a zero command except goal_pos z = default_goal_z.
+    void init(const std::vector<TaskPhase>& phases, const NamedGaitPaths& named,
+              double* noise_sigma_act, double default_goal_z)
+    {
+        phases_          = &phases;
+        named_           = &named;
+        noise_sigma_act_ = noise_sigma_act;
+
+        // Load the canonical named gaits up front (mirrors RTWholeBodyMPPI's
+        // self.gaits dict), plus any per-phase gait_path override not already covered.
+        load_gaits(gaits_, named, phases);
+
+        // Snapshot the YAML-loaded baseline before activate() can overwrite
+        // noise_sigma_act with a per-phase override.
+        std::memcpy(base_noise_sigma_act_, noise_sigma_act_, sizeof(base_noise_sigma_act_));
+
+        if (!phases.empty())
+            activate(0);
+        else
+            cmd_.goal_pos[2] = default_goal_z;  // z default for a phase-less task
+    }
+
+    // Call once per control tick, before the controller's update(). Advances to
+    // the next task phase once the robot has stayed within the current phase's
+    // goal_thresh for waiting_time in-threshold ticks (not reset if it drifts
+    // back out in between — cumulative, matching RTWholeBodyMPPI's next_goal()).
+    // Keeps running (updating dwelling) even after the task's final phase is
+    // reached — matches RTWholeBodyMPPI's next_goal(), which the driver keeps
+    // calling every in-threshold tick forever. No-op only if the task has no
+    // phases at all.
+    void advance(const RobotState& state)
+    {
+        const std::vector<TaskPhase>& phases = *phases_;
+        if (phases.empty()) return;
+
+        const TaskPhase& cur = phases[phase_index_];
+        const double dx = state.pos[0] - cur.goal_pos[0];
+        const double dy = state.pos[1] - cur.goal_pos[1];
+        const double dz = state.pos[2] - cur.goal_pos[2];
+        if (std::sqrt(dx*dx + dy*dy + dz*dz) >= cur.goal_thresh) return;  // distance gate; dwelling_ untouched
+
+        // Dwell gate: counts ticks spent within goal_thresh, not reset when the
+        // robot drifts back out in between — matches RTWholeBodyMPPI's next_goal(),
+        // whose Timer only ever increments on calls the driver's distance check let
+        // through, and is never reset on a failed check. Kept running even after
+        // task_success_ (matches the original driver still calling next_goal()
+        // every in-threshold tick forever) so dwelling_ keeps tracking correctly.
+        //
+        // <= (not <): RTWholeBodyMPPI's Timer.increment() only flips `done` once
+        // elapsed_time (pre-incremented) reaches end_time, and that `done` check
+        // happens inside the SAME next_goal() call that performed the increment —
+        // so it takes waiting_time+1 in-threshold calls to advance a phase, not
+        // waiting_time. Advancing on `dwell_ticks_ < waiting_time` fires one tick
+        // early on every phase transition. No effect on any task with
+        // waiting_time: 0.
+        if (++dwell_ticks_ <= cur.waiting_time) {
+            dwelling_ = true;   // mid-dwell: settled, not yet cleared to advance
+            return;
+        }
+
+        if (phase_index_ + 1 < static_cast<int>(phases.size())) {
+            ++phase_index_;
+            activate(phase_index_);
+            dwell_ticks_ = 0;
+            dwelling_ = false;  // resumed traveling toward the new phase's goal
+            const TaskPhase& next = phases[phase_index_];
+            std::printf("[phase] -> %d (goal=%.2f,%.2f,%.2f gait=%s)\n",
+                        phase_index_, next.goal_pos[0], next.goal_pos[1], next.goal_pos[2],
+                        next.gait_path.empty() ? next.desired_gait.c_str() : next.gait_path.c_str());
+        } else if (!task_success_) {
+            task_success_ = true;  // dwelling_ untouched here — matches the original
+            std::printf("[phase] task complete.\n");
+        } else {
+            dwelling_ = true;  // settled at the final goal, post-success
+        }
+    }
+
+    const MotionCommand& command() const { return cmd_; }
+    void set_command(const MotionCommand& cmd) { cmd_ = cmd; }
+
+    // Active phase's gait (nullptr only for a task with no phases). Non-const
+    // so the controller can advance() it once per tick.
+    Gait* active_gait() const { return active_gait_; }
+
+    int  phase_index()  const { return phase_index_; }
+
+    // True once the final phase's dwell gate has passed (see advance()).
+    bool task_success() const { return task_success_; }
+
+    // True while settled at a waypoint (mid-dwell, or holding after
+    // task_success) — mirrors RTWholeBodyMPPI's Timer.waiting. Controllers
+    // disable goal-facing heading tracking while true, matching update()'s
+    // `not self.timer.waiting` check in the original.
+    bool dwelling()     const { return dwelling_; }
+
+private:
+    // Point the command and active gait at phases[idx], and apply its noise override.
+    void activate(int idx)
+    {
+        const TaskPhase& p = (*phases_)[idx];
+        cmd_.goal_pos[0] = p.goal_pos[0];
+        cmd_.goal_pos[1] = p.goal_pos[1];
+        cmd_.goal_pos[2] = p.goal_pos[2];
+        cmd_.vx = p.cmd_vel[0];
+        cmd_.vy = p.cmd_vel[1];
+        active_gait_ = &gaits_.at(resolve_gait_key(p, *named_));
+
+        // Per-phase noise_sigma_act override, falling back to the task-level
+        // baseline — mirrors RTWholeBodyMPPI's next_goal(), which doubles thigh/
+        // calf exploration noise specifically during trot phases. Always falls
+        // back to the true YAML baseline, not whatever a previous phase left behind.
+        if (p.has_noise_sigma_act)
+            std::memcpy(noise_sigma_act_, p.noise_sigma_act, sizeof(base_noise_sigma_act_));
+        else
+            std::memcpy(noise_sigma_act_, base_noise_sigma_act_, sizeof(base_noise_sigma_act_));
+    }
+
+    const std::vector<TaskPhase>* phases_ = nullptr;
+    const NamedGaitPaths*         named_  = nullptr;
+
+    // All gaits a task can use, keyed by resolve_gait_key() so both the
+    // canonical names and any per-phase gait_path override share one map
+    // without key collisions. active_gait_ points at the current phase's entry.
+    std::unordered_map<std::string, Gait> gaits_;
+    Gait* active_gait_ = nullptr;
+
+    MotionCommand cmd_;
+
+    int  phase_index_  = 0;
+    int  dwell_ticks_  = 0;      // cumulative ticks spent within goal_thresh
+    bool task_success_ = false;  // true once the final phase's dwell gate passes
+    bool dwelling_     = false;
+
+    double* noise_sigma_act_ = nullptr;             // controller's live sampler sigma
+    double  base_noise_sigma_act_[NUM_JOINTS] = {}; // YAML baseline snapshot
+};
