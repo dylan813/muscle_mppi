@@ -21,16 +21,6 @@ inline double unitree_pd_torque(double kp, double kd, double q_des, double q,
     return tau_ff + kp * (q_des - q) + kd * (dq_des - dq);
 }
 
-struct RobotState {
-    double pos[3]          = {};
-    double vel[3]          = {};
-    double quat[4]         = {1,0,0,0};  // w, x, y, z
-    double gyro[3]         = {};
-    double q[NUM_JOINTS]   = {};
-    double dq[NUM_JOINTS]  = {};
-    bool   valid           = false;
-};
-
 // PD-actuated variant of BaseMPPI: action space is one desired joint position
 // per joint (NUM_JOINTS-wide), not an interleaved antagonistic muscle pair
 // (NUM_MUSCLES-wide). See muscle/control/base_mppi.h for the muscle-actuated original.

@@ -4,11 +4,10 @@
 #include <vector>
 
 #include "../../common/paths.h"
+#include "../../common/types.h"
 
 // Default task file for every PD-variant binary (absolute, see common/paths.h).
 inline const std::string kDefaultTasksPdYaml = repo_path("controllers/pd/utils/tasks_pd.yaml");
-
-static constexpr int NUM_JOINTS = 12;   // 4 legs × 3 joints (FR, FL, RR, RL)
 
 // Direct joint-space PD gains — replaces MuscleParams in the muscle-actuated
 // variant (see muscle/control/muscle.h / muscle/utils/tasks.h). tau[j] = kp[j]*(q_des[j]-q[j])
@@ -24,33 +23,6 @@ struct PDParams {
     // variant's kd_sim instead. Left at go2.xml's default this under-damps
     // the stiff kp=55 PD law and shows up as visible bouncing/jitter.
     double joint_damping[NUM_JOINTS] = {};
-};
-
-// One waypoint in a task's phase sequence, matching RTWholeBodyMPPI's per-phase
-// goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays. MPPILocomotionPD
-// advances phase_index_ once the robot has stayed within goal_thresh of the
-// current phase's goal_pos for waiting_time consecutive in-threshold ticks.
-struct TaskPhase {
-    double goal_pos[3]  = {};
-    double cmd_vel[2]   = {};  // [vx, vy] body-frame velocity command
-
-    // Categorical gait name: "in_place" | "walk" | "walk_fast" | "trot".
-    // Resolved to a gait TSV path by MPPILocomotionPD (see mppi_locomotion_pd.cpp).
-    std::string desired_gait;
-
-    // Optional escape hatch: an explicit gait TSV path, overriding desired_gait
-    // when non-empty.
-    std::string gait_path;
-
-    double goal_thresh  = 0.2;
-    int    waiting_time = 0;   // dwell ticks required within goal_thresh
-
-    // Optional per-phase override of TaskConfig::noise_sigma_act, applied while
-    // this phase is active and reverted to the task-level baseline on the next
-    // phase that doesn't set one. has_noise_sigma_act distinguishes "not set"
-    // from a legitimate all-zero override.
-    double noise_sigma_act[NUM_JOINTS] = {};
-    bool   has_noise_sigma_act = false;
 };
 
 struct TaskConfig {
@@ -92,12 +64,6 @@ struct TaskConfig {
     // Per-joint noise sigma (radians) applied to the sampled desired joint
     // position. Used by BaseMPPIPD::sample_actions().
     double noise_sigma_act[NUM_JOINTS]   = {};
-};
-
-struct MotionCommand {
-    double vx          = 0.0;
-    double vy          = 0.0;
-    double goal_pos[3] = {};  // world-frame position target [x, y, z]
 };
 
 TaskConfig load_task(const std::string& task_name,

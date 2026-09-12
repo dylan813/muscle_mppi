@@ -7,16 +7,6 @@
 #include <algorithm>
 #include "../utils/tasks.h"
 
-struct RobotState {
-    double pos[3]          = {};
-    double vel[3]          = {};
-    double quat[4]         = {1,0,0,0};  // w, x, y, z
-    double gyro[3]         = {};
-    double q[NUM_JOINTS]   = {};
-    double dq[NUM_JOINTS]  = {};
-    bool   valid           = false;
-};
-
 class BaseMPPI {
 public:
     explicit BaseMPPI(const TaskConfig& task);

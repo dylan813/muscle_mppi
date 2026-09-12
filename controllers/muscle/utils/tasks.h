@@ -4,11 +4,11 @@
 #include <vector>
 
 #include "../../common/paths.h"
+#include "../../common/types.h"
 
 // Default task file for every muscle-variant binary (absolute, see common/paths.h).
 inline const std::string kDefaultTasksYaml = repo_path("controllers/muscle/utils/tasks.yaml");
 
-static constexpr int NUM_JOINTS  = 12;              // 4 legs × 3 joints (FR, FL, RR, RL)
 static constexpr int NUM_MUSCLES = 2 * NUM_JOINTS;  // antagonistic pair per joint
 
 struct MuscleParams {
@@ -22,37 +22,6 @@ struct MuscleParams {
     double FVmax[NUM_JOINTS]      = {};        // eccentric force amplification (>1)
     double pFLmax[NUM_JOINTS]     = {};        // passive force at max extension
     double kd_sim[NUM_JOINTS]     = {};        // MuJoCo joint damping (applied to sim dofs)
-};
-
-// One waypoint in a task's phase sequence, matching RTWholeBodyMPPI's per-phase
-// goal_pos/cmd_vel/desired_gait/goal_thresh/waiting_times arrays. MPPILocomotion
-// advances phase_index_ once the robot has stayed within goal_thresh of the
-// current phase's goal_pos for waiting_time consecutive in-threshold ticks.
-struct TaskPhase {
-    double goal_pos[3]  = {};
-    double cmd_vel[2]   = {};  // [vx, vy] body-frame velocity command
-
-    // Categorical gait name: "in_place" | "walk" | "walk_fast" | "trot".
-    // Resolved to a gait TSV path by MPPILocomotion (see mppi_locomotion.cpp).
-    std::string desired_gait;
-
-    // Optional escape hatch: an explicit gait TSV path, overriding desired_gait
-    // when non-empty. Used by tooling (e.g. the CMA-ES muscle-parameter sweep in
-    // analysis/optimize/objective.py) that regenerates a gait file per candidate
-    // and needs mppi_sim to load that exact file rather than a canonical one.
-    std::string gait_path;
-
-    double goal_thresh  = 0.2;
-    int    waiting_time = 0;   // dwell ticks required within goal_thresh
-
-    // Optional per-phase override of TaskConfig::noise_sigma_act, applied while
-    // this phase is active and reverted to the task-level baseline on the next
-    // phase that doesn't set one. Mirrors RTWholeBodyMPPI's next_goal(), which
-    // doubles thigh/calf exploration noise specifically during trot phases
-    // regardless of the task config's declared baseline. has_noise_sigma_act
-    // distinguishes "not set" from a legitimate all-zero override.
-    double noise_sigma_act[NUM_JOINTS] = {};
-    bool   has_noise_sigma_act = false;
 };
 
 struct TaskConfig {
@@ -103,12 +72,6 @@ struct TaskConfig {
     double posture_FL2[NUM_JOINTS]  = {};
 
     // Co-contraction sampling parameters (per joint type: hip=0, thigh=1, calf=2).
-};
-
-struct MotionCommand {
-    double vx          = 0.0;
-    double vy          = 0.0;
-    double goal_pos[3] = {};  // world-frame position target [x, y, z]
 };
 
 TaskConfig load_task(const std::string& task_name,
