@@ -1,4 +1,5 @@
 #include "mppi_locomotion.h"
+#include "../../common/control_utils.h"
 
 #include <cmath>
 #include <cstdio>
@@ -259,11 +260,7 @@ void MPPILocomotion::base_com_state(mjData* d, double com_pos[3], double com_vel
     com_pos[1] = com[1];
     com_pos[2] = com[2];
 
-    const double* v_world = d->subtree_linvel + base_bid_ * 3;
-    const double* xmat    = d->xmat + base_bid_ * 9;
-    com_vel_body[0] = v_world[0]*xmat[0] + v_world[1]*xmat[3] + v_world[2]*xmat[6];
-    com_vel_body[1] = v_world[0]*xmat[1] + v_world[1]*xmat[4] + v_world[2]*xmat[7];
-    com_vel_body[2] = v_world[0]*xmat[2] + v_world[1]*xmat[5] + v_world[2]*xmat[8];
+    world_to_body(d->xmat + base_bid_ * 9, d->subtree_linvel + base_bid_ * 3, com_vel_body);
 }
 
 double MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES])

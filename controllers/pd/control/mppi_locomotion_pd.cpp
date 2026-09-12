@@ -238,11 +238,7 @@ void MPPILocomotionPD::base_state(mjData* d, double pos[3], double vel_body[3]) 
     pos[1] = d->qpos[1];
     pos[2] = d->qpos[2];
 
-    const double* xmat = d->xmat + base_bid_ * 9;
-    const double vx = d->qvel[0], vy = d->qvel[1], vz = d->qvel[2];
-    vel_body[0] = vx*xmat[0] + vy*xmat[3] + vz*xmat[6];
-    vel_body[1] = vx*xmat[1] + vy*xmat[4] + vz*xmat[7];
-    vel_body[2] = vx*xmat[2] + vy*xmat[5] + vz*xmat[8];
+    world_to_body(d->xmat + base_bid_ * 9, d->qvel, vel_body);
 }
 
 double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],

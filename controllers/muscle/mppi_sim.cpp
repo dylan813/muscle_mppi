@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "control/mppi_locomotion.h"
+#include "../common/control_utils.h"
 #include "../common/trial_log.h"
 
 // ── stand-up parameters (mirror mppi_controller.cpp) ─────────────────────────
@@ -158,8 +159,8 @@ int main(int argc, char** argv)
         const double kp    = phase * 50.0 + (1.0 - phase) * 20.0;
         for (int j = 0; j < NUM_JOINTS; ++j) {
             const double q_des = phase * STAND_UP[j] + (1.0 - phase) * STAND_DOWN[j];
-            d->ctrl[j] =
-                kp * (q_des - d->qpos[qa[j]]) + 3.5 * (-d->qvel[qv[j]]);
+            d->ctrl[j] = unitree_pd_torque(
+                kp, /*kd=*/3.5, q_des, d->qpos[qa[j]], /*dq_des=*/0.0, d->qvel[qv[j]], /*tau_ff=*/0.0);
         }
         mj_step(m, d);
     }
@@ -209,18 +210,15 @@ int main(int argc, char** argv)
 
             // Rotate world-frame free-joint velocity into body frame (xmat
             // is the body->world rotation, so its transpose maps world->body).
-            double xmat[9];
+            double xmat[9], v_body[3];
             mju_quat2Mat(xmat, d->qpos + 3);
-            const double vwx = d->qvel[0], vwy = d->qvel[1], vwz = d->qvel[2];
-            const double vx_body = vwx * xmat[0] + vwy * xmat[3] + vwz * xmat[6];
-            const double vy_body = vwx * xmat[1] + vwy * xmat[4] + vwz * xmat[7];
-            const double vz_body = vwx * xmat[2] + vwy * xmat[5] + vwz * xmat[8];
+            world_to_body(xmat, d->qvel, v_body);
 
             const double* com = d->subtree_com + base_bid * 3;
 
             csv << sim_t << ","
                 << com[0] << "," << com[1] << "," << com[2] << ","
-                << vx_body << "," << vy_body << "," << vz_body << ","
+                << v_body[0] << "," << v_body[1] << "," << v_body[2] << ","
                 << qw << "," << roll;
             for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
             const double* act = mppi.activation();

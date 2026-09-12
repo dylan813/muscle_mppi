@@ -237,16 +237,13 @@ int main(int argc, char** argv)
 
             // Rotate world-frame free-joint velocity into body frame (xmat
             // is the body->world rotation, so its transpose maps world->body).
-            double xmat[9];
+            double xmat[9], v_body[3];
             mju_quat2Mat(xmat, d->qpos + 3);
-            const double vwx = d->qvel[0], vwy = d->qvel[1], vwz = d->qvel[2];
-            const double vx_body = vwx * xmat[0] + vwy * xmat[3] + vwz * xmat[6];
-            const double vy_body = vwx * xmat[1] + vwy * xmat[4] + vwz * xmat[7];
-            const double vz_body = vwx * xmat[2] + vwy * xmat[5] + vwz * xmat[8];
+            world_to_body(xmat, d->qvel, v_body);
 
             csv << sim_t << ","
                 << d->qpos[0] << "," << d->qpos[1] << "," << d->qpos[2] << ","
-                << vx_body << "," << vy_body << "," << vz_body << ","
+                << v_body[0] << "," << v_body[1] << "," << v_body[2] << ","
                 << qw << "," << roll;
             for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
             const double* qdes = mppi.q_des();
