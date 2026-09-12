@@ -22,7 +22,7 @@
 // analysis/unit_tests/generate_pd_gaits.py) from the FAST/MED library in
 // controllers/pd/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
 // or, as an escape hatch, an explicit TSV path (TaskPhase::gait_path) — see
-// resolve_gait_key() below. Same 4-gait mapping as the muscle variant
+// resolve_gait_key() in common/gait_table.h. Same 4-gait mapping as the muscle variant
 // (muscle/control/mppi_locomotion.cpp's kNamedGaits). Paths are repo-relative
 // and resolved with repo_path() at load time.
 static const char* GAIT_INPLACE_PATH   = "controllers/pd/gaits/FAST/gait_FAST_0_0_10cm.tsv";
@@ -30,24 +30,12 @@ static const char* GAIT_WALK_PATH      = "controllers/pd/gaits/MED/gait_MED_0_1_
 static const char* GAIT_WALK_FAST_PATH = "controllers/pd/gaits/FAST/gait_FAST_0_1_10cm.tsv";
 static const char* GAIT_TROT_PATH      = "controllers/pd/gaits/MED/gait_MED_0_5_15cm.tsv";
 
-static const std::unordered_map<std::string, const char*> kNamedGaits = {
+static const NamedGaitPaths kNamedGaits = {
     {"in_place",  GAIT_INPLACE_PATH},
     {"walk",      GAIT_WALK_PATH},
     {"walk_fast", GAIT_WALK_FAST_PATH},
     {"trot",      GAIT_TROT_PATH},
 };
-
-// Resolves a phase to the key it's loaded/stored under in MPPILocomotionPD::gaits_:
-// an explicit gait_path override (if set) is keyed by its own path string;
-// otherwise desired_gait must be one of kNamedGaits' keys.
-static std::string resolve_gait_key(const TaskPhase& p)
-{
-    if (!p.gait_path.empty()) return p.gait_path;
-    if (!kNamedGaits.count(p.desired_gait))
-        throw std::runtime_error("Unknown desired_gait '" + p.desired_gait
-                                 + "'. Must be one of: in_place, walk, walk_fast, trot");
-    return p.desired_gait;
-}
 
 // ============================================================================
 // Constructor
@@ -94,10 +82,7 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
 
     // Load the 4 canonical named gaits up front, plus any per-phase gait_path
     // override not already covered.
-    for (const auto& kv : kNamedGaits) gaits_[kv.first].load(repo_path(kv.second));
-    for (const auto& p : task_.phases)
-        if (!p.gait_path.empty() && !gaits_.count(p.gait_path))
-            gaits_[p.gait_path].load(p.gait_path);
+    load_gaits(gaits_, kNamedGaits, task_.phases);
 
     // Snapshot the YAML-loaded baseline before activate_phase() can overwrite
     // task_.noise_sigma_act with a per-phase override.
@@ -128,7 +113,7 @@ void MPPILocomotionPD::activate_phase(int idx)
     cmd_.goal_pos[2] = p.goal_pos[2];
     cmd_.vx = p.cmd_vel[0];
     cmd_.vy = p.cmd_vel[1];
-    active_gait_ = &gaits_.at(resolve_gait_key(p));
+    active_gait_ = &gaits_.at(resolve_gait_key(p, kNamedGaits));
 
     // Per-phase noise_sigma_act override, falling back to the task-level
     // baseline.
