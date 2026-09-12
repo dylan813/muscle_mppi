@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -151,10 +152,25 @@ inline bool open_output(const std::string& path, std::ofstream& out)
     return true;
 }
 
+// An output CSV path with a guaranteed ".csv" extension (appended if missing),
+// so every companion file name below can be derived from it reliably.
+inline std::string with_csv_extension(const std::string& path)
+{
+    return std::filesystem::path(path).extension() == ".csv" ? path : path + ".csv";
+}
+
+// An output CSV path without its ".csv" — the base every run file is named from.
+inline std::string output_stem(const std::string& csv_path)
+{
+    std::filesystem::path p(csv_path);
+    if (p.extension() == ".csv") p.replace_extension();
+    return p.string();
+}
+
 // Companion qpos log path: <name>.csv -> <name>_qpos.csv.
 inline std::string qpos_path_for(const std::string& csv_path)
 {
-    return csv_path.substr(0, csv_path.rfind('.')) + "_qpos.csv";
+    return output_stem(csv_path) + "_qpos.csv";
 }
 
 // Columns every sim logs; each variant appends its own and then writes "\n".
@@ -196,6 +212,43 @@ inline void write_qpos_row(std::ostream& out, const mjModel* m, const mjData* d)
 
 inline bool has_fallen(const mjData* d) { return d->qpos[2] < kFallHeight; }
 
+// Rollout GIF path for a CSV: <name>.csv -> <name>.gif.
+inline std::string gif_path_for(const std::string& csv_path)
+{
+    return output_stem(csv_path) + ".gif";
+}
+
+// Single-quote a string for /bin/sh.
+inline std::string shell_quote(const std::string& s)
+{
+    std::string out = "'";
+    for (char c : s) out += (c == '\'') ? std::string("'\\''") : std::string(1, c);
+    return out + "'";
+}
+
+// Render a qpos log to a GIF with analysis/render_gif.py, replacing any existing
+// GIF at gif_path first so a failed render can't leave a stale one behind under
+// the new run's name. Uses $MUSCLE_MPPI_PYTHON if set (a Python with mujoco,
+// numpy, pyyaml and Pillow), else python3, and headless EGL rendering unless
+// MUJOCO_GL is already set. Returns true if the GIF was written.
+inline bool render_rollout_gif(const std::string& qpos_path, const std::string& gif_path,
+                               const std::string& task_name, const std::string& yaml_path)
+{
+    std::error_code ec;
+    std::filesystem::remove(gif_path, ec);
+
+    const char* py = std::getenv("MUSCLE_MPPI_PYTHON");
+    const std::string cmd =
+        std::string("MUJOCO_GL=\"${MUJOCO_GL:-egl}\" ") + shell_quote(py && *py ? py : "python3")
+        + " " + shell_quote(repo_path("analysis/render_gif.py"))
+        + " " + shell_quote(qpos_path) + " " + shell_quote(gif_path)
+        + " " + shell_quote(task_name) + " " + shell_quote(yaml_path);
+
+    std::fflush(stdout);   // keep our console lines ahead of the script's output
+    const int rc = std::system(cmd.c_str());
+    return rc == 0 && std::filesystem::exists(gif_path, ec);
+}
+
 // ============================================================================
 // Standalone sim program
 // ============================================================================
@@ -206,7 +259,8 @@ inline bool has_fallen(const mjData* d) { return d->qpos[2] < kFallHeight; }
 template <class Controller>
 struct SimSpec {
     std::string default_yaml;   // task file when [yaml] isn't given
-    std::string default_csv;    // output CSV when [output.csv] isn't given
+    std::string default_csv;    // output CSV when neither [output.csv] nor --name is given;
+                                // its folder is where --name <run> writes <run>.csv
 
     // Joint damping for the simulated model, matching the controller's rollout model.
     std::function<const double*(const Controller&)> joint_damping;
@@ -222,24 +276,62 @@ struct SimSpec {
 // Standalone MuJoCo simulation around an MPPI controller. No DDS, no real-time
 // constraint — MPPI runs as fast as possible against a local mjData
 // simulation. Usage:
-//   <sim> [task] [yaml] [output.csv] [--save <name>]
+//   <sim> [task] [yaml] [output.csv] [--name <run>] [--save <name>] [--no-gif]
+//
+// Output files are all named after the output CSV: <out>.csv, <out>_qpos.csv
+// and <out>.gif. By default that's spec.default_csv; --name <run> keeps the
+// default folder but names the files <run>.*, and an explicit [output.csv]
+// path sets it directly (a missing ".csv" is appended either way).
 //
 // Stands the robot up, runs kConvergenceSolves solves, then logs one CSV row
 // (and one qpos row) per control step until sim_duration elapses, the robot
-// falls, or the task's final phase is reached and held. The console lines are
-// parsed by run_trials.sh, so keep their wording stable.
+// falls, or the task's final phase is reached and held. Afterwards it deletes
+// any existing <output>.gif and, unless --no-gif is given, renders the logged
+// rollout to a fresh one; with --save the GIF is copied into the trial too. The
+// console lines are parsed by run_trials.sh, so keep their wording stable.
 template <class Controller>
 int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
 {
-    // --save is pulled out first so it can sit anywhere on the command line
-    // without shifting the positional [task] [yaml] [output.csv] arguments.
-    std::string trial_name;
-    const std::vector<std::string> args = trial_log::parse_args(argc, argv, trial_name);
+    // --save, --name and --no-gif are pulled out first so they can sit anywhere
+    // on the command line without shifting the positional [task] [yaml]
+    // [output.csv] arguments.
+    std::string trial_name, run_name;
+    bool make_gif = true;
+    std::vector<std::string> args;
+    const std::vector<std::string> raw = trial_log::parse_args(argc, argv, trial_name);
+    for (size_t i = 0; i < raw.size(); ++i) {
+        const std::string& arg = raw[i];
+        if (i == 0) { args.push_back(arg); continue; }   // argv[0]
+        if (arg == "--no-gif") {
+            make_gif = false;
+        } else if (arg == "--name") {
+            if (i + 1 >= raw.size()) { fprintf(stderr, "--name needs a run name\n"); return 1; }
+            run_name = raw[++i];
+        } else if (arg.rfind("--name=", 0) == 0) {
+            run_name = arg.substr(7);
+        } else {
+            args.push_back(arg);
+        }
+    }
     const size_t nargs = args.size();
+
+    if (!run_name.empty() && nargs >= 4) {
+        fprintf(stderr, "Give either an [output.csv] path or --name, not both.\n");
+        return 1;
+    }
+    if (run_name.find("..") != std::string::npos
+        || std::filesystem::path(run_name).is_absolute()) {
+        fprintf(stderr, "--name '%s' must be a plain name (optionally a subfolder), "
+                        "not a path outside the output folder.\n", run_name.c_str());
+        return 1;
+    }
 
     const std::string task_name = (nargs >= 2) ? args[1] : "walk";
     const std::string yaml_path = (nargs >= 3) ? args[2] : spec.default_yaml;
-    const std::string csv_path  = (nargs >= 4) ? args[3] : spec.default_csv;
+    const std::string csv_path  = with_csv_extension(
+        (nargs >= 4)        ? args[3]
+        : run_name.empty()  ? spec.default_csv
+        : (std::filesystem::path(spec.default_csv).parent_path() / run_name).string());
 
     printf("Task: %s  |  YAML: %s  |  CSV: %s\n",
            task_name.c_str(), yaml_path.c_str(), csv_path.c_str());
@@ -292,6 +384,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     int solve_count = 0;
     double solve_sum_ms = 0.0;
     bool converged = false;
+    int logged_rows = 0;
 
     while (sim_t < sim_duration) {
         // --- MPPI solve ---
@@ -327,6 +420,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
 
             // save full qpos for GIF rendering
             write_qpos_row(qpos_log, m, d);
+            ++logged_rows;
         }
 
         // --- safety: stop if robot falls ---
@@ -348,11 +442,36 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     printf("Avg MPPI solve: %.1f ms over %d solves\n",
            solve_sum_ms / solve_count, solve_count);
 
-    // Flush before copying — a run that fell still gets its partial logs saved.
+    // Flush before rendering/copying — a run that fell still gets its partial logs saved.
     csv.close();
     qpos_log.close();
+
+    // ── rollout GIF ──────────────────────────────────────────────────────────
+    // Always clear this output's previous GIF first — also under --no-gif and
+    // when there's nothing to render — so these CSVs are never left sitting next
+    // to another run's GIF.
+    const std::string gif_path = gif_path_for(csv_path);
+    {
+        std::error_code ec;
+        std::filesystem::remove(gif_path, ec);
+    }
+    if (make_gif) {
+        if (logged_rows == 0) {
+            printf("No rollout logged — skipping GIF.\n");
+        } else {
+            printf("Rendering rollout GIF...\n");
+            if (render_rollout_gif(qpos_path, gif_path, task_name, yaml_path))
+                printf("GIF saved to %s\n", gif_path.c_str());
+            else
+                fprintf(stderr, "GIF rendering failed (set MUSCLE_MPPI_PYTHON to a Python with "
+                                "mujoco, numpy, pyyaml and Pillow) — logs are unaffected.\n");
+        }
+    }
+
     if (!trial_name.empty()) {
-        const std::string trial_dir = trial_log::save(trial_name, {csv_path, qpos_path});
+        std::vector<std::string> files = {csv_path, qpos_path};
+        if (make_gif) files.push_back(gif_path);   // trial_log::save skips files that don't exist
+        const std::string trial_dir = trial_log::save(trial_name, files);
         if (!trial_dir.empty()) printf("Trial saved to %s\n", trial_dir.c_str());
     }
 

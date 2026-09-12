@@ -283,7 +283,7 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
         csv_path  = os.path.join(tmp_dir, "sim.csv")
 
         # Run mppi_sim
-        cmd = [MPPI_SIM, "walk", yaml_path, csv_path]
+        cmd = [MPPI_SIM, "walk", yaml_path, csv_path, "--no-gif"]   # no per-candidate GIF
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=SIM_TIMEOUT
@@ -368,7 +368,7 @@ def render_rollout(x, fps=RENDER_FPS):
         qpos_path = os.path.join(tmp_dir, "sim_qpos.csv")
 
         try:
-            result = subprocess.run([MPPI_SIM, "walk", yaml_path, csv_path],
+            result = subprocess.run([MPPI_SIM, "walk", yaml_path, csv_path, "--no-gif"],
                                     capture_output=True, text=True, timeout=SIM_TIMEOUT)
         except subprocess.TimeoutExpired:
             return None

@@ -19,6 +19,11 @@
 #   ./run_trials.sh -t walk -N flat          # different task, saved under flat/
 #   ./run_trials.sh --muscle-only            # skip the pd batch
 #   ./run_trials.sh --tee                    # also mirror each run's output to the terminal
+#   ./run_trials.sh --gif                    # also render each run's rollout GIF into its trial
+#
+# GIFs are off by default here (the sims pass --no-gif): rendering adds time to
+# every run's wall_s and tens of MB per trial across a 100-run batch. Note that
+# --no-gif still deletes the sims' working GIF under analysis/data/.
 #
 # Output layout:
 #   analysis/log/trials/<name>/muscle/trial_NNN/{mppi_sim.csv,mppi_sim_qpos.csv,console.log}
@@ -42,6 +47,7 @@ BATCH_NAME="workshop"
 RUN_MUSCLE=1
 RUN_PD=1
 TEE=0
+GIF_FLAG=(--no-gif)
 MUSCLE_YAML="../muscle/utils/tasks.yaml"
 PD_YAML="../pd/utils/tasks_pd.yaml"
 
@@ -60,6 +66,7 @@ while [[ $# -gt 0 ]]; do
         --muscle-only)    RUN_PD=0; shift ;;
         --pd-only)        RUN_MUSCLE=0; shift ;;
         --tee)            TEE=1; shift ;;
+        --gif)            GIF_FLAG=(); shift ;;
         -h|--help)        usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
     esac
@@ -128,15 +135,15 @@ trap 'ABORT=1; echo; echo "Interrupted — stopping after the current run."' INT
 run_one() {
     local label="$1" bin="$2" yaml="$3" save="$4" idx="$5" csv_base="$6"
     local tmp; tmp="$(mktemp)"
-    local cmd="./$bin $TASK $yaml --save $save"
+    local cmd="./$bin $TASK $yaml --save $save${GIF_FLAG[*]:+ ${GIF_FLAG[*]}}"
 
     local t0 t1 wall_ms rc
     t0="$(date +%s%N)"
     if (( TEE )); then
-        ( cd "$BUILD_DIR" && "${STDBUF[@]}" "./$bin" "$TASK" "$yaml" --save "$save" ) 2>&1 | tee "$tmp"
+        ( cd "$BUILD_DIR" && "${STDBUF[@]}" "./$bin" "$TASK" "$yaml" --save "$save" "${GIF_FLAG[@]}" ) 2>&1 | tee "$tmp"
         rc="${PIPESTATUS[0]}"
     else
-        ( cd "$BUILD_DIR" && "${STDBUF[@]}" "./$bin" "$TASK" "$yaml" --save "$save" ) >"$tmp" 2>&1
+        ( cd "$BUILD_DIR" && "${STDBUF[@]}" "./$bin" "$TASK" "$yaml" --save "$save" "${GIF_FLAG[@]}" ) >"$tmp" 2>&1
         rc=$?
     fi
     t1="$(date +%s%N)"

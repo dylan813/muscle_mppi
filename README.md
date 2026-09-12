@@ -77,17 +77,45 @@ python3 plot_force_velocity.py
 
 ```bash
 cd muscle_mppi/controllers/build
-./mppi_sim
-MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../../analysis/data/mppi_sim/mppi_sim_qpos.csv ../../analysis/data/mppi_sim/test.gif
+./mppi_sim                       # task "walk"; also renders the rollout GIF
+./mppi_sim walk_rough            # any task from tasks.yaml
+./mppi_sim walk --no-gif         # skip the GIF
+./mppi_sim walk_rough --name rough_test1   # name this run's output files
 python3 ../../analysis/log/plot_walk_leg.py <name>
 ```
 
+Working output (CSVs, GIFs, figures) goes to `analysis/data/`: `mppi_sim` writes `analysis/data/mppi_sim/mppi_sim.csv` + `mppi_sim_qpos.csv` + `mppi_sim.gif`, and `pd_mppi_sim` writes `analysis/data/pd_mppi_sim/pd_mppi_sim.csv` + `pd_mppi_sim_qpos.csv` + `pd_mppi_sim.gif`. The directories are created on first run if missing.
+
+## Naming runs
+
+A run's three files are always named after its output CSV: `<name>.csv`, `<name>_qpos.csv`, `<name>.gif`. Re-running with the same name replaces them; a different name leaves other runs' files alone.
+
+- **Default:** `./mppi_sim walk` writes `analysis/data/mppi_sim/mppi_sim.*`.
+- **`--name <run>`:** writes to the same folder under your name. You don't need the YAML or a path.
+  ```bash
+  ./mppi_sim walk_rough --name rough_test1       # analysis/data/mppi_sim/rough_test1.csv, rough_test1_qpos.csv, rough_test1.gif
+  ./pd_mppi_sim walk_rough --name rough_test1    # analysis/data/pd_mppi_sim/rough_test1.*
+  ./mppi_sim walk --name rough/test2             # a subfolder: analysis/data/mppi_sim/rough/test2.*
+  ```
+- **Full path:** a third positional argument still sets the output anywhere, e.g. `./mppi_sim walk ../muscle/utils/tasks.yaml /tmp/x.csv`. Give either a path or `--name`, not both.
+
+Leaving off `.csv` is fine in both forms; it's added for you. `--name` can't contain `..` or be an absolute path. Use a full path for that.
+
+## Rollout GIFs
+
+After each run, both sims render the logged rollout to a GIF next to the CSV (`<output>.gif`, e.g. `mppi_sim.gif`), using the task the run was simulated with so the scene matches. Every run first deletes any existing GIF of that name, then renders a new one, so the GIF next to the CSVs is always from the same run. That holds even when no new GIF is made: with `--no-gif`, after a failed render, or when the robot falls before logging starts, no GIF is left there.
+
+Rendering runs `analysis/render_gif.py` with `python3` and headless EGL (`MUJOCO_GL=egl` unless you've set `MUJOCO_GL`). That Python needs `mujoco`, `numpy`, `pyyaml` and `Pillow`. To use a different interpreter:
+
 ```bash
-./mppi_sim walk_rough
- MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py ../../analysis/data/mppi_sim/mppi_sim_qpos.csv ../../analysis/data/mppi_sim/walk_rough_test.gif walk_rough
+export MUSCLE_MPPI_PYTHON=/home/rml3/anaconda3/envs/mujoco/bin/python3
 ```
 
-Working output (CSVs, GIFs, figures) goes to `analysis/data/`: `mppi_sim` writes `analysis/data/mppi_sim/mppi_sim.csv` + `mppi_sim_qpos.csv`, and `pd_mppi_sim` writes `analysis/data/pd_mppi_sim/pd_mppi_sim.csv` + `pd_mppi_sim_qpos.csv`. The directories are created on first run if missing.
+If rendering fails, the sim prints a warning; its CSVs are unaffected. To re-render a run by hand (e.g. with a different output name):
+
+```bash
+MUJOCO_GL=egl python3 ../../analysis/render_gif.py ../../analysis/data/mppi_sim/mppi_sim_qpos.csv ../../analysis/data/mppi_sim/walk_rough_test.gif walk_rough
+```
 
 # Saving Trials
 
@@ -104,20 +132,21 @@ Each run lands in its own directory under `analysis/log/trials/`:
 
 ```
 analysis/log/trials/walk_baseline/
-  trial_001/mppi_sim.csv, mppi_sim_qpos.csv
-  trial_002/mppi_sim.csv, mppi_sim_qpos.csv
+  trial_001/mppi_sim.csv, mppi_sim_qpos.csv, mppi_sim.gif
+  trial_002/mppi_sim.csv, mppi_sim_qpos.csv, mppi_sim.gif
 ```
 
-The flag works alongside the positional arguments in any order (`./mppi_sim walk ../muscle/utils/tasks.yaml out.csv --save <name>`), and the working CSVs are still written to their usual location under `analysis/data/`, so `render_gif.py` and `plot_walk_leg.py` keep operating on the latest run unchanged.
+The flags work alongside the positional arguments in any order (`./mppi_sim walk --name baseline_run --save walk_baseline --no-gif`). `--save` picks the trial folder; the files inside keep the run's name (e.g. `baseline_run.csv`). With `--no-gif` the trial gets only the two CSVs. The working CSVs (and GIF, unless `--no-gif`) are still written to their usual location under `analysis/data/`, so `plot_walk_leg.py` keeps operating on the latest run unchanged.
 
-To plot or render a specific saved trial, point the scripts at that trial directory instead (run from `muscle_mppi/controllers/build/`):
+To plot a specific saved trial, point the script at that trial directory instead (run from `muscle_mppi/controllers/build/`):
 
 ```bash
 TRIAL=../../analysis/log/trials/walk_baseline/trial_001
 
 python3 ../../analysis/log/plot_walk_leg.py $TRIAL/mppi_sim.csv <name>
 
-MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render_gif.py $TRIAL/mppi_sim_qpos.csv $TRIAL/trial_001.gif walk
+# only needed for a trial saved with --no-gif:
+MUJOCO_GL=egl python3 ../../analysis/render_gif.py $TRIAL/mppi_sim_qpos.csv $TRIAL/mppi_sim.gif walk
 ```
 
 `plot_walk_leg.py` writes its plots beside the CSV it is given, so they stay with that trial's data. `render_gif.py` takes its output path explicitly (second argument), so give it a path inside the trial directory to keep the GIF there too. Its third argument is the task the trial was run with (`walk` above) — it must match, since the model path and dt are looked up from it.
@@ -132,7 +161,10 @@ MUJOCO_GL=egl /home/rml3/anaconda3/envs/mujoco/bin/python3 ../../analysis/render
 ./run_trials.sh -t walk -N flat          # different task, saved under flat/
 ./run_trials.sh --muscle-only            # or --pd-only
 ./run_trials.sh --tee                    # also mirror each run's output to the terminal
+./run_trials.sh --gif                    # also render each run's rollout GIF into its trial
 ```
+
+Unlike a single sim run, batches skip GIFs by default (`run_trials.sh` passes `--no-gif`). Rendering would add to every run's `wall_s` and cost tens of MB per trial across a 100-run batch; `--gif` turns them back on. The CMA-ES objective (`analysis/optimize/objective.py`) likewise runs `mppi_sim --no-gif`, since it renders its own wandb rollouts.
 
 Runs are strictly sequential — one sim process at a time, muscle batch first, then PD. Both binaries use every core for their rollout loop (`num_threads: 0`), so overlapping them would make the solve-time numbers meaningless. An `flock` on `analysis/log/trials/.run_trials.lock` also refuses to start a second batch while one is running.
 

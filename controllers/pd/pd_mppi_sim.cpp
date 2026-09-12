@@ -6,7 +6,8 @@
 // worrying about latency.
 //
 // Run from any directory (e.g. controllers/build/):
-//   ./pd_mppi_sim [task] [yaml] [output.csv] [--save <name>]
+//   ./pd_mppi_sim [task] [yaml] [output.csv] [--name <run>] [--save <name>] [--no-gif]
+//   ./pd_mppi_sim walk_rough --name rough_test1   # -> analysis/data/pd_mppi_sim/rough_test1.csv/_qpos.csv/.gif
 // Defaults read controllers/pd/utils/tasks_pd.yaml and write to
 // analysis/data/pd_mppi_sim/pd_mppi_sim.csv (a dedicated output directory,
 // mirroring analysis/data/mppi_sim/ for the muscle-actuated mppi_sim binary,
@@ -17,6 +18,11 @@
 // --save copies this run's CSVs, once it finishes, into
 // analysis/log/trials/<name>/trial_NNN/ — one directory per run, so
 // repeated trials of the same task accumulate instead of overwriting.
+//
+// After the run, the logged rollout is rendered to <output>.gif next to the CSV
+// (copied into the trial with --save). Any previous GIF of that name is always
+// deleted first, so --no-gif leaves no GIF there at all. See run_sim() in
+// common/harness.h.
 //
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, qdes_j0..qdes_j{NUM_JOINTS-1}
