@@ -34,7 +34,6 @@ struct MuscleParams {
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase
 // (common/task_config.h); this adds the muscle variant's own parameters.
 struct TaskConfig : TaskConfigBase {
-    double       height_target = 0.0;
     MuscleParams muscle;
 };
 

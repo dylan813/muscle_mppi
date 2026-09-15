@@ -145,9 +145,8 @@ public:
     PhaseSequencer& operator=(const PhaseSequencer&) = delete;
 
     // Load the gaits and activate phase 0. phases must outlive the sequencer.
-    // A task with no phases keeps a zero command except goal_pos z = default_goal_z.
-    void init(const std::vector<TaskPhase>& phases, const NamedGaitPaths& named,
-              double default_goal_z)
+    // A task with no phases keeps an all-zero command.
+    void init(const std::vector<TaskPhase>& phases, const NamedGaitPaths& named)
     {
         phases_ = &phases;
         named_  = &named;
@@ -157,8 +156,6 @@ public:
 
         if (!phases.empty())
             activate(0);
-        else
-            cmd_.goal_pos[2] = default_goal_z;  // z default for a phase-less task
     }
 
     // Call once per control tick, before the controller's update(). Advances to

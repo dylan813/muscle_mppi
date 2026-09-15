@@ -79,7 +79,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         if (p.gait_path.empty())
             ensure_activation_gait(kNamedGaitSources.at(resolve_gait_key(p, kNamedGaits)), muscle_);
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
-    phases_.init(task_.phases, kNamedGaits, task_.height_target);
+    phases_.init(task_.phases, kNamedGaits);
     apply_phase_noise();
 
     // Warm start: seed trajectory_ and real_act_ with activations that hold the

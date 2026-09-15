@@ -82,7 +82,7 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
     // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()),
     // then apply phase 0's noise override against the YAML baseline.
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
-    phases_.init(task_.phases, kNamedGaits, /*default_goal_z=*/0.0);
+    phases_.init(task_.phases, kNamedGaits);
     apply_phase_noise();
 
     // Seed trajectory_ and real_q_des_ with the task's nominal pose — sensible

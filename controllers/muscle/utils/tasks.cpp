@@ -12,15 +12,15 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     TaskConfig cfg;
     load_task_base(t, cfg);
 
-    cfg.height_target = t["height_target"] ? t["height_target"].as<double>() : 0.0;
-
     if (t["posture_bias"] || t["posture_FL1"] || t["posture_FL2"]
-        || (t["cost"] && t["cost"]["gait_stiffness"]) || t["stiffness"] || t["nominal_pose"])
+        || (t["cost"] && t["cost"]["gait_stiffness"]) || t["stiffness"] || t["nominal_pose"]
+        || t["height_target"])
         throw std::runtime_error("Task '" + task_name + "': posture_bias/posture_FL1/posture_FL2, "
-                                 "cost.gait_stiffness, a task-level 'stiffness' and nominal_pose are no "
-                                 "longer used — the warm start is computed at startup from the "
-                                 "settled stand-up and the co-contraction level is "
-                                 "muscle.stiffness. Update " + yaml_path);
+                                 "cost.gait_stiffness, a task-level 'stiffness', nominal_pose and "
+                                 "height_target are no longer used — the warm start is computed "
+                                 "at startup from the settled stand-up, the co-contraction level "
+                                 "is muscle.stiffness and the height target is each phase's "
+                                 "goal_pos z. Update " + yaml_path);
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();

@@ -72,7 +72,6 @@ default_muscle_quad: &default_muscle_quad
 # at a per-candidate regenerated gait file).
 walk:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
-  height_target: 0.34
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -124,7 +123,6 @@ walk:
 # edge of the field so the walk phase actually crosses it.
 walk_rough:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene_rough.xml"
-  height_target: 0.34
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -166,7 +164,6 @@ walk_rough:
 # with no mechanism to turn/walk diagonally. Not a bug to fix here.
 walk_octagon:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
-  height_target: 0.34
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -263,7 +260,6 @@ walk_octagon:
 # may need a revisit under these parameters.
 guinea_fowl:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
-  height_target: 0.44
   n_samples:     30
   horizon:       40
   lambda:        0.1
