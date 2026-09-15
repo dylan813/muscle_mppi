@@ -70,7 +70,7 @@ walk:
     pos_x:         300.0      # L1 x-position error to goal_pos[0]
     pos_y:         300.0      # L1 y-position error to goal_pos[1]
     pos_z:         500.0      # L1 height error to goal_pos[2]
-    orientation:   400000.0   # (1 - |qw|)^2 quaternion distance from upright
+    orientation:   400000.0   # (1 - |q . q_goal|)^2 distance from the goal-facing orientation
     vel_x:         1.0        # forward velocity tracking
     vel_y:         0.0001     # lateral velocity tracking
     vel_z:         0.0001     # vertical velocity tracking
@@ -156,7 +156,7 @@ walk_rough:
 # z=0.1) rather than on the base floor -- pd_mppi_sim's stand-up placement
 # assumes flat ground at z=0, so spawn_height_offset below tells it the
 # actual ground height under the spawn point. Field sits at x in [0.9, 2.9];
-# goal_pos is set past its far edge, with z raised to 0.44 (0.34 nominal
+# goal_pos is set past its far edge, with z raised to 0.37 (0.27 gait-implied
 # standing height + the 0.1 terrain elevation) so the height cost tracks
 # correctly while the robot is up on the platform/field.
 walk_rough_2:

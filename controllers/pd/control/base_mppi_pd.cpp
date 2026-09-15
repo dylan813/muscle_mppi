@@ -143,6 +143,12 @@ BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
     model_->opt.o_solref[0] = 0.02;
     model_->opt.o_solref[1] = 1.0;
 
+    // Pyramidal friction cones for the planner only, matching RTWholeBodyMPPI:
+    // its planner loads go1_scene_mppi_pyr.xml (cone="pyramidal") while its
+    // simulator loads go1_scene_mppi.xml (cone="elliptic"). pd_mppi_sim's "real
+    // world" model keeps go2.xml's elliptic cone, as their simulator does.
+    model_->opt.cone = mjCONE_PYRAMIDAL;
+
     data_.resize(task_.n_samples + 1);
     for (int i = 0; i <= task_.n_samples; ++i)
         data_[i] = mj_makeData(model_);

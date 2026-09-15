@@ -166,15 +166,22 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 // Whole-robot CoM position (world frame) and CoM velocity (body-frame axes).
 //
 // base_bid_ is the trunk (root) body, so its subtree is the entire robot
-// (trunk + all legs). d->subtree_com is the mass-weighted CoM of that whole
-// subtree and is already computed every step by mj_fwdPosition, so it's
-// free. Its velocity (d->subtree_linvel) is a diagnostic quantity MuJoCo
-// does NOT compute by default, so we call mj_subtreeVel() to populate it —
-// this is an extra O(nbody) pass on top of the regular step, cheap for this
-// model but not free. subtree_linvel comes out in world-aligned axes, so we
-// rotate it into the body frame the same way the old code rotated qvel.
+// (trunk + all legs): d->subtree_com is the mass-weighted CoM of that whole
+// subtree and d->subtree_linvel (filled by mj_subtreeVel) its velocity, in
+// world-aligned axes, rotated here into the body frame.
+//
+// Called right after mj_step(), which integrates qpos/qvel but leaves every
+// derived quantity (subtree_com, xmat, cvel, ...) at the PRE-step state. So the
+// kinematics are recomputed for the new state first — otherwise position and
+// velocity would score the previous step while orientation and the joint terms
+// (read straight from qpos/qvel) score this one. mj_kinematics + mj_comPos give
+// subtree_com/xmat, mj_comVel the cvel mj_subtreeVel needs; the next mj_step
+// recomputes all of these anyway, so the dynamics are unaffected.
 void MPPILocomotion::base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const
 {
+    mj_kinematics(model_, d);
+    mj_comPos(model_, d);
+    mj_comVel(model_, d);
     mj_subtreeVel(model_, d);
 
     const double* com = d->subtree_com + base_bid_ * 3;

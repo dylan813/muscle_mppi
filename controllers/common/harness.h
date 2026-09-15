@@ -193,7 +193,10 @@ struct SimSpec {
     std::function<const double*(const Controller&)> joint_damping;
 
     // Position logged as px/py/pz — whatever the controller's cost scores.
-    std::function<const double*(const mjData*, int base_bid)> log_position;
+    // Called right after mj_step(), so derived quantities in d (xpos,
+    // subtree_com, ...) are still at the pre-step state; d is mutable so a hook
+    // can recompute what it reads (the next mj_step recomputes them anyway).
+    std::function<const double*(const mjModel*, mjData*, int base_bid)> log_position;
 
     // Variant-specific CSV columns, each written with a leading ','.
     std::function<void(std::ostream&)>                    extra_header;
@@ -341,7 +344,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
 
         // --- log ---
         if (converged) {
-            write_csv_row_base(csv, sim_t, spec.log_position(d, base_bid), d, qv);
+            write_csv_row_base(csv, sim_t, spec.log_position(m, d, base_bid), d, qv);
             spec.extra_row(csv, mppi);
             csv << "\n";
 

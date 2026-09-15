@@ -43,7 +43,10 @@ int main(int argc, char** argv)
     spec.joint_damping = [](const MPPILocomotion& mppi) { return mppi.task_ref().muscle.kd_sim; };
 
     // Whole-robot CoM (base body's subtree_com), which step_cost() scores.
-    spec.log_position = [](const mjData* d, int base_bid) -> const double* {
+    // Recomputed for the post-step state first, as base_com_state() does.
+    spec.log_position = [](const mjModel* m, mjData* d, int base_bid) -> const double* {
+        mj_kinematics(m, d);
+        mj_comPos(m, d);
         return d->subtree_com + base_bid * 3;
     };
 

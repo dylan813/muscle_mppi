@@ -103,6 +103,4 @@ private:
     // Tracks the desired joint positions at the most recently issued command.
     // Seeds rollouts.
     double real_q_des_[NUM_JOINTS] = {};
-
-    int    base_bid_ = 1;
 };

@@ -73,7 +73,7 @@ int main(int argc, char** argv)
     spec.joint_damping = [](const MPPILocomotionPD& mppi) { return mppi.task_ref().pd.joint_damping; };
 
     // Trunk origin = free-joint qpos[0:3], which step_cost() scores.
-    spec.log_position = [](const mjData* d, int) -> const double* { return d->qpos; };
+    spec.log_position = [](const mjModel*, mjData* d, int) -> const double* { return d->qpos; };
 
     spec.extra_header = [](std::ostream& csv) {
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_j" << j;

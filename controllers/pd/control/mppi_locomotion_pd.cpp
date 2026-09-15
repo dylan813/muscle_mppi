@@ -49,8 +49,6 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
 {
     pd_ = task_.pd;
 
-    base_bid_ = find_base_body(model_);
-
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
         const YAML::Node& c = root[task_name]["cost"];
@@ -157,14 +155,21 @@ void MPPILocomotionPD::base_state(mjData* d, double pos[3], double vel_body[3]) 
     // quadruped_cost_np's x[:, :3] is qpos[0:3] and x[:, 19:22] is qvel[0:3]
     // (mppi_locomotion.py:240, 287-288), taken straight out of the rollout
     // state — never a center-of-mass quantity. MuJoCo's free joint reports
-    // qvel[0:3] in world axes, so rotate into the body frame by R^T (xmat is
-    // body->world), which is what RTWholeBodyMPPI's
-    // batch_world_to_local_velocity does via rotation.inv().apply().
+    // qvel[0:3] in world axes, so rotate into the body frame by R^T, which is
+    // what RTWholeBodyMPPI's batch_world_to_local_velocity does via
+    // rotation.inv().apply() on the rollout state's own quaternion.
+    //
+    // The rotation is built from qpos[3:7], not d->xmat: step_cost() runs right
+    // after mj_step(), which integrates qpos but leaves xmat at the pre-step
+    // orientation, so xmat would rotate this step's velocity by last step's
+    // orientation.
     pos[0] = d->qpos[0];
     pos[1] = d->qpos[1];
     pos[2] = d->qpos[2];
 
-    world_to_body(d->xmat + base_bid_ * 9, d->qvel, vel_body);
+    double rot[9];
+    mju_quat2Mat(rot, d->qpos + 3);
+    world_to_body(rot, d->qvel, vel_body);
 }
 
 double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],
