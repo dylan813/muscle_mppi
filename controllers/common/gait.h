@@ -77,8 +77,9 @@ private:
     bool loaded_   = false;
 };
 
-// Categorical gait name -> repo-relative TSV path (each variant has its own table).
-using NamedGaitPaths = std::unordered_map<std::string, const char*>;
+// Categorical gait name -> TSV path, repo-relative or absolute (each variant has
+// its own table).
+using NamedGaitPaths = std::unordered_map<std::string, std::string>;
 
 // Resolves a phase to the key its gait is loaded/stored under: an explicit
 // gait_path override (if set) is keyed by its own path string; otherwise
@@ -99,17 +100,19 @@ inline std::string resolve_gait_key(const TaskPhase& p, const NamedGaitPaths& na
     return p.desired_gait;
 }
 
-// Load every named gait up front (mirrors RTWholeBodyMPPI's self.gaits dict),
-// plus any per-phase gait_path override not already covered, keyed as
-// resolve_gait_key() expects.
+// Load every gait the task's phases use, once each, keyed as resolve_gait_key()
+// expects: named gaits from `named`, per-phase gait_path overrides from their own
+// path. Named gaits no phase uses aren't loaded. Resolving every phase here also
+// reports an unknown desired_gait at startup rather than when that phase is reached.
 template <class Gait>
 void load_gaits(std::unordered_map<std::string, Gait>& gaits, const NamedGaitPaths& named,
                 const std::vector<TaskPhase>& phases)
 {
-    for (const auto& kv : named) gaits[kv.first].load(repo_path(kv.second));
-    for (const auto& p : phases)
-        if (!p.gait_path.empty() && !gaits.count(p.gait_path))
-            gaits[p.gait_path].load(p.gait_path);
+    for (const auto& p : phases) {
+        const std::string key = resolve_gait_key(p, named);
+        if (gaits.count(key)) continue;
+        gaits[key].load(p.gait_path.empty() ? repo_path(named.at(key)) : p.gait_path);
+    }
 }
 
 // ============================================================================
@@ -143,8 +146,7 @@ public:
         phases_ = &phases;
         named_  = &named;
 
-        // Load the canonical named gaits up front (mirrors RTWholeBodyMPPI's
-        // self.gaits dict), plus any per-phase gait_path override not already covered.
+        // Load every gait the phases use (named gaits and gait_path overrides).
         load_gaits(gaits_, named, phases);
 
         if (!phases.empty())

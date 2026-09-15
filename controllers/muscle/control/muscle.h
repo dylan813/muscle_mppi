@@ -59,7 +59,7 @@ static inline double passive_force_length(double length, double max, double b) {
 // tau_req is the joint torque to produce: qfrc_bias (gravity + Coriolis) in the
 // gait-tracking cost, as during gait generation; the standing holding torque
 // (qfrc_bias − qfrc_constraint) for the warm start.
-// stiffness in [0,1] (TaskConfig::stiffness): 0.5 = minimum co-contraction
+// stiffness in [0,1] (MuscleParams::stiffness): 0.5 = minimum co-contraction
 // midpoint, 1.0 = maximum co-contraction.
 static inline void hill_invert_torque(
     double q, double dq, double tau_req, int j,

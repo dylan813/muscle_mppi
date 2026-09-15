@@ -13,11 +13,11 @@
 // Named gaits
 // ============================================================================
 //
-// A fixed set of categorical gaits, each backed by one pre-generated
-// joint-angle gait TSV (position rows only, extracted from RTWholeBodyMPPI's
-// original joint-space gait library — see pd/gaits/ and
-// analysis/unit_tests/generate_pd_gaits.py) from the FAST/MED library in
-// controllers/pd/gaits/. A phase selects a gait by name (TaskPhase::desired_gait)
+// A fixed set of categorical gaits, each backed by one joint-space gait TSV
+// (joint position + velocity rows) from controllers/pd/gaits/ — a verbatim copy
+// of RTWholeBodyMPPI's 100 Hz raibert gait library, which is also the source
+// the muscle variant generates its activation gaits from
+// (muscle/control/activation_gait.h). A phase selects a gait by name (TaskPhase::desired_gait)
 // or, as an escape hatch, an explicit TSV path (TaskPhase::gait_path) — see
 // resolve_gait_key() in common/gait.h. Same 4-gait mapping as the muscle variant
 // (muscle/control/mppi_locomotion.cpp's kNamedGaits). Paths are repo-relative

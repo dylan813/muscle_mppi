@@ -35,8 +35,7 @@ from PIL import Image
 # ── paths ─────────────────────────────────────────────────────────────────────
 _DIR       = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_DIR, "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml")
-SRC_GAIT_DIR = os.path.join(_DIR, "../../../RTWholeBodyMPPI/legged_mppi/"
-                                   "whole_body_mppi/control/gait_scheduler/gaits")
+SRC_GAIT_DIR = os.path.join(_DIR, "../../controllers/pd/gaits")   # RTWholeBodyMPPI's 100 Hz library
 ACT_GAIT_DIR = os.path.join(_DIR, "../../controllers/muscle/gaits")
 
 gait_key = sys.argv[1] if len(sys.argv) > 1 else "FAST_0_1_10cm"
@@ -48,8 +47,7 @@ tier   = parts[0]
 height = parts[-1]
 vel    = "_".join(parts[1:-1])
 
-src_gait_path = os.path.join(SRC_GAIT_DIR, tier,
-                              f"walking_gait_raibert_{tier}_{vel}_{height}_100hz.tsv")
+src_gait_path = os.path.join(SRC_GAIT_DIR, tier, f"gait_{gait_key}.tsv")
 act_gait_path = os.path.join(ACT_GAIT_DIR, tier, f"activation_gait_{gait_key}.tsv")
 
 for p in (src_gait_path, act_gait_path):

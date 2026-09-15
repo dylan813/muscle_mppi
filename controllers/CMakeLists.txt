@@ -30,6 +30,7 @@ add_executable(muscle_mppi_controller
     muscle/mppi_controller.cpp
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
+    muscle/control/activation_gait.cpp
     muscle/utils/tasks.cpp
     common/task_config.cpp
 )
@@ -40,6 +41,7 @@ add_executable(mppi_sim
     muscle/mppi_sim.cpp
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
+    muscle/control/activation_gait.cpp
     muscle/utils/tasks.cpp
     common/task_config.cpp
 )

@@ -11,7 +11,7 @@ controllers/common/harness.h):
 Outputs:
   constraint_lines.png        — constraint line per joint coloured by K
   stiffness_cocontraction.png — K (N·m/rad) vs. total activation (a1+a2) per joint
-and prints each joint's warm-start anchor at the task's `stiffness` (the same
+and prints each joint's warm-start anchor at `muscle.stiffness` (the same
 activations MPPILocomotion computes at startup, up to the stand-up details below).
 
 Run from anywhere; paths are relative to this file.
@@ -36,7 +36,7 @@ with open(YAML_PATH) as f:
 
 muscle       = cfg["default_muscle_quad"]
 walk         = cfg["walk"]
-STIFFNESS    = walk["stiffness"]       # co-contraction level used for the warm-start anchor
+STIFFNESS    = muscle["stiffness"]     # co-contraction level used for the warm-start anchor
 
 lce_min    = muscle["lce_min"][:3]
 lce_max    = muscle["lce_max"][:3]

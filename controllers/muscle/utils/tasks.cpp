@@ -14,16 +14,12 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
 
     cfg.height_target = t["height_target"] ? t["height_target"].as<double>() : 0.0;
 
-    cfg.stiffness = t["stiffness"] ? t["stiffness"].as<double>() : 0.75;
-    if (!(cfg.stiffness >= 0.0 && cfg.stiffness <= 1.0))
-        throw std::runtime_error("Field 'stiffness': expected a value in [0, 1], got "
-                                 + std::to_string(cfg.stiffness));
     if (t["posture_bias"] || t["posture_FL1"] || t["posture_FL2"]
-        || (t["cost"] && t["cost"]["gait_stiffness"]))
-        throw std::runtime_error("Task '" + task_name + "': posture_bias/posture_FL1/posture_FL2 "
-                                 "and cost.gait_stiffness are no longer used — the warm start is "
-                                 "computed at startup and the co-contraction level is the "
-                                 "task-level 'stiffness'. Remove them from " + yaml_path);
+        || (t["cost"] && t["cost"]["gait_stiffness"]) || t["stiffness"])
+        throw std::runtime_error("Task '" + task_name + "': posture_bias/posture_FL1/posture_FL2, "
+                                 "cost.gait_stiffness and a task-level 'stiffness' are no longer "
+                                 "used — the warm start is computed at startup and the "
+                                 "co-contraction level is muscle.stiffness. Update " + yaml_path);
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();
@@ -36,6 +32,11 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     load_doubles(m["FVmax"],      cfg.muscle.FVmax,      NUM_JOINTS, "FVmax");
     load_doubles(m["pFLmax"],     cfg.muscle.pFLmax,     NUM_JOINTS, "pFLmax");
     load_doubles(m["kd_sim"],     cfg.muscle.kd_sim,     NUM_JOINTS, "kd_sim");
+
+    cfg.muscle.stiffness = m["stiffness"] ? m["stiffness"].as<double>() : 0.75;
+    if (!(cfg.muscle.stiffness >= 0.0 && cfg.muscle.stiffness <= 1.0))
+        throw std::runtime_error("Field 'muscle.stiffness': expected a value in [0, 1], got "
+                                 + std::to_string(cfg.muscle.stiffness));
 
     return cfg;
 }

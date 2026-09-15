@@ -1,4 +1,5 @@
 #include "mppi_locomotion.h"
+#include "activation_gait.h"
 #include "../../common/control_utils.h"
 #include "../../common/harness.h"   // settle_standing() for the warm start
 
@@ -15,22 +16,27 @@
 // ============================================================================
 //
 // Mirrors RTWholeBodyMPPI's GAIT_*_PATH constants (mppi_locomotion.py): a fixed
-// set of categorical gaits, each backed by one pre-generated activation-gait TSV
-// from the FAST/MED/SLOW library in controllers/muscle/gaits/. A phase selects a gait by name
-// (TaskPhase::desired_gait) or, as an escape hatch, an explicit TSV path
-// (TaskPhase::gait_path) — see resolve_gait_key() in common/gait.h. Paths
-// are repo-relative and resolved with repo_path() at load time.
-static const char* GAIT_INPLACE_PATH   = "controllers/muscle/gaits/FAST/activation_gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH      = "controllers/muscle/gaits/MED/activation_gait_MED_0_1_10cm.tsv";
-static const char* GAIT_WALK_FAST_PATH = "controllers/muscle/gaits/FAST/activation_gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH      = "controllers/muscle/gaits/MED/activation_gait_MED_0_5_15cm.tsv";
-
-static const NamedGaitPaths kNamedGaits = {
-    {"in_place",  GAIT_INPLACE_PATH},
-    {"walk",      GAIT_WALK_PATH},
-    {"walk_fast", GAIT_WALK_FAST_PATH},
-    {"trot",      GAIT_TROT_PATH},
+// set of categorical gaits, each the activation version of one joint-space
+// source gait in controllers/pd/gaits/. The activation files are generated into
+// controllers/muscle/gaits/ at startup whenever they're missing or were built
+// with different muscle parameters/stiffness (muscle/control/activation_gait.h).
+// A phase selects a gait by name (TaskPhase::desired_gait) or, as an escape
+// hatch, an explicit TSV path (TaskPhase::gait_path, used as-is) — see
+// resolve_gait_key() in common/gait.h.
+static const std::unordered_map<std::string, std::string> kNamedGaitSources = {
+    {"in_place",  "FAST_0_0_10cm"},
+    {"walk",      "MED_0_1_10cm"},
+    {"walk_fast", "FAST_0_1_10cm"},
+    {"trot",      "MED_0_5_15cm"},
 };
+
+static NamedGaitPaths named_activation_gaits()
+{
+    NamedGaitPaths named;
+    for (const auto& kv : kNamedGaitSources) named[kv.first] = activation_gait_path(kv.second);
+    return named;
+}
+static const NamedGaitPaths kNamedGaits = named_activation_gaits();
 
 // ============================================================================
 // Constructor
@@ -65,8 +71,13 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
     }
 
-    // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()),
-    // then apply phase 0's noise override against the YAML baseline.
+    // Make every named gait the phases use current for these muscle parameters
+    // (regenerating it if needed), then load the task's gaits and activate
+    // phase 0 (see PhaseSequencer::init()), then apply phase 0's noise override
+    // against the YAML baseline.
+    for (const TaskPhase& p : task_.phases)
+        if (p.gait_path.empty())
+            ensure_activation_gait(kNamedGaitSources.at(resolve_gait_key(p, kNamedGaits)), muscle_);
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
     phases_.init(task_.phases, kNamedGaits, task_.height_target);
     apply_phase_noise();
@@ -76,14 +87,14 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     // do (settle_standing(), common/harness.h — same stand-up, timestep, joint
     // damping and spawn height), so the pose and holding torques are the ones
     // MPPI actually takes over from. Each joint's activation pair is then the
-    // point on its torque-balance line at task_.stiffness (hill_invert_torque,
+    // point on its torque-balance line at muscle.stiffness (hill_invert_torque,
     // static so FV = 1 — the same inversion the gait-tracking cost uses).
     {
         const StandingEquilibrium stand = settle_standing(model_, task_.spawn_height_offset);
         double seed[NUM_MUSCLES] = {};
         for (int j = 0; j < NUM_JOINTS; ++j)
             hill_invert_torque(stand.q[j], /*dq=*/0.0, stand.tau[j], j, muscle_,
-                               task_.stiffness, seed[2 * j], seed[2 * j + 1]);
+                               muscle_.stiffness, seed[2 * j], seed[2 * j + 1]);
         for (int t = 0; t < task_.horizon; ++t)
             for (int m = 0; m < NUM_MUSCLES; ++m)
                 trajectory_[t * NUM_MUSCLES + m] = seed[m];
@@ -208,7 +219,7 @@ double MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES])
         const double dq_j  = d->qvel[act_qvel_adr_[j]];
         const double tau_j = d->qfrc_bias[act_qvel_adr_[j]];
         double a1_imp, a2_imp;
-        hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, task_.stiffness, a1_imp, a2_imp);
+        hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, muscle_.stiffness, a1_imp, a2_imp);
         const double e1 = a1_imp - gait_ref[2 * j];
         const double e2 = a2_imp - gait_ref[2 * j + 1];
         cost += w.gait_ref_weights[j] * (e1*e1 + e2*e2);
@@ -319,7 +330,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
                     const double dq_j  = dl->qvel[act_qvel_adr_[j]];
                     const double tau_j = dl->qfrc_bias[act_qvel_adr_[j]];
                     double a1_imp, a2_imp;
-                    hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, task_.stiffness, a1_imp, a2_imp);
+                    hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, muscle_.stiffness, a1_imp, a2_imp);
                     const double e1 = a1_imp - gref[2 * j];
                     const double e2 = a2_imp - gref[2 * j + 1];
                     c_gait += cost_.gait_ref_weights[j] * (e1*e1 + e2*e2);

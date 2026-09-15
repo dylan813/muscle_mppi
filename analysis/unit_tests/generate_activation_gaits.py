@@ -18,11 +18,19 @@ The midpoint of the feasible segment of this line on [0,1]² gives the nominal
 activation pair (a1*(t), a2*(t)) for each joint at each gait phase.
 
 Output: 24 × N TSV files saved to controllers/muscle/gaits/
+    line 1     = "# activation_gait source=<key> stiffness=<s> muscle=<fingerprint>"
     rows  0-11 = a1 (agonist)  per joint  [FR_hip, FR_thigh, FR_calf, FL..., RR..., RL...]
     rows 12-23 = a2 (antagonist) per joint (same order)
 
-Source gait TSVs: the 4 files actually used by RTWholeBodyMPPI (in_place, walk,
-walk_fast, trot). These carry joint positions/velocities for a Go1 robot but are
+The controllers generate the gaits a task uses on their own at startup (identical
+output, muscle/control/activation_gait.cpp) whenever the header doesn't match the
+current muscle parameters and stiffness — this script regenerates the whole
+library at once and draws the per-tier plots. It uses the same header, so files
+it writes count as current.
+
+Source gait TSVs: RTWholeBodyMPPI's 100 Hz raibert gait library, copied into
+controllers/pd/gaits/ (the 4 used by the named gaits: in_place, walk, walk_fast,
+trot, plus the rest of the library). These carry joint positions/velocities for a Go1 robot but are
 applied to the Go2 model here — treat as a gait pattern template, not an exact
 kinematic match.
 
@@ -42,8 +50,7 @@ _DIR       = os.path.dirname(os.path.abspath(__file__))
 YAML_PATH  = os.path.join(_DIR,  "../../controllers/muscle/utils/tasks.yaml")
 MODEL_PATH = os.path.join(_DIR,  "../../unitree_mujoco/unitree_robots/go2/scene_suspended.xml")
 OUT_DIR    = os.path.join(_DIR,  "../../controllers/muscle/gaits")
-GAIT_DIR   = os.path.join(_DIR,  "../../../RTWholeBodyMPPI/legged_mppi/"
-                                  "whole_body_mppi/control/gait_scheduler/gaits")
+GAIT_DIR   = os.path.join(_DIR,  "../../controllers/pd/gaits")
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -66,7 +73,7 @@ GAIT_FILES = {}   # key → (path, tier, vel, height)
 for tier in TIERS:
     for vel in VELOCITIES:
         for height in HEIGHTS:
-            fname = f"walking_gait_raibert_{tier}_{vel}_{height}_100hz.tsv"
+            fname = f"gait_{tier}_{vel}_{height}.tsv"
             fpath = os.path.join(GAIT_DIR, tier, fname)
             if os.path.exists(fpath):
                 GAIT_FILES[f"{tier}_{vel}_{height}"] = (fpath, tier, vel, height)
@@ -144,7 +151,25 @@ def lce_pair(q, j):
 #   0.5 = midpoint (minimum co-contraction, original behaviour)
 #   1.0 = high-activation end (maximum co-contraction on the constraint line)
 # Higher values → stiffer joint, more robust to perturbations, less efficient.
-STIFFNESS = 0.75
+STIFFNESS = float(muscle["stiffness"])   # default_muscle_quad.stiffness in tasks.yaml
+
+
+def muscle_fingerprint():
+    """Same hash as muscle_fingerprint() in controllers/muscle/control/activation_gait.cpp:
+    FNV-1a 64 over the generator version and every parameter the gait depends on,
+    each formatted "%.17g;"."""
+    h = 1469598103934665603
+    def feed(s):
+        nonlocal h
+        for c in s.encode():
+            h = ((h ^ c) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    feed("v1;")
+    feed("stiffness"); feed("%.17g;" % STIFFNESS)
+    for name in ("lce_min", "lce_max", "phi_min", "phi_max", "pFLmax", "FVmax", "vmax", "peak_force"):
+        feed(name)
+        for v in muscle[name]:
+            feed("%.17g;" % float(v))
+    return "%016x" % h
 
 def constraint_midpoint(q, dq, tau_req, j):
     """
@@ -262,7 +287,8 @@ for gait_key, (gait_path, tier, vel, height) in GAIT_FILES.items():
     out_array = np.vstack([a1_out, a2_out])   # (24, N)
     out_fname = f"activation_gait_{gait_key}.tsv"
     out_path  = os.path.join(tier_out_dir, out_fname)
-    np.savetxt(out_path, out_array, delimiter='\t', fmt='%.8f')
+    header = f"activation_gait source={gait_key} stiffness={STIFFNESS!r} muscle={muscle_fingerprint()}"
+    np.savetxt(out_path, out_array, delimiter='\t', fmt='%.8f', header=header, comments='# ')
 
     total_inf = n_infeasible.sum()
     inf_str   = f"  ⚠ {total_inf} infeasible phases (clamped)" if total_inf else ""

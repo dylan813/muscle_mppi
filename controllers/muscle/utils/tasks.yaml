@@ -50,6 +50,14 @@ default_muscle_quad: &default_muscle_quad
   # Overrides the go2.xml default of 0.1. Values should match Go2 motor driver kd gains.
   kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
 
+  # Co-contraction level in [0, 1]: where on each joint's torque-balance line
+  # (all activation pairs producing the needed torque) activations are chosen.
+  # 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the warm
+  # start (holding the standing pose, computed at startup), the gait-tracking
+  # cost, and generating the activation gaits in controllers/muscle/gaits/,
+  # which are regenerated automatically when this or the muscle parameters above change.
+  stiffness:   0.75
+
 # -----------------------------------------------------------------------
 # Locomotion task
 #
@@ -105,14 +113,6 @@ walk:
   # Per-joint activation noise (applied independently to both muscles of each pair).
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 
-  # Co-contraction level in [0, 1]: where on each joint's torque-balance line
-  # (all activation pairs producing the needed torque) activations are chosen.
-  # 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the
-  # warm start (holding the standing pose, computed at startup) and for the
-  # gait-tracking cost — so it must match the stiffness the activation gait
-  # TSVs were generated with.
-  stiffness: 0.75
-
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
@@ -158,8 +158,6 @@ walk_rough:
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
-
-  stiffness: 0.75
 
   muscle: *default_muscle_quad
 
@@ -249,8 +247,6 @@ walk_octagon:
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 
-  stiffness: 0.75
-
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
@@ -311,7 +307,5 @@ guinea_fowl:
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
-
-  stiffness: 0.75
 
   muscle: *default_muscle_quad

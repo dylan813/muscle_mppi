@@ -29,9 +29,7 @@ from PIL import Image
 _DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_DIR, "../../unitree_mujoco/unitree_robots/go2/scene.xml")
 YAML_PATH = os.path.join(_DIR, "../../controllers/muscle/utils/tasks.yaml")
-DEFAULT_GAIT = os.path.join(
-    _DIR, "../../../RTWholeBodyMPPI/legged_mppi/whole_body_mppi/control/"
-          "gait_scheduler/gaits/MED/walking_gait_raibert_MED_0_1_10cm_100hz.tsv")
+DEFAULT_GAIT = os.path.join(_DIR, "../../controllers/pd/gaits/MED/gait_MED_0_1_10cm.tsv")
 
 gait_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_GAIT
 gif_path  = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_DIR, "../videos/raibert_gait_reference.gif")

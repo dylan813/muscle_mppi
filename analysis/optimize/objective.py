@@ -254,7 +254,7 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
                                 "activation_gait_FAST_0_1_10cm.tsv")
         try:
             n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=walk_cfg["stiffness"])
+                                  stiffness=muscle_params["stiffness"])
         except Exception as e:
             if verbose:
                 print(f"  [w{worker_id}] gait generation failed: {e}")
@@ -345,7 +345,7 @@ def render_rollout(x, fps=RENDER_FPS):
                                 "activation_gait_FAST_0_1_10cm.tsv")
         try:
             n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=walk_cfg["stiffness"])
+                                  stiffness=muscle_params["stiffness"])
         except Exception:
             return None
         if n_inf > 0:

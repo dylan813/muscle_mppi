@@ -21,6 +21,14 @@ struct MuscleParams {
     double FVmax[NUM_JOINTS]      = {};        // eccentric force amplification (>1)
     double pFLmax[NUM_JOINTS]     = {};        // passive force at max extension
     double kd_sim[NUM_JOINTS]     = {};        // MuJoCo joint damping (applied to sim dofs)
+
+    // Co-contraction level in [0, 1]: where on the torque-balance line (all
+    // activation pairs producing the required joint torque) activations are
+    // chosen. 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for
+    // the warm start (holding the settled standing pose), for inverting rollout
+    // states in the gait-tracking cost, and for generating the activation gaits
+    // (muscle/control/activation_gait.h), which regenerate when it changes.
+    double stiffness = 0.75;
 };
 
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase
@@ -28,14 +36,6 @@ struct MuscleParams {
 struct TaskConfig : TaskConfigBase {
     double       height_target = 0.0;
     MuscleParams muscle;
-
-    // Co-contraction level in [0, 1]: where on the torque-balance line (all
-    // activation pairs producing the required joint torque) activations are
-    // chosen. 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for
-    // both the warm start (holding the settled standing pose) and inverting
-    // rollout states in the gait-tracking cost, so it must also match the
-    // stiffness the activation gait TSVs were generated with.
-    double       stiffness = 0.75;
 };
 
 TaskConfig load_task(const std::string& task_name,
