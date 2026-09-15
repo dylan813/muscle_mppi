@@ -16,7 +16,7 @@ Usage (run from anywhere; paths are relative to this file):
 
 Defaults:
     gait.tsv = RTWholeBodyMPPI's 'walk' gait (GAIT_WALK_PATH in mppi_locomotion.py)
-    output   = ../videos/raibert_gait_reference.gif
+    output   = ../data/videos/raibert_gait_reference.gif
 """
 
 import sys
@@ -32,7 +32,7 @@ YAML_PATH = os.path.join(_DIR, "../../controllers/muscle/utils/tasks.yaml")
 DEFAULT_GAIT = os.path.join(_DIR, "../../controllers/pd/gaits/MED/gait_MED_0_1_10cm.tsv")
 
 gait_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_GAIT
-gif_path  = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_DIR, "../videos/raibert_gait_reference.gif")
+gif_path  = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_DIR, "../data/videos/raibert_gait_reference.gif")
 
 DT = 0.002            # physics timestep (500 Hz), matches test_gait_pos.cpp
 GAIT_HZ = 100.0        # gait file phase rate

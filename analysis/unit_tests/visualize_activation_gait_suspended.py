@@ -23,7 +23,7 @@ Usage (run from anywhere; paths are relative to this file):
 
 Defaults:
     gait_key = FAST_0_1_10cm
-    output   = ../videos/activation_gait_suspended_<gait_key>.gif
+    output   = ../data/videos/activation_gait_suspended_<gait_key>.gif
 """
 
 import sys
@@ -40,7 +40,7 @@ ACT_GAIT_DIR = os.path.join(_DIR, "../../controllers/muscle/gaits")
 
 gait_key = sys.argv[1] if len(sys.argv) > 1 else "FAST_0_1_10cm"
 gif_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
-    _DIR, "../videos", f"activation_gait_suspended_{gait_key}.gif")
+    _DIR, "../data/videos", f"activation_gait_suspended_{gait_key}.gif")
 
 parts  = gait_key.split("_")
 tier   = parts[0]

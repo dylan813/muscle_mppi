@@ -51,7 +51,7 @@ For recording rollout,
 ```bash
 sudo apt install ffmpeg
 cd muscle_mppi/unitree_mujoco/simulate/build
-./unitree_mujoco -r go2 -s scene.xml -o ../../../analysis/videos/run.mp4
+./unitree_mujoco -r go2 -s scene.xml -o ../../../analysis/data/videos/run.mp4
 ```
 
 Terminal 2: Run muscle-inspired torque-level MPPI controller
@@ -64,7 +64,7 @@ cd muscle_mppi/controllers/build
 ```bash
 sudo apt install xvfb
 Xvfb :99 -screen 0 1280x720x24 &
-DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
+DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/data/videos/run.mp4
 ``` -->
 
 # Plots

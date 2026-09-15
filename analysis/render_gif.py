@@ -6,12 +6,12 @@ velocity and per-muscle activation columns for FR-leg plotting via
 analysis/plot/plot_walk_leg.py — this script only reads the qpos companion and
 ignores that file.
 
-Usage (from controllers/build/):
-    python3 ../../analysis/render_gif.py [qpos_csv] [output.gif] [task_name] [tasks_yaml]
+Usage (from anywhere; the sims call it automatically after each run):
+    python3 analysis/render_gif.py [qpos_csv] [output.gif] [task_name] [tasks_yaml]
 
 Defaults:
-    qpos_csv   = mppi_sim_qpos.csv
-    output     = mppi_sim.gif
+    qpos_csv   = analysis/data/mppi_sim/mppi_sim_qpos.csv (mppi_sim's working log)
+    output     = analysis/data/mppi_sim/mppi_sim.gif
     task_name  = none -> renders against the flat go2/scene.xml (old behavior)
     tasks_yaml = ../controllers/muscle/utils/tasks.yaml (relative to this script)
 
@@ -39,8 +39,9 @@ DEFAULT_TASKS_YAML  = os.path.join(_DIR, "../controllers/muscle/utils/tasks.yaml
 # not this script's dir.
 TASKS_YAML_BASE_DIR = os.path.join(_DIR, "..")
 
-qpos_path  = sys.argv[1] if len(sys.argv) > 1 else "mppi_sim_qpos.csv"
-gif_path   = sys.argv[2] if len(sys.argv) > 2 else "mppi_sim.gif"
+DEFAULT_OUT_DIR     = os.path.join(_DIR, "data", "mppi_sim")
+qpos_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(DEFAULT_OUT_DIR, "mppi_sim_qpos.csv")
+gif_path   = sys.argv[2] if len(sys.argv) > 2 else os.path.join(DEFAULT_OUT_DIR, "mppi_sim.gif")
 task_name  = sys.argv[3] if len(sys.argv) > 3 else None
 tasks_yaml = sys.argv[4] if len(sys.argv) > 4 else DEFAULT_TASKS_YAML
 
