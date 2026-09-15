@@ -1,7 +1,9 @@
 """
-Stiffness vs. co-contraction at the nominal standing pose.
+Stiffness vs. co-contraction at the standing pose.
 
-For each joint type (hip, thigh, calf), at the standing nominal_pose:
+For each joint type (hip, thigh, calf), at the pose the robot settles into after
+the same stand-up the sims and controllers run (target kStandUpPose in
+controllers/common/harness.h):
   1. Extracts gravitational torques via MuJoCo (qfrc_bias at qvel=0 = pure gravity).
   2. Solves the torque-balance constraint line in (a1, a2) activation space.
   3. Sweeps along the constraint line and computes muscle stiffness K = -dtau/dq.
@@ -9,6 +11,8 @@ For each joint type (hip, thigh, calf), at the standing nominal_pose:
 Outputs:
   constraint_lines.png        — constraint line per joint coloured by K
   stiffness_cocontraction.png — K (N·m/rad) vs. total activation (a1+a2) per joint
+and prints each joint's warm-start anchor at the task's `stiffness` (the same
+activations MPPILocomotion computes at startup, up to the stand-up details below).
 
 Run from anywhere; paths are relative to this file.
 """
@@ -32,7 +36,7 @@ with open(YAML_PATH) as f:
 
 muscle       = cfg["default_muscle_quad"]
 walk         = cfg["walk"]
-nominal_pose = walk["nominal_pose"]    # 12 values: FR(hip,thigh,calf) FL RR RL
+STIFFNESS    = walk["stiffness"]       # co-contraction level used for the warm-start anchor
 
 lce_min    = muscle["lce_min"][:3]
 lce_max    = muscle["lce_max"][:3]
@@ -124,8 +128,9 @@ _jid     = [model.actuator_trnid[i, 0] for i in range(12)]
 _qa_adr  = [model.jnt_qposadr[j] for j in _jid]   # qpos index per actuator
 _dof_adr = [model.jnt_dofadr[j]  for j in _jid]   # qvel/qfrc index per actuator
 
-_yaml_nominal  = list(walk["nominal_pose"])          # save YAML values for comparison
-stand_up_pos   = list(_yaml_nominal)
+# Same stand-up target as the controllers (kStandUpPose, controllers/common/harness.h).
+_stand_target  = [0.0, 0.67, -1.3] * 4
+stand_up_pos   = list(_stand_target)
 stand_down_pos = [ 0.0473455,  1.22187, -2.44375,
                   -0.0473455,  1.22187, -2.44375,
                    0.0473455,  1.22187, -2.44375,
@@ -182,9 +187,9 @@ _labels = ["FR_hip","FR_thigh","FR_calf",
            "FL_hip","FL_thigh","FL_calf",
            "RR_hip","RR_thigh","RR_calf",
            "RL_hip","RL_thigh","RL_calf"]
-print("Steady-state joint torques (N·m)  |  sim pose vs tasks.yaml nominal_pose (Δ rad):")
-for lbl, tg, qs, qn in zip(_labels, tau_grav_all, nominal_pose, _yaml_nominal):
-    print(f"  {lbl:12s}: tau={tg:+.4f}  sim={qs:+.5f}  yaml={qn:+.5f}  Δ={qs-qn:+.5f}")
+print("Steady-state joint torques (N·m)  |  settled pose vs stand-up target (Δ rad):")
+for lbl, tg, qs, qn in zip(_labels, tau_grav_all, nominal_pose, _stand_target):
+    print(f"  {lbl:12s}: tau={tg:+.4f}  settled={qs:+.5f}  target={qn:+.5f}  Δ={qs-qn:+.5f}")
 
 tau_grav = tau_grav_all[:3]   # FR leg is representative
 
@@ -256,10 +261,8 @@ for j, (name, color) in enumerate(zip(JOINT_NAMES, COLORS)):
 # Thigh/calf gravity torques are identical across all legs, but hip torques
 # are opposite for left (FL/RL) vs right (FR/RR) legs, requiring separate solutions.
 LEG_NAMES = ["FR", "FL", "RR", "RL"]
-new_ga    = [0.0] * 24
-new_gc    = [0.0] * 12   # gravity_C[j]: FL1*a1_anchor - FL2*a2_anchor per joint
 
-print("\n── Constraint-line anchors (per leg) ────────────────────────────────────")
+print(f"\n── Warm-start anchors at stiffness={STIFFNESS} (per leg) ─────────────────────")
 print(f"  {'Leg':3s}  {'Joint':6s}  {'a1':>7s}  {'a2':>7s}  {'K_anchor':>10s}  {'tau_grav':>9s}")
 
 for leg in range(4):
@@ -285,64 +288,18 @@ for leg in range(4):
         if a2_lo > a2_hi:
             a2_lo, a2_hi = 0.0, 0.0
 
-        a2_anchor = a2_lo + 0.75 * (a2_hi - a2_lo)
+        a2_anchor = a2_lo + STIFFNESS * (a2_hi - a2_lo)
         a1_anchor = np.clip((C_lj + FL2_lj * a2_anchor) / FL1_lj, 0.0, 1.0)
         K_anchor  = joint_stiffness(q_nom_lj, a1_anchor, a2_anchor, jt)
 
         C_lj_val = FL1_lj * a1_anchor - FL2_lj * a2_anchor
 
-        idx             = leg * 6 + jt * 2
-        new_ga[idx]     = round(float(a1_anchor), 4)
-        new_ga[idx + 1] = round(float(a2_anchor), 4)
-        new_gc[leg * 3 + jt] = round(float(C_lj_val), 6)
-
         print(f"  {LEG_NAMES[leg]:3s}  {JOINT_NAMES[jt]:6s}  "
               f"{a1_anchor:7.4f}  {a2_anchor:7.4f}  {K_anchor:10.2f}  {tau_grav_lj:+9.4f}  C={C_lj_val:+.6f}")
 
-print("\n  ── gravity_act (paste into tasks.yaml stand section) ──────────────")
-for leg in range(4):
-    b    = leg * 6
-    vals = (f"{new_ga[b]}, {new_ga[b+1]},  "
-            f"{new_ga[b+2]}, {new_ga[b+3]},  "
-            f"{new_ga[b+4]}, {new_ga[b+5]}")
-    if leg == 0:
-        print(f"  gravity_act: [{vals},")
-    elif leg < 3:
-        print(f"               {vals},")
-    else:
-        print(f"               {vals}]")
-
-print("\n  ── posture_bias (paste into tasks.yaml stand section) ─────────────")
-print(f"  # Normalized gravity torque: tau_grav/(-r*peak_force) - (P1-P2), one per joint")
-lines = []
-for leg in range(4):
-    lines.append(f"{new_gc[leg*3]}, {new_gc[leg*3+1]}, {new_gc[leg*3+2]}")
-print(f"  posture_bias: [{lines[0]},  {lines[1]},")
-print(f"                 {lines[2]},  {lines[3]}]")
-
-# ── per-leg FL1/FL2 at nominal pose ───────────────────────────────────────────
-new_fl1 = [0.0] * 12
-new_fl2 = [0.0] * 12
-
-for leg in range(4):
-    for jt in range(3):
-        q_nom_lj   = nominal_pose[leg * 3 + jt]
-        lce1_lj, lce2_lj = lce_pair(q_nom_lj, jt)
-        new_fl1[leg * 3 + jt] = round(active_fl(lce1_lj, lce_min[jt], lce_max[jt]), 6)
-        new_fl2[leg * 3 + jt] = round(active_fl(lce2_lj, lce_min[jt], lce_max[jt]), 6)
-
-print("\n  ── posture_FL1 / posture_FL2 (paste into tasks.yaml stand section) ──")
-print("  # Active force-length values at the nominal standing pose (fixed slope).")
-fl1_lines = [f"{new_fl1[l*3]}, {new_fl1[l*3+1]}, {new_fl1[l*3+2]}" for l in range(4)]
-fl2_lines = [f"{new_fl2[l*3]}, {new_fl2[l*3+1]}, {new_fl2[l*3+2]}" for l in range(4)]
-print(f"  posture_FL1: [{fl1_lines[0]},  {fl1_lines[1]},")
-print(f"                {fl1_lines[2]},  {fl1_lines[3]}]")
-print(f"  posture_FL2: [{fl2_lines[0]},  {fl2_lines[1]},")
-print(f"                {fl2_lines[2]},  {fl2_lines[3]}]")
-
 
 # ── save figures ──────────────────────────────────────────────────────────────
-fig1.suptitle("Torque-balance constraint lines at nominal pose\n"
+fig1.suptitle("Torque-balance constraint lines at the standing pose\n"
               "(colour = muscle stiffness K)", fontsize=12)
 fig1.tight_layout()
 out1 = os.path.join(_DIR, "constraint_lines.png")
@@ -351,7 +308,7 @@ print(f"\nSaved → {out1}")
 
 ax2.set_xlabel("Total activation  a1 + a2", fontsize=12)
 ax2.set_ylabel("Stiffness  K  (N·m/rad)", fontsize=12)
-ax2.set_title("Muscle stiffness vs. co-contraction at nominal standing pose", fontsize=12)
+ax2.set_title("Muscle stiffness vs. co-contraction at the standing pose", fontsize=12)
 ax2.legend(fontsize=10)
 ax2.grid(True, alpha=0.3)
 fig2.tight_layout()

@@ -29,11 +29,13 @@ struct TaskConfig : TaskConfigBase {
     double       height_target = 0.0;
     MuscleParams muscle;
 
-    // Normalized gravity torque at the nominal pose: tau_grav/(-r*peak_force) - (P1-P2).
-    // Used by MPPILocomotion to seed the trajectory warm-start.
-    double posture_bias[NUM_JOINTS] = {};
-    double posture_FL1[NUM_JOINTS]  = {};
-    double posture_FL2[NUM_JOINTS]  = {};
+    // Co-contraction level in [0, 1]: where on the torque-balance line (all
+    // activation pairs producing the required joint torque) activations are
+    // chosen. 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for
+    // both the warm start (holding the settled standing pose) and inverting
+    // rollout states in the gait-tracking cost, so it must also match the
+    // stiffness the activation gait TSVs were generated with.
+    double       stiffness = 0.75;
 };
 
 TaskConfig load_task(const std::string& task_name,

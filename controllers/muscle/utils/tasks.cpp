@@ -1,6 +1,7 @@
 #include "tasks.h"
 
 #include <yaml-cpp/yaml.h>
+#include <stdexcept>
 #include <string>
 
 #include "../../common/task_config.h"
@@ -13,12 +14,16 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
 
     cfg.height_target = t["height_target"] ? t["height_target"].as<double>() : 0.0;
 
-    if (t["posture_bias"])
-        load_doubles(t["posture_bias"], cfg.posture_bias, NUM_JOINTS, "posture_bias");
-    if (t["posture_FL1"])
-        load_doubles(t["posture_FL1"],  cfg.posture_FL1,  NUM_JOINTS, "posture_FL1");
-    if (t["posture_FL2"])
-        load_doubles(t["posture_FL2"],  cfg.posture_FL2,  NUM_JOINTS, "posture_FL2");
+    cfg.stiffness = t["stiffness"] ? t["stiffness"].as<double>() : 0.75;
+    if (!(cfg.stiffness >= 0.0 && cfg.stiffness <= 1.0))
+        throw std::runtime_error("Field 'stiffness': expected a value in [0, 1], got "
+                                 + std::to_string(cfg.stiffness));
+    if (t["posture_bias"] || t["posture_FL1"] || t["posture_FL2"]
+        || (t["cost"] && t["cost"]["gait_stiffness"]))
+        throw std::runtime_error("Task '" + task_name + "': posture_bias/posture_FL1/posture_FL2 "
+                                 "and cost.gait_stiffness are no longer used — the warm start is "
+                                 "computed at startup and the co-contraction level is the "
+                                 "task-level 'stiffness'. Remove them from " + yaml_path);
 
     const YAML::Node& m = t["muscle"];
     cfg.muscle.act_bandwidth = m["act_bandwidth"].as<double>();

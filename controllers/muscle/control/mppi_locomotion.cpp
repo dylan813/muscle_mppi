@@ -1,5 +1,6 @@
 #include "mppi_locomotion.h"
 #include "../../common/control_utils.h"
+#include "../../common/harness.h"   // settle_standing() for the warm start
 
 #include <cmath>
 #include <cstdio>
@@ -62,7 +63,6 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
             for (int j = 0; j < NUM_JOINTS; ++j)
                 cost_.gait_ref_weights[j] = gw[j].as<double>();
         }
-        gait_stiffness_ = c["gait_stiffness"] ? c["gait_stiffness"].as<double>() : 0.75;
     }
 
     // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()),
@@ -71,32 +71,23 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     phases_.init(task_.phases, kNamedGaits, task_.height_target);
     apply_phase_noise();
 
-    // Seed trajectory_ and real_act_ with the posture constraint-line midpoint
-    // (the co-contraction solution holding the nominal pose against gravity).
-    // Only applied when posture geometry is provided (FL1 > 0 for at least one joint).
+    // Warm start: seed trajectory_ and real_act_ with activations that hold the
+    // robot's standing pose. The planner model is stood up exactly as the sims
+    // do (settle_standing(), common/harness.h — same stand-up, timestep, joint
+    // damping and spawn height), so the pose and holding torques are the ones
+    // MPPI actually takes over from. Each joint's activation pair is then the
+    // point on its torque-balance line at task_.stiffness (hill_invert_torque,
+    // static so FV = 1 — the same inversion the gait-tracking cost uses).
     {
-        bool has_posture = false;
+        const StandingEquilibrium stand = settle_standing(model_, task_.spawn_height_offset);
+        double seed[NUM_MUSCLES] = {};
         for (int j = 0; j < NUM_JOINTS; ++j)
-            if (task_.posture_FL1[j] > 1e-9) { has_posture = true; break; }
-
-        if (has_posture) {
-            double nominal[NUM_MUSCLES] = {};
-            for (int j = 0; j < NUM_JOINTS; ++j) {
-                const double FL1  = task_.posture_FL1[j];
-                const double FL2  = task_.posture_FL2[j];
-                const double bias = task_.posture_bias[j];
-                const double a2_lo  = (FL2 > 1e-9) ? std::max(0.0, -bias / FL2)        : 0.0;
-                const double a2_hi  = (FL2 > 1e-9) ? std::min(1.0, (FL1 - bias) / FL2) : 1.0;
-                const double a2_mid = a2_lo + 0.75 * (a2_hi - a2_lo);
-                const double a1_mid = std::clamp((bias + FL2 * a2_mid) / FL1, 0.0, 1.0);
-                nominal[2 * j]     = a1_mid;
-                nominal[2 * j + 1] = a2_mid;
-            }
-            for (int t = 0; t < task_.horizon; ++t)
-                for (int m = 0; m < NUM_MUSCLES; ++m)
-                    trajectory_[t * NUM_MUSCLES + m] = nominal[m];
-            std::memcpy(real_act_, nominal, NUM_MUSCLES * sizeof(double));
-        }
+            hill_invert_torque(stand.q[j], /*dq=*/0.0, stand.tau[j], j, muscle_,
+                               task_.stiffness, seed[2 * j], seed[2 * j + 1]);
+        for (int t = 0; t < task_.horizon; ++t)
+            for (int m = 0; m < NUM_MUSCLES; ++m)
+                trajectory_[t * NUM_MUSCLES + m] = seed[m];
+        std::memcpy(real_act_, seed, NUM_MUSCLES * sizeof(double));
     }
 }
 
@@ -217,7 +208,7 @@ double MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES])
         const double dq_j  = d->qvel[act_qvel_adr_[j]];
         const double tau_j = d->qfrc_bias[act_qvel_adr_[j]];
         double a1_imp, a2_imp;
-        hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, gait_stiffness_, a1_imp, a2_imp);
+        hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, task_.stiffness, a1_imp, a2_imp);
         const double e1 = a1_imp - gait_ref[2 * j];
         const double e2 = a2_imp - gait_ref[2 * j + 1];
         cost += w.gait_ref_weights[j] * (e1*e1 + e2*e2);
@@ -328,7 +319,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
                     const double dq_j  = dl->qvel[act_qvel_adr_[j]];
                     const double tau_j = dl->qfrc_bias[act_qvel_adr_[j]];
                     double a1_imp, a2_imp;
-                    hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, gait_stiffness_, a1_imp, a2_imp);
+                    hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, task_.stiffness, a1_imp, a2_imp);
                     const double e1 = a1_imp - gref[2 * j];
                     const double e2 = a2_imp - gref[2 * j + 1];
                     c_gait += cost_.gait_ref_weights[j] * (e1*e1 + e2*e2);

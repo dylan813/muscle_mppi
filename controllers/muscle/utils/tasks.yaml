@@ -90,7 +90,6 @@ walk:
     vel_z:         0.0001     # vertical velocity tracking
     ang_vel:       0.0001     # body angular velocity damping (x, y, z)
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]  # per-joint (FR/FL/RR/RL × hip/thigh/calf)
-    gait_stiffness: 0.75     # constraint-line blend — must match generate_activation_gaits.py STIFFNESS
 
   # Single phase — same target/gait/cmd_vel this task used before the phases: migration.
   phases:
@@ -106,13 +105,13 @@ walk:
   # Per-joint activation noise (applied independently to both muscles of each pair).
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 
-  posture_bias: [-0.013492, -0.139178, -0.237088,  0.013492, -0.139179, -0.237088,
-                 -0.036156, -0.157226, -0.266074,  0.036156, -0.157226, -0.266074]
-
-  posture_FL1: [0.840162, 0.668695, 0.350412,  0.843239, 0.668695, 0.350412,
-                0.832209, 0.666395, 0.454089,  0.851119, 0.666395, 0.454089]
-  posture_FL2: [0.843239, 0.93456, 0.500727,  0.840162, 0.93456, 0.500727,
-                0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
+  # Co-contraction level in [0, 1]: where on each joint's torque-balance line
+  # (all activation pairs producing the needed torque) activations are chosen.
+  # 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the
+  # warm start (holding the standing pose, computed at startup) and for the
+  # gait-tracking cost — so it must match the stiffness the activation gait
+  # TSVs were generated with.
+  stiffness: 0.75
 
   muscle: *default_muscle_quad
 
@@ -147,7 +146,6 @@ walk_rough:
     vel_z:         0.0001
     ang_vel:       0.0001
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
-    gait_stiffness: 0.75
 
   sim_duration: 45.0
   phases:
@@ -161,13 +159,7 @@ walk_rough:
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 
-  posture_bias: [-0.013492, -0.139178, -0.237088,  0.013492, -0.139179, -0.237088,
-                 -0.036156, -0.157226, -0.266074,  0.036156, -0.157226, -0.266074]
-
-  posture_FL1: [0.840162, 0.668695, 0.350412,  0.843239, 0.668695, 0.350412,
-                0.832209, 0.666395, 0.454089,  0.851119, 0.666395, 0.454089]
-  posture_FL2: [0.843239, 0.93456, 0.500727,  0.840162, 0.93456, 0.500727,
-                0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
+  stiffness: 0.75
 
   muscle: *default_muscle_quad
 
@@ -200,7 +192,6 @@ walk_octagon:
     vel_z:         0.0001
     ang_vel:       0.0001
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
-    gait_stiffness: 0.75
 
   phases:
     - goal_pos:     [0.0, 0.0, 0.34]
@@ -258,13 +249,7 @@ walk_octagon:
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 
-  posture_bias: [-0.013492, -0.139178, -0.237088,  0.013492, -0.139179, -0.237088,
-                 -0.036156, -0.157226, -0.266074,  0.036156, -0.157226, -0.266074]
-
-  posture_FL1: [0.840162, 0.668695, 0.350412,  0.843239, 0.668695, 0.350412,
-                0.832209, 0.666395, 0.454089,  0.851119, 0.666395, 0.454089]
-  posture_FL2: [0.843239, 0.93456, 0.500727,  0.840162, 0.93456, 0.500727,
-                0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
+  stiffness: 0.75
 
   muscle: *default_muscle_quad
 
@@ -308,7 +293,6 @@ guinea_fowl:
     vel_z:         0.0001
     joint_vel:     0.0001
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
-    gait_stiffness: 0.75
 
   sim_duration: 30.0
   spawn_height_offset: 0.05
@@ -328,12 +312,6 @@ guinea_fowl:
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 
-  posture_bias: [-0.013492, -0.139178, -0.237088,  0.013492, -0.139179, -0.237088,
-                 -0.036156, -0.157226, -0.266074,  0.036156, -0.157226, -0.266074]
-
-  posture_FL1: [0.840162, 0.668695, 0.350412,  0.843239, 0.668695, 0.350412,
-                0.832209, 0.666395, 0.454089,  0.851119, 0.666395, 0.454089]
-  posture_FL2: [0.843239, 0.93456, 0.500727,  0.840162, 0.93456, 0.500727,
-                0.851119, 0.935577, 0.569064,  0.832209, 0.935577, 0.569064]
+  stiffness: 0.75
 
   muscle: *default_muscle_quad

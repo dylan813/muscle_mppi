@@ -88,7 +88,6 @@ private:
     // held fixed across that tick's whole rollout batch.
     double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
 
-    double gait_stiffness_  = 0.75;
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;
 

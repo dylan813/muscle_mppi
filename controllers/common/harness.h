@@ -137,6 +137,36 @@ inline void run_standup(const mjModel* m, mjData* d,
     }
 }
 
+// Settled standing state: joint angles, and the joint torques the actuators must
+// supply to hold them (qfrc_bias − qfrc_constraint, so ground contact carries its
+// share), in actuator order.
+struct StandingEquilibrium {
+    double q[NUM_JOINTS]   = {};
+    double tau[NUM_JOINTS] = {};
+};
+
+// Stand the robot up on its own mjData for model m exactly as the sims do
+// (place_on_ground + run_standup at m's timestep) and return the settled state.
+// m's joint damping should already match the run's (e.g. muscle.kd_sim), so the
+// result is the same state the sims hand over to MPPI.
+inline StandingEquilibrium settle_standing(const mjModel* m, double spawn_height_offset)
+{
+    mjData* d = mj_makeData(m);
+    int qa[NUM_JOINTS], qv[NUM_JOINTS];
+    joint_addresses(m, qa, qv);
+    place_on_ground(m, d, qa, spawn_height_offset);
+    run_standup(m, d, qa, qv, m->opt.timestep);
+    mj_forward(m, d);   // bias/constraint forces for the final state, stand-up PD still applied
+
+    StandingEquilibrium eq;
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        eq.q[j]   = d->qpos[qa[j]];
+        eq.tau[j] = d->qfrc_bias[qv[j]] - d->qfrc_constraint[qv[j]];
+    }
+    mj_deleteData(d);
+    return eq;
+}
+
 // Open an output log for writing. The output directory only holds gitignored
 // CSVs, so a fresh checkout may not have it — create it rather than let
 // ofstream fail silently. Prints an error and returns false on failure.

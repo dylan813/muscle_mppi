@@ -56,8 +56,11 @@ static inline double passive_force_length(double length, double max, double b) {
 
 // Invert Hill model for one joint: given (q, dq, tau_req), return implied (a1, a2).
 // Mirrors generate_activation_gaits.py::constraint_midpoint() exactly.
-// tau_req = qfrc_bias for that joint (gravity + Coriolis, as used during gait generation).
-// stiffness in [0,1]: 0.5 = minimum co-contraction midpoint, 0.75 = generation default.
+// tau_req is the joint torque to produce: qfrc_bias (gravity + Coriolis) in the
+// gait-tracking cost, as during gait generation; the standing holding torque
+// (qfrc_bias − qfrc_constraint) for the warm start.
+// stiffness in [0,1] (TaskConfig::stiffness): 0.5 = minimum co-contraction
+// midpoint, 1.0 = maximum co-contraction.
 static inline void hill_invert_torque(
     double q, double dq, double tau_req, int j,
     const MuscleParams& p, double stiffness,

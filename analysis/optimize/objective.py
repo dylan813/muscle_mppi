@@ -46,7 +46,6 @@ import pandas as pd
 import yaml
 
 from gait_generator import generate_gait
-from posture_generator import compute_posture
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _HERE      = os.path.dirname(os.path.abspath(__file__))
@@ -171,14 +170,14 @@ def _build_muscle_params(x, base_quad):
     return p
 
 
-def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir, posture):
+def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir):
     """
     Write a modified tasks.yaml to tmp_dir, with:
     - walk.muscle fields updated to muscle_params
     - walk.model_path  set to absolute MODEL_PATH
     - walk.phases[0].gait_path   set to gait_path_abs
-    - walk.posture_bias / posture_FL1 / posture_FL2 set to posture
-    Returns the path to the written yaml.
+    Returns the path to the written yaml. (mppi_sim computes the warm start from
+    these muscle params at startup, so nothing posture-related is written.)
     """
     cfg = copy.deepcopy(base_cfg)
 
@@ -190,13 +189,6 @@ def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir, posture):
     # Absolute paths so mppi_sim works from any CWD
     cfg["walk"]["model_path"]          = MODEL_PATH
     cfg["walk"]["phases"][0]["gait_path"] = gait_path_abs
-
-    # Constraint-line seed used by mppi_locomotion.cpp to warm-start MPPI —
-    # must be recomputed per candidate since it depends on lce_min/lce_max/pFLmax.
-    posture_bias, posture_FL1, posture_FL2 = posture
-    cfg["walk"]["posture_bias"] = posture_bias
-    cfg["walk"]["posture_FL1"]  = posture_FL1
-    cfg["walk"]["posture_FL2"]  = posture_FL2
 
     yaml_path = os.path.join(tmp_dir, "tasks.yaml")
     with open(yaml_path, "w") as f:
@@ -262,7 +254,7 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
                                 "activation_gait_FAST_0_1_10cm.tsv")
         try:
             n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=walk_cfg["cost"]["gait_stiffness"])
+                                  stiffness=walk_cfg["stiffness"])
         except Exception as e:
             if verbose:
                 print(f"  [w{worker_id}] gait generation failed: {e}")
@@ -275,11 +267,8 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
                 print(f"  [w{worker_id}] INFEASIBLE ({n_inf} phases) → penalty={penalty:.0f}, skipping sim")
             return penalty
 
-        # Recompute the posture constraint-line seed for this candidate's muscle params
-        posture = compute_posture(muscle_params, walk_cfg["nominal_pose"])
-
         # Write temp yaml
-        yaml_path = _write_temp_yaml(base_cfg, muscle_params, gait_out, tmp_dir, posture)
+        yaml_path = _write_temp_yaml(base_cfg, muscle_params, gait_out, tmp_dir)
         csv_path  = os.path.join(tmp_dir, "sim.csv")
 
         # Run mppi_sim
@@ -356,14 +345,13 @@ def render_rollout(x, fps=RENDER_FPS):
                                 "activation_gait_FAST_0_1_10cm.tsv")
         try:
             n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=walk_cfg["cost"]["gait_stiffness"])
+                                  stiffness=walk_cfg["stiffness"])
         except Exception:
             return None
         if n_inf > 0:
             return None
 
-        posture   = compute_posture(muscle_params, walk_cfg["nominal_pose"])
-        yaml_path = _write_temp_yaml(base_cfg, muscle_params, gait_out, tmp_dir, posture)
+        yaml_path = _write_temp_yaml(base_cfg, muscle_params, gait_out, tmp_dir)
         csv_path  = os.path.join(tmp_dir, "sim.csv")
         qpos_path = os.path.join(tmp_dir, "sim_qpos.csv")
 
