@@ -2,8 +2,10 @@
 Importable gait generation — mirrors controllers/muscle/control/activation_gait.cpp
 but accepts muscle params directly instead of reading from tasks.yaml.
 
-Used by the CMA-ES optimizer to regenerate a single gait file per candidate
-without touching the canonical tasks.yaml or the global gaits directory.
+Used by the CMA-ES optimizer to generate each candidate's activation gaits into
+its own temp directory (also counting infeasible phases, which the C++ generator
+doesn't report), without touching the canonical tasks.yaml or
+controllers/muscle/gaits/, which concurrent candidates would otherwise race on.
 """
 
 import numpy as np
@@ -12,10 +14,23 @@ import mujoco
 
 REPO_ROOT  = os.path.join(os.path.dirname(__file__), "..", "..")
 SUSP_MODEL = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene_suspended.xml")
-GAIT_DIR   = os.path.join(REPO_ROOT, "..", "RTWholeBodyMPPI", "legged_mppi",
-                           "whole_body_mppi", "control", "gait_scheduler", "gaits")
+GAIT_DIR   = os.path.join(REPO_ROOT, "controllers", "pd", "gaits")   # joint-space source gaits
 
 NUM_JOINTS = 12
+
+# desired_gait name -> source gait key. Must match kNamedGaitSources in
+# controllers/muscle/control/mppi_locomotion.cpp.
+NAMED_GAIT_SOURCES = {
+    "in_place":  "FAST_0_0_10cm",
+    "walk":      "MED_0_1_10cm",
+    "walk_fast": "FAST_0_1_10cm",
+    "trot":      "MED_0_5_15cm",
+}
+
+
+def source_gait_path(key):
+    """"FAST_0_1_10cm" -> controllers/pd/gaits/FAST/gait_FAST_0_1_10cm.tsv"""
+    return os.path.join(GAIT_DIR, key.split("_", 1)[0], f"gait_{key}.tsv")
 
 # ── Hill model (param-explicit versions) ────────────────────────────────────
 
@@ -62,6 +77,9 @@ def _lce_pair(q, r, lce_min_j, phi_min_j, phi_max_j):
     return lce1, lce2
 
 def _constraint_midpoint(q, dq, tau_req, j, p, stiffness):
+    """(a1, a2, infeasible) for one joint — same as hill_invert_torque() in
+    muscle.h. infeasible is True when no activation pair in [0, 1] produces
+    tau_req (the band collapses and a2 is clamped to its midpoint)."""
     lce_min_j  = p["lce_min"][j]
     lce_max_j  = p["lce_max"][j]
     phi_min_j  = p["phi_min"][j]
@@ -84,37 +102,37 @@ def _constraint_midpoint(q, dq, tau_req, j, p, stiffness):
     eff1 = FL1 * FV1
     eff2 = FL2 * FV2
 
-    if eff1 < 1e-8:
-        return 0.0, 0.0
-
     C      = tau_req / (-r * peak_j) - (P1 - P2)
     denom2 = eff2 if eff2 > 1e-8 else 1e-8
     a2_lo  = max(0.0, -C / denom2)
     a2_hi  = min(1.0, (eff1 - C) / denom2)
+    infeasible = a2_lo > a2_hi   # counted even when eff1 ~ 0 below
 
-    if a2_lo > a2_hi:
+    if eff1 < 1e-8:
+        return 0.0, 0.0, infeasible
+
+    if infeasible:
         a2_out = np.clip(0.5 * (a2_lo + a2_hi), 0.0, 1.0)
     else:
         a2_out = a2_lo + stiffness * (a2_hi - a2_lo)
 
     a1_out = np.clip((C + eff2 * a2_out) / eff1, 0.0, 1.0)
-    return float(a1_out), float(a2_out)
+    return float(a1_out), float(a2_out), infeasible
 
 
-def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75):
+def generate_gait(key, output_path, muscle_params, stiffness=0.75):
     """
-    Generate one activation gait TSV using the given muscle_params dict.
+    Generate the activation gait for source gait `key` (e.g. "FAST_0_1_10cm",
+    see source_gait_path()) using the given muscle_params dict.
 
     muscle_params must contain keys (each a list of 12 floats):
         lce_min, lce_max, FVmax, pFLmax, vmax, phi_min, phi_max, peak_force
-    and a scalar:
-        height_target
 
-    Writes a 24×N TSV to output_path.
-    Returns the number of infeasible phases clamped.
+    Writes a 24×N TSV to output_path (no header line — it's loaded through an
+    explicit gait_path, which the controller never regenerates).
+    Returns the number of infeasible (phase, joint) pairs clamped.
     """
-    fname = f"walking_gait_raibert_{tier}_{vel}_{height}_100hz.tsv"
-    gait_path = os.path.join(GAIT_DIR, tier, fname)
+    gait_path = source_gait_path(key)
     if not os.path.exists(gait_path):
         raise FileNotFoundError(f"Source gait not found: {gait_path}")
 
@@ -123,8 +141,6 @@ def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75)
     q_traj  = gait[:12, :]
     dq_traj = gait[12:24, :]
 
-    HEIGHT = muscle_params["height_target"]
-
     model = mujoco.MjModel.from_xml_path(SUSP_MODEL)
     data  = mujoco.MjData(model)
     _jid     = [model.actuator_trnid[i, 0] for i in range(NUM_JOINTS)]
@@ -132,9 +148,8 @@ def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75)
     _dof_adr = [model.jnt_dofadr[j]        for j in _jid]
 
     def get_bias_torques(q_joints, dq_joints):
+        # Fixed-base model: only the joints are set (no free joint to place).
         mujoco.mj_resetData(model, data)
-        data.qpos[2] = HEIGHT
-        data.qpos[3] = 1.0
         for i in range(NUM_JOINTS):
             data.qpos[_qa_adr[i]]  = q_joints[i]
             data.qvel[_dof_adr[i]] = dq_joints[i]
@@ -148,24 +163,9 @@ def generate_gait(tier, vel, height, output_path, muscle_params, stiffness=0.75)
     for t in range(N):
         tau = get_bias_torques(q_traj[:, t], dq_traj[:, t])
         for j in range(NUM_JOINTS):
-            a1_out[j, t], a2_out[j, t] = _constraint_midpoint(
+            a1_out[j, t], a2_out[j, t], infeasible = _constraint_midpoint(
                 q_traj[j, t], dq_traj[j, t], tau[j], j, muscle_params, stiffness)
-            r = _moment_arm(muscle_params["lce_min"][j], muscle_params["lce_max"][j],
-                            muscle_params["phi_min"][j], muscle_params["phi_max"][j])
-            lce1, lce2 = _lce_pair(q_traj[j, t], r,
-                                   muscle_params["lce_min"][j],
-                                   muscle_params["phi_min"][j],
-                                   muscle_params["phi_max"][j])
-            eff1 = (_active_fl(lce1, muscle_params["lce_min"][j], muscle_params["lce_max"][j])
-                    * _force_vel(r * dq_traj[j, t], muscle_params["vmax"][j], muscle_params["FVmax"][j]))
-            eff2 = (_active_fl(lce2, muscle_params["lce_min"][j], muscle_params["lce_max"][j])
-                    * _force_vel(-r * dq_traj[j, t], muscle_params["vmax"][j], muscle_params["FVmax"][j]))
-            P1 = _passive_fl(lce1, muscle_params["lce_max"][j], muscle_params["pFLmax"][j])
-            P2 = _passive_fl(lce2, muscle_params["lce_max"][j], muscle_params["pFLmax"][j])
-            C  = tau[j] / (-r * muscle_params["peak_force"][j]) - (P1 - P2)
-            d2 = eff2 if eff2 > 1e-8 else 1e-8
-            if max(0.0, -C / d2) > min(1.0, (eff1 - C) / d2):
-                n_infeasible += 1
+            n_infeasible += infeasible
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     out_array = np.vstack([a1_out, a2_out])

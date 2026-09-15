@@ -7,9 +7,12 @@ Each call to evaluate(x):
      the locomotion cost below via AREA_WEIGHT (env var, default 0 = off).
   2. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
      arrays (hip/thigh/calf values shared across all 4 legs).
-  3. Writes a temp tasks.yaml with absolute paths
-  4. Regenerates the single gait file used by the walk task
-  5. Runs mppi_sim as a subprocess
+  3. Generates the activation gait(s) the walk task's phases use into a temp
+     dir (gait_generator.py) and checks them for infeasible phases
+  4. Writes a temp tasks.yaml with the candidate's muscle params, pointing each
+     walk phase's gait_path at its generated gait
+  5. Runs mppi_sim as a subprocess (it computes the warm start from these
+     muscle params at startup)
   6. Parses the output CSV and computes the mean per-step cost from tasks.yaml weights
 
 The cost formula mirrors mppi_locomotion.cpp::step_cost() for terms computable
@@ -45,7 +48,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from gait_generator import generate_gait
+from gait_generator import NAMED_GAIT_SOURCES, generate_gait
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _HERE      = os.path.dirname(os.path.abspath(__file__))
@@ -170,14 +173,15 @@ def _build_muscle_params(x, base_quad):
     return p
 
 
-def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir):
+def _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir):
     """
     Write a modified tasks.yaml to tmp_dir, with:
     - walk.muscle fields updated to muscle_params
     - walk.model_path  set to absolute MODEL_PATH
-    - walk.phases[0].gait_path   set to gait_path_abs
-    Returns the path to the written yaml. (mppi_sim computes the warm start from
-    these muscle params at startup, so nothing posture-related is written.)
+    - walk.phases[i].gait_path set to phase_gait_paths[i] (absolute), so
+      mppi_sim uses the candidate's gaits instead of generating its own into
+      the shared controllers/muscle/gaits/
+    Returns the path to the written yaml.
     """
     cfg = copy.deepcopy(base_cfg)
 
@@ -187,13 +191,43 @@ def _write_temp_yaml(base_cfg, muscle_params, gait_path_abs, tmp_dir):
         cfg["walk"]["muscle"][key]      = muscle_params[key]
 
     # Absolute paths so mppi_sim works from any CWD
-    cfg["walk"]["model_path"]          = MODEL_PATH
-    cfg["walk"]["phases"][0]["gait_path"] = gait_path_abs
+    cfg["walk"]["model_path"] = MODEL_PATH
+    for phase, gait_path in zip(cfg["walk"]["phases"], phase_gait_paths):
+        phase["gait_path"] = gait_path
 
     yaml_path = os.path.join(tmp_dir, "tasks.yaml")
     with open(yaml_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=None)
     return yaml_path
+
+
+def _prepare_candidate(x, tmp_dir):
+    """
+    Build candidate x's muscle params and generate the activation gait for every
+    source gait the walk task's phases use (by desired_gait) into tmp_dir.
+
+    Returns (base_cfg, muscle_params, phase_gait_paths, n_infeasible).
+    Raises if a phase has no desired_gait or gait generation fails.
+    """
+    # Load base config each call (safe for multiprocessing; file is read-only)
+    with open(BASE_YAML) as f:
+        base_cfg = yaml.safe_load(f)
+
+    muscle_params = _build_muscle_params(x, base_cfg["default_muscle_quad"])
+
+    generated = {}          # source key -> generated gait path
+    phase_gait_paths = []
+    n_inf = 0
+    for phase in base_cfg["walk"]["phases"]:
+        key = NAMED_GAIT_SOURCES[phase["desired_gait"]]
+        if key not in generated:
+            out = os.path.join(tmp_dir, "gaits", f"activation_gait_{key}.tsv")
+            n_inf += generate_gait(key, out, muscle_params,
+                                   stiffness=muscle_params["stiffness"])
+            generated[key] = out
+        phase_gait_paths.append(generated[key])
+
+    return base_cfg, muscle_params, phase_gait_paths, n_inf
 
 
 def _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel):
@@ -237,24 +271,10 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
     running mppi_sim. Returns scalar locomotion cost (lower is better);
     does not include the curve-area term (see evaluate()).
     """
-    # Load base config each call (safe for multiprocessing; file is read-only)
-    with open(BASE_YAML) as f:
-        base_cfg = yaml.safe_load(f)
-
-    quad_base = base_cfg["default_muscle_quad"]
-    walk_cfg  = base_cfg["walk"]
-
-    muscle_params = _build_muscle_params(x, quad_base)
-    # height_target needed by gait_generator for bias torque computation
-    muscle_params["height_target"] = walk_cfg["height_target"]
-
     with tempfile.TemporaryDirectory(prefix=f"cmaes_w{worker_id}_") as tmp_dir:
-        # Generate single gait file
-        gait_out = os.path.join(tmp_dir, "gaits", "FAST",
-                                "activation_gait_FAST_0_1_10cm.tsv")
+        # Generate the walk task's gait file(s)
         try:
-            n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=muscle_params["stiffness"])
+            base_cfg, muscle_params, phase_gait_paths, n_inf = _prepare_candidate(x, tmp_dir)
         except Exception as e:
             if verbose:
                 print(f"  [w{worker_id}] gait generation failed: {e}")
@@ -268,7 +288,8 @@ def _locomotion_cost(x, worker_id=0, verbose=False):
             return penalty
 
         # Write temp yaml
-        yaml_path = _write_temp_yaml(base_cfg, muscle_params, gait_out, tmp_dir)
+        walk_cfg  = base_cfg["walk"]
+        yaml_path = _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir)
         csv_path  = os.path.join(tmp_dir, "sim.csv")
 
         # Run mppi_sim
@@ -331,27 +352,16 @@ def render_rollout(x, fps=RENDER_FPS):
     Returns a (T, C, H, W) uint8 numpy array (wandb.Video layout), or None
     if the candidate is infeasible / the sim fails.
     """
-    with open(BASE_YAML) as f:
-        base_cfg = yaml.safe_load(f)
-
-    quad_base = base_cfg["default_muscle_quad"]
-    walk_cfg  = base_cfg["walk"]
-
-    muscle_params = _build_muscle_params(x, quad_base)
-    muscle_params["height_target"] = walk_cfg["height_target"]
-
     with tempfile.TemporaryDirectory(prefix="cmaes_render_") as tmp_dir:
-        gait_out = os.path.join(tmp_dir, "gaits", "FAST",
-                                "activation_gait_FAST_0_1_10cm.tsv")
         try:
-            n_inf = generate_gait("FAST", "0_1", "10cm", gait_out, muscle_params,
-                                  stiffness=muscle_params["stiffness"])
+            base_cfg, muscle_params, phase_gait_paths, n_inf = _prepare_candidate(x, tmp_dir)
         except Exception:
             return None
         if n_inf > 0:
             return None
 
-        yaml_path = _write_temp_yaml(base_cfg, muscle_params, gait_out, tmp_dir)
+        walk_cfg  = base_cfg["walk"]
+        yaml_path = _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir)
         csv_path  = os.path.join(tmp_dir, "sim.csv")
         qpos_path = os.path.join(tmp_dir, "sim_qpos.csv")
 
