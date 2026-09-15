@@ -1,11 +1,11 @@
 """
 Kinematic scrub of a generated activation gait, rendered on the suspended Go2
-model (scene_suspended.xml) — i.e. the exact same setup generate_activation_gaits.py
-used to compute tau_req (base rigidly fixed at z=0.8, gravity + Coriolis/
+model (scene_suspended.xml) — i.e. the exact same setup the controller's gait generation
+(controllers/muscle/control/activation_gait.cpp) uses to compute tau_req (base rigidly fixed at z=0.8, gravity + Coriolis/
 centrifugal only, zero contact). Replays q_traj/dq_traj via direct qpos/qvel
 assignment + mj_forward (teleport, no mj_step — there is no dynamics to
 integrate since the base isn't free and nothing contacts the floor), same as
-get_bias_torques() in generate_activation_gaits.py.
+generate() in activation_gait.cpp.
 
 Each leg link (hip/thigh/calf) is additionally tinted by that joint's
 co-contraction level (a1+a2)/2, taken from the corresponding row pair of the
@@ -17,9 +17,9 @@ Usage (run from anywhere; paths are relative to this file):
     python3 visualize_activation_gait_suspended.py [gait_key] [output.gif]
 
     gait_key = "{TIER}_{vel}_{height}", e.g. FAST_0_1_10cm (default)
-               Must have a matching source gait TSV under RTWholeBodyMPPI's
-               gait_scheduler/gaits/ and a generated activation_gait_*.tsv
-               under controllers/muscle/gaits/ (run generate_activation_gaits.py first).
+               Must have a matching source gait TSV under controllers/pd/gaits/
+               and a generated activation_gait_*.tsv under controllers/muscle/gaits/
+               (mppi_sim generates it when a task uses that gait).
 
 Defaults:
     gait_key = FAST_0_1_10cm
@@ -53,7 +53,7 @@ act_gait_path = os.path.join(ACT_GAIT_DIR, tier, f"activation_gait_{gait_key}.ts
 for p in (src_gait_path, act_gait_path):
     if not os.path.exists(p):
         raise FileNotFoundError(
-            f"{p} not found — run generate_activation_gaits.py first "
+            f"{p} not found — run mppi_sim on a task that uses this gait first "
             f"(or check gait_key '{gait_key}' matches an existing tier/vel/height combo).")
 
 NUM_JOINTS  = 12

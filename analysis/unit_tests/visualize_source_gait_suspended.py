@@ -1,18 +1,18 @@
 """
 Kinematic scrub of the raw joint-space source gait (position + velocity, the
-input to generate_activation_gaits.py) rendered on the suspended Go2 model
+input to activation gait generation) rendered on the suspended Go2 model
 (scene_suspended.xml) — same model, camera, and mj_forward-teleport scrub as
 visualize_activation_gait_suspended.py, but with no Hill model / activation
 overlay involved. Meant to be played side by side with that script's output
-for a direct before/after comparison: this is exactly what get_bias_torques()
-saw when generate_activation_gaits.py computed tau_req at each phase.
+for a direct before/after comparison: this is exactly what the controller's gait
+generation (activation_gait.cpp) sees when it computes tau_req at each phase.
 
 Usage (run from anywhere; paths are relative to this file):
     python3 visualize_source_gait_suspended.py [gait_key] [output.gif]
 
     gait_key = "{TIER}_{vel}_{height}", e.g. FAST_0_1_10cm (default)
-               Must have a matching source gait TSV under RTWholeBodyMPPI's
-               gait_scheduler/gaits/.
+               Must have a matching source gait TSV under
+               controllers/pd/gaits/.
 
 Defaults:
     gait_key = FAST_0_1_10cm

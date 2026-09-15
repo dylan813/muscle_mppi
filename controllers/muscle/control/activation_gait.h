@@ -7,12 +7,11 @@
 // controllers/pd/gaits/), each joint's activation pair is the point on its
 // torque-balance line at MuscleParams::stiffness that produces the joint's bias
 // torque (gravity + Coriolis, suspended model, no contact) — hill_invert_torque().
-// This is the same computation as analysis/unit_tests/generate_activation_gaits.py.
 //
 // Generated files live in controllers/muscle/gaits/ (gitignored) and start with
 // one header line recording what they were generated from:
 //   # activation_gait source=<key> stiffness=<value> muscle=<fingerprint>
-// The C++ gait loader skips it (non-numeric), as does np.loadtxt ('#').
+// The gait loader skips it (non-numeric), as does np.loadtxt ('#').
 // ensure_activation_gait() regenerates a file whenever that line doesn't match
 // the current source key and muscle parameters (including stiffness).
 

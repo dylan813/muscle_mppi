@@ -1,6 +1,6 @@
 """
-Importable gait generation — mirrors generate_activation_gaits.py but accepts
-muscle params directly instead of reading from tasks.yaml.
+Importable gait generation — mirrors controllers/muscle/control/activation_gait.cpp
+but accepts muscle params directly instead of reading from tasks.yaml.
 
 Used by the CMA-ES optimizer to regenerate a single gait file per candidate
 without touching the canonical tasks.yaml or the global gaits directory.

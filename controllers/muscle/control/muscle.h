@@ -55,7 +55,6 @@ static inline double passive_force_length(double length, double max, double b) {
 }
 
 // Invert Hill model for one joint: given (q, dq, tau_req), return implied (a1, a2).
-// Mirrors generate_activation_gaits.py::constraint_midpoint() exactly.
 // tau_req is the joint torque to produce: qfrc_bias (gravity + Coriolis) in the
 // gait-tracking cost, as during gait generation; the standing holding torque
 // (qfrc_bias − qfrc_constraint) for the warm start.

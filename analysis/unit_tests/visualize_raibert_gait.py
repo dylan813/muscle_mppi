@@ -2,7 +2,7 @@
 Dynamic playback of a raw RTWholeBodyMPPI joint-space gait reference
 (walking_gait_raibert_*.tsv), rendered on the Go2 model for a direct visual
 comparison against test_gait_pos's Hill-model activation gait output
-(generated from this same source file by generate_activation_gaits.py).
+(generated from this same source file by the controller's gait generation).
 
 No Hill model — instead the gait file's joint-position rows (0-11) drive a
 plain PD torque controller (kp/kd, same structure as test_gait_pos.cpp's
