@@ -67,10 +67,12 @@ Xvfb :99 -screen 0 1280x720x24 &
 DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/videos/run.mp4
 ``` -->
 
-# Unit Tests
+# Plots
+
+Plotting scripts live in `analysis/plot/` and save their figures to `analysis/plot/figures/` (created if missing).
 
 ```bash
-cd muscle_mppi/analysis/unit_tests
+cd muscle_mppi/analysis/plot
 python3 plot_force_length.py
 python3 plot_force_velocity.py
 ```
@@ -81,10 +83,10 @@ cd muscle_mppi/controllers/build
 ./mppi_sim walk_rough            # any task from tasks.yaml
 ./mppi_sim walk --no-gif         # skip the GIF
 ./mppi_sim walk_rough --name rough_test1   # name this run's output files
-python3 ../../analysis/log/plot_walk_leg.py <name>
+python3 ../../analysis/plot/plot_walk_leg.py <name>
 ```
 
-Working output (CSVs, GIFs, figures) goes to `analysis/data/`: `mppi_sim` writes `analysis/data/mppi_sim/mppi_sim.csv` + `mppi_sim_qpos.csv` + `mppi_sim.gif`, and `pd_mppi_sim` writes `analysis/data/pd_mppi_sim/pd_mppi_sim.csv` + `pd_mppi_sim_qpos.csv` + `pd_mppi_sim.gif`. The directories are created on first run if missing.
+Working sim output (CSVs, GIFs) goes to `analysis/data/`: `mppi_sim` writes `analysis/data/mppi_sim/mppi_sim.csv` + `mppi_sim_qpos.csv` + `mppi_sim.gif`, and `pd_mppi_sim` writes `analysis/data/pd_mppi_sim/pd_mppi_sim.csv` + `pd_mppi_sim_qpos.csv` + `pd_mppi_sim.gif`. The directories are created on first run if missing.
 
 ## Naming runs
 
@@ -136,20 +138,20 @@ analysis/log/trials/walk_baseline/
   trial_002/mppi_sim.csv, mppi_sim_qpos.csv, mppi_sim.gif
 ```
 
-The flags work alongside the positional arguments in any order (`./mppi_sim walk --name baseline_run --save walk_baseline --no-gif`). `--save` picks the trial folder; the files inside keep the run's name (e.g. `baseline_run.csv`). With `--no-gif` the trial gets only the two CSVs. The working CSVs (and GIF, unless `--no-gif`) are still written to their usual location under `analysis/data/`, so `plot_walk_leg.py` keeps operating on the latest run unchanged.
+The flags work alongside the positional arguments in any order (`./mppi_sim walk --name baseline_run --save walk_baseline --no-gif`). `--save` picks the trial folder; the files inside keep the run's name (e.g. `baseline_run.csv`). With `--no-gif` the trial gets only the two CSVs. The working CSVs (and GIF, unless `--no-gif`) are still written to their usual location under `analysis/data/`, so `plot_walk_leg.py` keeps plotting the latest run by default.
 
 To plot a specific saved trial, point the script at that trial directory instead (run from `muscle_mppi/controllers/build/`):
 
 ```bash
 TRIAL=../../analysis/log/trials/walk_baseline/trial_001
 
-python3 ../../analysis/log/plot_walk_leg.py $TRIAL/mppi_sim.csv <name>
+python3 ../../analysis/plot/plot_walk_leg.py $TRIAL/mppi_sim.csv <name> --outdir $TRIAL
 
 # only needed for a trial saved with --no-gif:
 MUJOCO_GL=egl python3 ../../analysis/render_gif.py $TRIAL/mppi_sim_qpos.csv $TRIAL/mppi_sim.gif walk
 ```
 
-`plot_walk_leg.py` writes its plots beside the CSV it is given, so they stay with that trial's data. `render_gif.py` takes its output path explicitly (second argument), so give it a path inside the trial directory to keep the GIF there too. Its third argument is the task the trial was run with (`walk` above) — it must match, since the model path and dt are looked up from it.
+`plot_walk_leg.py` writes to `analysis/plot/figures/` by default; `--outdir $TRIAL` keeps the plots with that trial's data instead. `render_gif.py` takes its output path explicitly (second argument), so give it a path inside the trial directory to keep the GIF there too. Its third argument is the task the trial was run with (`walk` above) — it must match, since the model path and dt are looked up from it.
 
 # Batch Trials
 

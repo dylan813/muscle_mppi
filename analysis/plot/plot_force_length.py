@@ -107,6 +107,7 @@ axes[0].set_ylim(-0.05, 2.4)
 
 fig.tight_layout()
 
-out_path = os.path.join(os.path.dirname(__file__), "force_length.png")
+out_path = os.path.join(os.path.dirname(__file__), "figures", "force_length.png")
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
 fig.savefig(out_path, dpi=150)
 print(f"Saved → {out_path}")

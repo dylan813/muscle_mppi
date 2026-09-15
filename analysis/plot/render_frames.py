@@ -1,7 +1,7 @@
 """
 Render matched still frames from two saved trials, at identical sim timesteps.
 
-Companion to analysis/log/plot_torque_spike.py: that figure shows the PD
+Companion to plot_torque_spike.py: that figure shows the PD
 controller commanding ~46 N.m (1.93x its +/-23.7 N.m limit) on RL hip flex-ext
 at t = 12100 ms, and these frames show what each robot is doing at that moment.
 
@@ -32,16 +32,16 @@ import yaml
 from PIL import Image
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.normpath(os.path.join(_DIR, ".."))
+_REPO = os.path.normpath(os.path.join(_DIR, "..", ".."))
 
 TASK = "guinea_fowl"
 TASKS_YAML = os.path.join(_REPO, "controllers", "muscle", "utils", "tasks.yaml")
 MODEL_BASE = _REPO   # model_path in tasks.yaml is repo-relative
 
 TRIALS = {
-    "pd": (os.path.join(_DIR, "log", "trials", "workshop", "7pd", "trial_070",
+    "pd": (os.path.join(_REPO, "analysis", "log", "trials", "workshop", "7pd", "trial_070",
                         "pd_mppi_sim_qpos.csv"), "#d1620a"),
-    "muscle": (os.path.join(_DIR, "log", "trials", "workshop", "7muscle", "trial_017",
+    "muscle": (os.path.join(_REPO, "analysis", "log", "trials", "workshop", "7muscle", "trial_017",
                             "mppi_sim_qpos.csv"), "#0f8a5f"),
 }
 
@@ -56,8 +56,7 @@ CAM = dict(distance=2.1, elevation=-10.0, azimuth=90.0, lookat=[1.05, 0.0, 0.22]
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ms", type=int, nargs="+", default=DEFAULT_MS)
-    ap.add_argument("--outdir", default=os.path.join(
-        _REPO, "analysis", "data", "mppi_sim", "summer_results", "workshop", "frames"))
+    ap.add_argument("--outdir", default=os.path.join(_DIR, "figures", "frames"))
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 

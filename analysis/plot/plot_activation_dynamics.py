@@ -1,0 +1,171 @@
+"""
+Plot the activation dynamics stage of the muscle model.
+
+Activation is the only state in the Hill pipeline: every other stage
+(force-length, force-velocity, passive) is a memoryless function of the current
+(q, dq). This script visualizes the u -> a filter implemented in
+controllers/muscle/control/muscle.h:140-145:
+
+    alpha = act_bandwidth * dt
+    a <- clamp(a + alpha*(clamp(u,0,1) - a), 0, 1)
+
+Four panels:
+  (a) step response, with the tau = 1/f_act marker
+  (b) a real gait-library reference row pushed through the same filter
+  (c) magnitude response, discrete vs. ideal continuous first-order
+  (d) stability sweep over alpha = f_act*dt
+
+Parameters are read from tasks.yaml so the figure tracks the config rather than
+drifting from it. Writes figures/activation_dynamics.png.
+
+Run from anywhere; paths are resolved relative to this file.
+"""
+
+import os
+
+import numpy as np
+import yaml
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+# ── paths ─────────────────────────────────────────────────────────────────────
+_DIR      = os.path.dirname(os.path.abspath(__file__))
+YAML_PATH = os.path.join(_DIR, "../../controllers/muscle/utils/tasks.yaml")
+GAIT_PATH = os.path.join(_DIR, "../../controllers/muscle/gaits/MED/"
+                               "activation_gait_MED_0_1_10cm.tsv")
+OUT_PATH  = os.path.join(_DIR, "figures", "activation_dynamics.png")
+
+# ── config ────────────────────────────────────────────────────────────────────
+with open(YAML_PATH) as f:
+    cfg = yaml.safe_load(f)
+
+F_ACT = cfg["default_muscle_quad"]["act_bandwidth"]   # 20.0 Hz
+DT    = cfg["walk"]["dt"]                             # 0.01 s (physics step)
+ALPHA = F_ACT * DT
+TAU   = 1.0 / F_ACT
+
+# The gait TSVs are sampled at 100 Hz; panel (b) is only meaningful when the
+# filter step matches that. Guard rather than silently plotting a rescaled cycle.
+GAIT_DT = 0.01
+
+# Row 14 = RR antagonist: a long stance plateau at the co-contraction midpoint
+# with a sharp swing dip, which is the most legible case for showing smoothing.
+GAIT_ROW = 14
+
+# Nominal co-contraction level. Panel (d) steps to this rather than to 1.0 on
+# purpose: at a step to the clamp boundary, clamp(...,0,1) absorbs the overshoot
+# and an unstable alpha > 1 looks indistinguishable from a stable one.
+U_STEP = 0.75
+
+
+def filt(u, alpha=ALPHA, a0=0.0):
+    """Exact reproduction of the activation filter in hill_compute_torques."""
+    a, out = a0, np.empty_like(u, dtype=float)
+    for n, ui in enumerate(u):
+        a = np.clip(a + alpha * (np.clip(ui, 0.0, 1.0) - a), 0.0, 1.0)
+        out[n] = a
+    return out
+
+
+fig, ax = plt.subplots(2, 2, figsize=(13, 8.5))
+fig.suptitle(f"Activation dynamics:  $\\dot a = f_{{act}}(u-a)$   "
+             f"$f_{{act}}$={F_ACT:g} Hz, $dt$={DT:g} s, $\\alpha$={ALPHA:g}, "
+             f"$\\tau$={TAU*1000:g} ms",
+             fontsize=13, y=0.98)
+
+# ── (a) step response ─────────────────────────────────────────────────────────
+t = np.arange(200) * DT
+u = np.where((t >= 0.2) & (t < 0.8), 1.0, 0.0)
+A = ax[0, 0]
+A.step(t, u, where="post", color="0.35", lw=1.8, label="$u$  excitation (command)")
+A.plot(t, filt(u), color="#c0392b", lw=2.4, label="$a$  activation (state)")
+for t0 in (0.2, 0.8):
+    A.axvline(t0, color="0.85", lw=0.8, zorder=0)
+A.plot([0.2, 0.2 + TAU], [0.632, 0.632], color="#2980b9", lw=1.2, ls="--")
+A.annotate(f"$\\tau$ = {TAU*1000:g} ms\n(63%)", xy=(0.2 + TAU, 0.632),
+           xytext=(0.30, 0.44), fontsize=9, color="#2980b9",
+           arrowprops=dict(arrowstyle="->", color="#2980b9", lw=1))
+A.annotate("rise and fall are\nSYMMETRIC here\n(real muscle: slower release)",
+           xy=(0.87, 0.30), xytext=(1.05, 0.42), fontsize=8.5, color="#7f8c8d",
+           arrowprops=dict(arrowstyle="->", color="#7f8c8d", lw=1))
+A.set_title("(a) Step response — the canonical shape", fontsize=11, loc="left")
+A.set_xlabel("time (s)"); A.set_ylabel("activation / excitation")
+A.set_ylim(-0.05, 1.2); A.legend(loc="upper right", fontsize=9, framealpha=0.95)
+
+# ── (b) a real gait reference through the same filter ─────────────────────────
+B = ax[0, 1]
+if abs(DT - GAIT_DT) > 1e-12:
+    B.text(0.5, 0.5, f"skipped: gait TSVs are {1/GAIT_DT:g} Hz\nbut dt = {DT:g} s",
+           ha="center", va="center", fontsize=10, color="0.4", transform=B.transAxes)
+else:
+    row = np.loadtxt(GAIT_PATH)[GAIT_ROW]
+    u2  = np.tile(row, 3)
+    t2  = np.arange(u2.size) * DT
+    B.step(t2, u2, where="post", color="0.35", lw=1.6,
+           label=f"$u$  gait reference (TSV row {GAIT_ROW})")
+    B.plot(t2, filt(u2, a0=row[0]), color="#c0392b", lw=2.4,
+           label="$a$  after activation dynamics")
+    B.annotate("sharp swing dip is rounded,\nattenuated and lagged",
+               xy=(0.60, 0.32), xytext=(0.72, 0.07), fontsize=8.5, color="#7f8c8d",
+               arrowprops=dict(arrowstyle="->", color="#7f8c8d", lw=1))
+    B.legend(loc="upper left", fontsize=9, framealpha=0.95, ncol=2)
+B.set_title("(b) A real command from the gait library, filtered", fontsize=11, loc="left")
+B.set_xlabel("time (s)"); B.set_ylabel("activation")
+B.set_ylim(-0.02, 1.15)
+
+# ── (c) magnitude response ────────────────────────────────────────────────────
+# NOTE: act_bandwidth is named in Hz but is used as a rate constant, so the
+# -3 dB corner sits at f_act/2*pi (3.18 Hz at 20 Hz), NOT at f_act itself.
+f  = np.logspace(-1, np.log10(0.5 / DT), 600)
+w  = 2 * np.pi * f * DT
+Hd = ALPHA / np.abs(1 - (1 - ALPHA) * np.exp(-1j * w))    # discrete, as implemented
+Hc = 1.0 / np.sqrt(1 + (2 * np.pi * f / F_ACT) ** 2)      # ideal continuous
+fc = F_ACT / (2 * np.pi)
+C = ax[1, 0]
+C.semilogx(f, 20 * np.log10(Hd), color="#c0392b", lw=2.4, label="discrete (as implemented)")
+C.semilogx(f, 20 * np.log10(Hc), color="#2980b9", lw=1.4, ls="--", label="continuous 1st-order")
+C.axhline(-3, color="0.7", lw=0.9, ls=":")
+C.axvline(fc, color="0.5", lw=1.0)
+C.annotate(f"$-3$ dB at {fc:.2f} Hz\n$= f_{{act}}/2\\pi$, NOT {F_ACT:g} Hz",
+           xy=(fc, -3), xytext=(0.16, -21), fontsize=9,
+           arrowprops=dict(arrowstyle="->", color="0.4", lw=1))
+C.axvline(0.5 / DT, color="0.85", lw=1.0)
+C.text(0.5 / DT * 0.93, -46, "Nyquist", rotation=90, fontsize=8, color="0.5", ha="right")
+C.set_title("(c) It is a low-pass filter — where the cutoff actually is", fontsize=11, loc="left")
+C.set_xlabel("frequency (Hz)"); C.set_ylabel("|H| (dB)")
+C.set_ylim(-50, 5); C.legend(loc="lower left", fontsize=9)
+C.grid(alpha=0.25, which="both")
+
+# ── (d) stability sweep over alpha ────────────────────────────────────────────
+t3 = np.arange(60) * DT
+u3 = np.where(t3 >= 0.1, U_STEP, 0.0)
+D  = ax[1, 1]
+cases = [(0.2, "#c0392b", "$\\alpha$=0.2   20 Hz $\\times$ 0.01 s  (yaml)   stable"),
+         (1.0, "#e67e22", "$\\alpha$=1.0   100 Hz $\\times$ 0.01 s   deadbeat"),
+         (2.0, "#8e44ad", "$\\alpha$=2.0   100 Hz $\\times$ 0.02 s   rings")]
+D.step(t3, u3, where="post", color="0.35", lw=1.6, label=f"$u$ = {U_STEP:g}")
+for al, col, lab in cases:
+    D.plot(t3, filt(u3, alpha=al), color=col, lw=2.0, marker="o", ms=3.2,
+           alpha=0.9, label=lab)
+D.annotate("struct default $f_{act}$=100 Hz\nwould land here",
+           xy=(0.38, 0.5), xytext=(0.30, 0.12), fontsize=8.5, color="#8e44ad",
+           arrowprops=dict(arrowstyle="->", color="#8e44ad", lw=1))
+D.set_title("(d) Stability: $\\alpha = f_{act}\\cdot dt$ must stay below 1", fontsize=11, loc="left")
+D.set_xlabel("time (s)"); D.set_ylabel("activation")
+D.set_ylim(-0.05, 1.25); D.legend(loc="upper right", fontsize=8.5, framealpha=0.95)
+
+for a_ in ax.ravel():
+    a_.spines[["top", "right"]].set_visible(False)
+
+plt.tight_layout(rect=[0, 0, 1, 0.955])
+os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+plt.savefig(OUT_PATH, dpi=150)
+print(f"wrote {OUT_PATH}")
+
+# ── numeric summary ───────────────────────────────────────────────────────────
+print(f"alpha = {ALPHA:g}   tau = {TAU*1000:g} ms   -3 dB = {fc:.3f} Hz")
+step = filt(np.ones(40))
+print("step response:")
+for n in (1, 5, 10, 14, 20):
+    print(f"  n={n:2d}  t={n*DT*1000:5.0f} ms   a={step[n-1]:.3f}")

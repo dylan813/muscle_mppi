@@ -4,12 +4,12 @@ candidate x, for wandb logging during cmaes_walk.py runs.
 
 FL curve logic is recycled directly from objective.py's closed-form
 active/passive functions (the same ones curve_area_mean() integrates).
-FV curve logic is recycled from analysis/unit_tests/plot_force_velocity.py's
+FV curve logic is recycled from analysis/plot/plot_force_velocity.py's
 force_vel(), reimplemented here since that script hardcodes tasks.yaml as
 its parameter source instead of taking x.
 
 Both plotting functions mirror the subplot layout/style of
-analysis/unit_tests/plot_force_length.py and plot_force_velocity.py
+analysis/plot/plot_force_length.py and plot_force_velocity.py
 (one column per joint type), just parameterized by an arbitrary x instead
 of tasks.yaml, and returning a Figure instead of saving a PNG.
 """
@@ -31,7 +31,7 @@ _FV_DOMAIN = np.linspace(-1.5, 2.0, 400)
 
 
 def _force_vel(eff_vel, c, FVmax):
-    """Recycled from analysis/unit_tests/plot_force_velocity.py::force_vel."""
+    """Recycled from analysis/plot/plot_force_velocity.py::force_vel."""
     if eff_vel < -1.0:
         return 0.0
     elif eff_vel <= 0.0:

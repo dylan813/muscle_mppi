@@ -8,7 +8,7 @@ controllers/common/harness.h):
   2. Solves the torque-balance constraint line in (a1, a2) activation space.
   3. Sweeps along the constraint line and computes muscle stiffness K = -dtau/dq.
 
-Outputs:
+Outputs (in figures/):
   constraint_lines.png        — constraint line per joint coloured by K
   stiffness_cocontraction.png — K (N·m/rad) vs. total activation (a1+a2) per joint
 and prints each joint's warm-start anchor at `muscle.stiffness` (the same
@@ -302,7 +302,8 @@ for leg in range(4):
 fig1.suptitle("Torque-balance constraint lines at the standing pose\n"
               "(colour = muscle stiffness K)", fontsize=12)
 fig1.tight_layout()
-out1 = os.path.join(_DIR, "constraint_lines.png")
+os.makedirs(os.path.join(_DIR, "figures"), exist_ok=True)
+out1 = os.path.join(_DIR, "figures", "constraint_lines.png")
 fig1.savefig(out1, dpi=150)
 print(f"\nSaved → {out1}")
 
@@ -312,6 +313,6 @@ ax2.set_title("Muscle stiffness vs. co-contraction at the standing pose", fontsi
 ax2.legend(fontsize=10)
 ax2.grid(True, alpha=0.3)
 fig2.tight_layout()
-out2 = os.path.join(_DIR, "stiffness_cocontraction.png")
+out2 = os.path.join(_DIR, "figures", "stiffness_cocontraction.png")
 fig2.savefig(out2, dpi=150)
 print(f"Saved → {out2}")

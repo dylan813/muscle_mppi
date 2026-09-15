@@ -14,7 +14,7 @@ duplicated here because those two run their plotting at module level and so can'
 be imported.
 
 Usage:
-  python3 plot_hill_curves.py        ->  hill_curves.png beside this file
+  python3 plot_hill_curves.py        ->  figures/hill_curves.png
 """
 
 import os
@@ -206,7 +206,8 @@ def main():
         fig.text(0.5 * (box.x0 + box.x1), 0.20 / FIG_H, tag,
                  ha="center", va="center", fontsize=FS_TAG)
 
-    out_path = os.path.join(os.path.dirname(__file__), "hill_curves.png")
+    out_path = os.path.join(os.path.dirname(__file__), "figures", "hill_curves.png")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"Saved → {out_path}")

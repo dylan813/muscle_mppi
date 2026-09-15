@@ -84,7 +84,7 @@ _JOINT_TYPE = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2]
 
 # ── closed-form active/passive force-length curve area (no simulation) ──────
 # Reimplements muscle.h's active/passive FL curves exactly as in
-# unit_tests/plot_force_length.py, so the area between them can be scored
+# analysis/plot/plot_force_length.py, so the area between them can be scored
 # for every candidate before (and regardless of) running mppi_sim.
 #
 # Integration domain is fixed and wide enough to contain both curves'
