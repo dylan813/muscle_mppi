@@ -6,6 +6,12 @@
 // is variant-specific, so each variant derives its own scheduler with a
 // get_phase() for its layout (muscle/control/gait_scheduler.h,
 // pd/control/gait_scheduler_pd.h).
+//
+// Shared on purpose: phase sequencing (goal thresholds, dwell timing) is identical for the muscle and PD variants so their
+// results stay comparable, and editing it changes both. If one variant needs
+// different behavior, fork that piece into the variant's own folder first
+// rather than changing it here (e.g. settle_standing() is muscle-only and PD
+// never calls it; nominal_pose lives in PD's task config).
 
 #include <algorithm>
 #include <cmath>

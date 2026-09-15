@@ -86,9 +86,9 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
     apply_phase_noise();
 
     // Seed trajectory_ and real_q_des_ with the task's nominal pose — sensible
-    // cold-start for a joint-position action space (unlike the muscle variant,
-    // there's no constraint-line posture solve; the nominal pose is already a
-    // valid joint-angle target).
+    // cold-start for a joint-position action space (the nominal pose is already
+    // a valid joint-angle target; the muscle variant instead inverts the settled
+    // stand-up's holding torques into activations).
     for (int t = 0; t < task_.horizon; ++t)
         for (int j = 0; j < NUM_JOINTS; ++j)
             trajectory_[t * NUM_JOINTS + j] = task_.nominal_pose[j];

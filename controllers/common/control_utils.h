@@ -3,6 +3,12 @@
 // Small stateless helpers shared by the controllers (and sims): the Unitree PD
 // law, frame rotation, base-body lookup, the goal-facing orientation target,
 // and the MPPI warm-start / softmin update steps.
+//
+// Shared on purpose: the math inside both MPPI loops is identical for the muscle and PD variants so their
+// results stay comparable, and editing it changes both. If one variant needs
+// different behavior, fork that piece into the variant's own folder first
+// rather than changing it here (e.g. settle_standing() is muscle-only and PD
+// never calls it; nominal_pose lives in PD's task config).
 
 #include <algorithm>
 #include <cmath>

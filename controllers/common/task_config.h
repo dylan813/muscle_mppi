@@ -100,7 +100,6 @@ struct TaskConfigBase {
     // Ordered waypoint sequence for locomotion tasks.
     std::vector<TaskPhase> phases;
 
-    double       nominal_pose[NUM_JOINTS] = {};
     int          n_samples    = 16;
     int          horizon      = 25;
     double       lambda       = 0.1;

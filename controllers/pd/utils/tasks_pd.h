@@ -28,6 +28,11 @@ struct PDParams {
 // (common/task_config.h); this adds the PD variant's own parameters.
 struct TaskConfig : TaskConfigBase {
     PDParams     pd;
+
+    // Joint targets the planner's initial q_des trajectory is filled with
+    // (MPPILocomotionPD's constructor). PD-only: the muscle variant warm-starts
+    // from the settled stand-up instead (settle_standing(), common/harness.h).
+    double       nominal_pose[NUM_JOINTS] = {};
 };
 
 TaskConfig load_task(const std::string& task_name,

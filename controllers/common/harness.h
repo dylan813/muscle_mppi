@@ -5,6 +5,13 @@
 // harness helpers (model setup, spawn placement, state readout, CSV logging),
 // and run_sim(), the standalone sim program both sims share. The --save trial
 // copying itself lives separately in trial_log.h.
+//
+// Shared on purpose: the stand-up (kStandDownPose/kStandUpPose, run_standup)
+// and the sim loop are identical for the muscle and PD variants so their
+// results stay comparable, and editing it changes both. If one variant needs
+// different behavior, fork that piece into the variant's own folder first
+// rather than changing it here (e.g. settle_standing() is muscle-only and PD
+// never calls it; nominal_pose lives in PD's task config).
 
 #include <algorithm>
 #include <chrono>

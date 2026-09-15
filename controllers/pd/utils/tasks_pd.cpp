@@ -11,6 +11,8 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     TaskConfig cfg;
     load_task_base(t, cfg);
 
+    load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
+
     const YAML::Node& pd = t["pd"];
     load_doubles(pd["kp"], cfg.pd.kp, NUM_JOINTS, "pd.kp");
     load_doubles(pd["kd"], cfg.pd.kd, NUM_JOINTS, "pd.kd");

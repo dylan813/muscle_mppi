@@ -45,7 +45,6 @@ void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)
     cfg.spawn_height_offset =
         t["spawn_height_offset"] ? t["spawn_height_offset"].as<double>()    : 0.0;
 
-    load_doubles(t["nominal_pose"], cfg.nominal_pose, NUM_JOINTS, "nominal_pose");
     if (t["noise_sigma_act"])
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
 
