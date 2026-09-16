@@ -39,5 +39,24 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
         throw std::runtime_error("Field 'muscle.stiffness': expected a value in [0, 1], got "
                                  + std::to_string(cfg.muscle.stiffness));
 
+    // Ablation switches live at task level rather than inside `muscle:`, so one
+    // task can be switched without touching the shared *default_muscle_quad
+    // anchor (yaml-cpp has no merge keys, <<:). Each is optional and defaults to
+    // true; run_ablation_walk.sh writes this block into per-condition YAMLs.
+    // Unknown keys throw, so a typo can't silently run the full model.
+    if (const YAML::Node& a = t["ablation"]) {
+        for (const auto& kv : a) {
+            const std::string key = kv.first.as<std::string>();
+            if (key != "activation_dynamics" && key != "use_fl" && key != "use_fv" && key != "use_passive")
+                throw std::runtime_error("Task '" + task_name + "': unknown ablation key '" + key
+                                         + "' (expected activation_dynamics, use_fl, use_fv, use_passive)");
+        }
+        auto flag = [&a](const char* key, bool& dst) { if (a[key]) dst = a[key].as<bool>(); };
+        flag("activation_dynamics", cfg.muscle.activation_dynamics);
+        flag("use_fl",              cfg.muscle.use_fl);
+        flag("use_fv",              cfg.muscle.use_fv);
+        flag("use_passive",         cfg.muscle.use_passive);
+    }
+
     return cfg;
 }

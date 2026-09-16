@@ -55,6 +55,7 @@ public:
     const MuscleParams& muscle_params() const { return muscle_; }
     const TaskConfig&   task_ref()      const { return task_; }
     const double*       activation()    const { return real_act_; }
+    const double*       torque()        const { return last_tau_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
@@ -94,6 +95,9 @@ private:
     // Tracks the activation state at the most recently issued command.
     // Seeds rollouts — updated each update() after hill_compute_torques.
     double real_act_[NUM_MUSCLES] = {};
+
+    // Joint torques returned by the most recent update() (logged by mppi_sim).
+    double last_tau_[NUM_JOINTS] = {};
 
     int    base_bid_ = 1;
 };

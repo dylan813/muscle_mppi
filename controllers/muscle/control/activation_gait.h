@@ -28,8 +28,8 @@ std::string source_gait_path(const std::string& key);
 std::string activation_gait_path(const std::string& key);
 
 // Hash of every muscle parameter the generated gait depends on (stiffness,
-// lce_min/max, phi_min/max, pFLmax, FVmax, vmax, peak_force) plus a generator
-// version, as 16 hex digits.
+// lce_min/max, phi_min/max, pFLmax, FVmax, vmax, peak_force, and the Hill
+// ablation switches when any is off) plus a generator version, as 16 hex digits.
 std::string muscle_fingerprint(const MuscleParams& p);
 
 // The header line (without "# " and newline) a gait generated from `key` with `p` carries.

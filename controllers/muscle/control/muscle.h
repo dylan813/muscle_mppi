@@ -72,19 +72,22 @@ static inline void hill_invert_torque(
     const double lce1 = q *   r1 + (p.lce_min[j] - r1 * p.phi_min[j]);
     const double lce2 = q * (-r1) + (p.lce_min[j] + r1 * p.phi_max[j]);
 
+    // Ablated Hill components (MuscleParams::use_*) are replaced by FL = FV = 1, passive = 0.
     const double lmin = p.lce_min[j], lmax = p.lce_max[j];
-    const double FL1 = active_force_length(lce1, lmin, 1.0, lmax)
+    const double FL1 = !p.use_fl ? 1.0
+                     : active_force_length(lce1, lmin, 1.0, lmax)
                      + 0.15 * active_force_length(lce1, lmin, 0.5*(lmin+0.95), 0.95);
-    const double FL2 = active_force_length(lce2, lmin, 1.0, lmax)
+    const double FL2 = !p.use_fl ? 1.0
+                     : active_force_length(lce2, lmin, 1.0, lmax)
                      + 0.15 * active_force_length(lce2, lmin, 0.5*(lmin+0.95), 0.95);
 
     const double b_passive = 0.5 * (lmax + 1.0);
-    const double P1 = passive_force_length(lce1, p.pFLmax[j], b_passive);
-    const double P2 = passive_force_length(lce2, p.pFLmax[j], b_passive);
+    const double P1 = p.use_passive ? passive_force_length(lce1, p.pFLmax[j], b_passive) : 0.0;
+    const double P2 = p.use_passive ? passive_force_length(lce2, p.pFLmax[j], b_passive) : 0.0;
 
     const double c   = p.FVmax[j] - 1.0;
-    const double FV1 = force_vel( r1 * dq, c, p.vmax[j], p.FVmax[j]);
-    const double FV2 = force_vel(-r1 * dq, c, p.vmax[j], p.FVmax[j]);
+    const double FV1 = p.use_fv ? force_vel( r1 * dq, c, p.vmax[j], p.FVmax[j]) : 1.0;
+    const double FV2 = p.use_fv ? force_vel(-r1 * dq, c, p.vmax[j], p.FVmax[j]) : 1.0;
 
     const double eff1 = FL1 * FV1;
     const double eff2 = FL2 * FV2;
@@ -111,8 +114,10 @@ static inline void hill_invert_torque(
 // Action layout (act_cmd, activation): interleaved per joint:
 //   [agonist_j0, antagonist_j0, agonist_j1, antagonist_j1, ...]
 //
-// Activation dynamics: first-order filter at act_bandwidth Hz.
+// Activation dynamics: first-order filter at act_bandwidth Hz (alpha = 1, i.e.
+// activation = command, when MuscleParams::activation_dynamics is off).
 // dt must be the physics timestep (task_.dt), not the control period.
+// Ablated Hill components (MuscleParams::use_*) are replaced by FL = FV = 1, passive = 0.
 inline void hill_compute_torques(
     const double        act_cmd[NUM_MUSCLES],
     const double        q[NUM_JOINTS],
@@ -122,7 +127,7 @@ inline void hill_compute_torques(
     double              activation[NUM_MUSCLES],   // in/out
     double              tau_out[NUM_JOINTS])
 {
-    const double alpha = p.act_bandwidth * dt;
+    const double alpha = p.activation_dynamics ? p.act_bandwidth * dt : 1.0;
 
     for (int j = 0; j < NUM_JOINTS; ++j) {
         // Linear moment-arm parametrization: maps [phi_min, phi_max] → [lce_min, lce_max].
@@ -151,22 +156,24 @@ inline void hill_compute_torques(
         // Force-length: primary bell + secondary shoulder at short lengths.
         const double lmin = p.lce_min[j];
         const double lmax = p.lce_max[j];
-        const double active_FL1 = active_force_length(lce1, lmin, 1.0, lmax)
+        const double active_FL1 = !p.use_fl ? 1.0
+                                : active_force_length(lce1, lmin, 1.0, lmax)
                                 + 0.15 * active_force_length(lce1, lmin, 0.5 * (lmin + 0.95), 0.95);
-        const double active_FL2 = active_force_length(lce2, lmin, 1.0, lmax)
+        const double active_FL2 = !p.use_fl ? 1.0
+                                : active_force_length(lce2, lmin, 1.0, lmax)
                                 + 0.15 * active_force_length(lce2, lmin, 0.5 * (lmin + 0.95), 0.95);
 
         // Force-velocity.
         const double vmax  = p.vmax[j];
         const double FVmax = p.FVmax[j];
         const double c     = FVmax - 1.0;
-        const double FV1   = force_vel(lce_dot1, c, vmax, FVmax);
-        const double FV2   = force_vel(lce_dot2, c, vmax, FVmax);
+        const double FV1   = p.use_fv ? force_vel(lce_dot1, c, vmax, FVmax) : 1.0;
+        const double FV2   = p.use_fv ? force_vel(lce_dot2, c, vmax, FVmax) : 1.0;
 
         // Passive parallel elasticity.
         const double b_passive = 0.5 * (lmax + 1.0);
-        const double passive_FL1 = passive_force_length(lce1, p.pFLmax[j], b_passive);
-        const double passive_FL2 = passive_force_length(lce2, p.pFLmax[j], b_passive);
+        const double passive_FL1 = p.use_passive ? passive_force_length(lce1, p.pFLmax[j], b_passive) : 0.0;
+        const double passive_FL2 = p.use_passive ? passive_force_length(lce2, p.pFLmax[j], b_passive) : 0.0;
 
         // Total force per muscle (normalized), scaled to Newtons by peak_force.
         const double F1 = (active_FL1 * FV1 * act1 + passive_FL1) * p.peak_force[j];

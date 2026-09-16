@@ -29,6 +29,17 @@ struct MuscleParams {
     // states in the gait-tracking cost, and for generating the activation gaits
     // (muscle/control/activation_gait.h), which regenerate when it changes.
     double stiffness = 0.75;
+
+    // Ablation switches, set from the task's optional `ablation:` block (all
+    // true = the full model; see run_ablation_walk.sh). The Hill switches apply to both
+    // hill_compute_torques and hill_invert_torque, so the gait reference, the
+    // gait-tracking cost and the warm start use the same muscle model as the
+    // rollouts. All Hill switches off leaves a linear actuator:
+    // tau = r * peak_force * (a2 - a1).
+    bool activation_dynamics = true;   // false: activation = command (no first-order filter)
+    bool use_fl              = true;   // false: active force-length = 1
+    bool use_fv              = true;   // false: force-velocity = 1
+    bool use_passive         = true;   // false: no passive parallel force
 };
 
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase

@@ -63,6 +63,13 @@ std::string muscle_fingerprint(const MuscleParams& p)
     feed_array("phi_min", p.phi_min);     feed_array("phi_max", p.phi_max);
     feed_array("pFLmax", p.pFLmax);       feed_array("FVmax", p.FVmax);
     feed_array("vmax", p.vmax);           feed_array("peak_force", p.peak_force);
+    // Hill ablation switches change hill_invert_torque, so they change the gait.
+    // Fed only when a component is off, so full-model gaits keep their existing
+    // fingerprint. activation_dynamics isn't used by gait generation.
+    if (!(p.use_fl && p.use_fv && p.use_passive)) {
+        feed("ablation");
+        feed_value(p.use_fl); feed_value(p.use_fv); feed_value(p.use_passive);
+    }
 
     char out[17];
     std::snprintf(out, sizeof out, "%016" PRIx64, h);

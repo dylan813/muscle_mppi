@@ -1,8 +1,9 @@
 """
 Commanded-torque statistics across a set of saved trials.
 
-Aggregates what plot_leg_muscles.py plots: neither sim logs torque, so both
-controllers' torques are reconstructed from the logged state. All of the
+Aggregates what plot_leg_muscles.py plots. Muscle runs that log tau_j* (added
+for the walk ablation study) use that logged torque directly; older muscle runs
+and PD runs don't log torque, so theirs is reconstructed from the logged state. All of the
 reconstruction — the Hill model, the PD law, the model's joint->qpos mapping,
 and the one-row log offset — is imported from plot_leg_muscles.py rather than
 reimplemented here, so the numbers below and that script's traces can't drift
@@ -62,6 +63,13 @@ def trial_torque(csv_path, kind, params, qadr):
     the first logged row is dropped (its predecessor was never written).
     """
     df, qpos = load_run(csv_path)
+
+    # Muscle runs logged since the ablation study carry the torque mppi_sim
+    # actually commanded (tau_j*, same row convention as act_m*). Use it: the
+    # Hill reconstruction below is wrong for ablated muscle models.
+    if kind == "muscle" and "tau_j0" in df.columns:
+        return np.column_stack([df[f"tau_j{j}"].to_numpy()[1:] for j in range(NUM_JOINTS)])
+
     tau = np.zeros((len(df) - 1, NUM_JOINTS))
 
     for j in range(NUM_JOINTS):
@@ -160,11 +168,18 @@ def main():
                          "reporting delivered rather than commanded torque")
     args = ap.parse_args()
 
-    muscle_task = load_task(DEFAULT_YAML, args.task)
-    pd_task     = load_task(DEFAULT_PD_YAML, args.task)
+    # A task only has to exist in the YAML of a controller that has trials here
+    # (e.g. the walk ablation tasks exist only in the muscle YAML).
+    have = {kind: os.path.isdir(os.path.join(args.trials_dir, kind))
+            for kind in ("muscle", "pd")}
+    tasks = {"muscle": load_task(DEFAULT_YAML, args.task) if have["muscle"] else None,
+             "pd":     load_task(DEFAULT_PD_YAML, args.task) if have["pd"] else None}
+    if not any(have.values()):
+        raise SystemExit(f"no muscle/ or pd/ directory under {args.trials_dir}")
 
+    model_task = tasks["muscle"] or tasks["pd"]
     qadr, ctrlrange = model_joint_info(os.path.normpath(
-        os.path.join(_MODEL_BASE, muscle_task["model_path"])))
+        os.path.join(_MODEL_BASE, model_task["model_path"])))
 
     label = "delivered (clipped)" if args.clip else "commanded"
     print(f"Task: {args.task}   torque: {label}")
@@ -172,14 +187,14 @@ def main():
     print(f"Actuator limit: ±{ctrlrange[0][1]:.4g} N·m\n")
 
     stats = {}
-    for kind, params in (("muscle", muscle_task["muscle"]), ("pd", pd_task["pd"])):
+    for kind, section in (("muscle", "muscle"), ("pd", "pd")):
         cdir = os.path.join(args.trials_dir, kind)
-        if not os.path.isdir(cdir):
+        if not have[kind]:
             print(f"(no {kind}/ directory — skipping)\n")
             continue
 
         df, jmeans, jpeaks, jover = summarize(
-            cdir, kind, params, qadr, ctrlrange, args.clip)
+            cdir, kind, tasks[kind][section], qadr, ctrlrange, args.clip)
         types = by_joint_type(jmeans, jpeaks, jover)
         stats[kind] = (df, jmeans, jpeaks, types)
 
