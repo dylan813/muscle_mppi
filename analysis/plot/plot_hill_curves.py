@@ -199,7 +199,7 @@ def main():
     # the inter-row gap only has to hold the upper x-label plus the lower ticks.
     fig.subplots_adjust(left=AXES_LEFT_IN / FIG_W, right=0.974,
                         top=1 - 0.15 / FIG_H, bottom=1.39 / FIG_H,
-                        hspace=0.29, wspace=0.20)
+                        hspace=0.38, wspace=0.20)
 
     for ax, tag in zip(axes[-1], SUBFIG_TAGS):
         box = ax.get_position()
