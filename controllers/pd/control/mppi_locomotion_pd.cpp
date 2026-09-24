@@ -251,6 +251,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
         for (int j = 0; j < NUM_JOINTS; ++j)
             tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], real_q_des_[j], state.q[j],
                                            /*dq_des=*/0.0, state.dq[j], /*tau_ff=*/0.0);
+        std::memcpy(last_tau_, tau_out, NUM_JOINTS * sizeof(double));
         return;
     }
 
@@ -372,6 +373,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
     for (int j = 0; j < NUM_JOINTS; ++j)
         tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], real_q_des_[j], state.q[j],
                                        /*dq_des=*/0.0, state.dq[j], /*tau_ff=*/0.0);
+    std::memcpy(last_tau_, tau_out, NUM_JOINTS * sizeof(double));
 
     if (phases_.active_gait()) phases_.active_gait()->advance();
 

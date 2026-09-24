@@ -246,6 +246,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     if (!state.valid) {
         double act_cmd[NUM_MUSCLES] = {};
         hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
+        std::memcpy(last_act_cmd_, act_cmd, NUM_MUSCLES * sizeof(double));
         std::memcpy(last_tau_, tau_out, NUM_JOINTS * sizeof(double));
         return;
     }
@@ -354,6 +355,7 @@ void MPPILocomotion::update(const RobotState& state, double tau_out[NUM_JOINTS])
     double act_cmd[NUM_MUSCLES];
     for (int m = 0; m < NUM_MUSCLES; ++m) act_cmd[m] = trajectory_[m];
     hill_compute_torques(act_cmd, state.q, state.dq, muscle_, task_.dt, real_act_, tau_out);
+    std::memcpy(last_act_cmd_, act_cmd, NUM_MUSCLES * sizeof(double));
     std::memcpy(last_tau_, tau_out, NUM_JOINTS * sizeof(double));
 
     if (phases_.active_gait()) phases_.active_gait()->advance();

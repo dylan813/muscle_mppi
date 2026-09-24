@@ -281,6 +281,9 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     // Resolve the base body (mirrors the controllers' base_bid_ resolution).
     const int base_bid = find_base_body(m);
 
+    // Foot geoms, for the per-foot contact forces logged with every row.
+    const FootGeoms feet = find_foot_geoms(m);
+
     // set joint damping to match MPPI's internal model
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
     joint_addresses(m, qa, qv);
@@ -344,7 +347,8 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
 
         // --- log ---
         if (converged) {
-            write_csv_row_base(csv, sim_t, spec.log_position(m, d, base_bid), d, qv);
+            write_csv_row_base(csv, sim_t, spec.log_position(m, d, base_bid),
+                               m, d, qv, feet, ms);
             spec.extra_row(csv, mppi);
             csv << "\n";
 

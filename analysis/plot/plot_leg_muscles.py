@@ -216,12 +216,23 @@ LEGEND_X_IN   = 1.25   # right edge of the stacked legend
 AXES_LEFT_IN  = 1.70   # left edge of the axes (tick labels fill the gap)
 
 
-def plot_joints(panels, out_path, shared_scale=False):
+def plot_joints(panels, out_path, shared_scale=False,
+                x_scale=1e3, x_label="Time (ms)", linewidth=1.0, panel_h=PANEL_H):
+    """Stacked torque panels, one per (leg, joint), each overlaying its series.
+
+    x_scale/x_label default to milliseconds, which suits the short single-run
+    traces this was written for; the ablation comparison passes seconds, whose
+    rollouts run to 20 s. linewidth is raised there too, because its series
+    colours are categorical rather than the two-series muscle/PD pair and the
+    lighter slots need the extra weight to read against the surface. panel_h is
+    the inches of height per panel: one or two series read fine in a 1 inch
+    panel, but four or five overlaid traces need more vertical room to separate.
+    """
     n = len(panels)
-    fig, axes = plt.subplots(n, 1, figsize=(FIG_W, PANEL_H * n), sharex=True)
+    fig, axes = plt.subplots(n, 1, figsize=(FIG_W, panel_h * n), sharex=True)
     axes = np.atleast_1d(axes)
     # Header offset is in inches so it holds at any panel count.
-    height = PANEL_H * n
+    height = panel_h * n
 
     # Each panel is scaled to its own peak. A shared per-joint-type scale reads
     # better when the legs are similar, but one leg's saturation transient can
@@ -245,7 +256,7 @@ def plot_joints(panels, out_path, shared_scale=False):
         # Painted front-to-back in list order, so the first series sits on top
         # while the legend still reads in that same order.
         for i, (t, tau, label, color) in enumerate(panel["series"]):
-            ax.plot(t * 1e3, tau, color=color, linewidth=1.0, label=label,
+            ax.plot(t * x_scale, tau, color=color, linewidth=linewidth, label=label,
                     zorder=len(panel["series"]) - i + 1)
 
         ax.set_ylim(-ylim, ylim)
@@ -253,7 +264,7 @@ def plot_joints(panels, out_path, shared_scale=False):
         ax.set_axisbelow(True)
         ax.set_ylabel("")
 
-    axes[-1].set_xlabel("Time (ms)")
+    axes[-1].set_xlabel(x_label)
 
     # Explicit margins rather than tight_layout: the left gutter holds three
     # columns that must not collide — leg/joint labels outermost, the shared
@@ -261,8 +272,12 @@ def plot_joints(panels, out_path, shared_scale=False):
     # inches converted to figure fractions, so they hold at any panel count.
     # The legend now sits in the left gutter rather than under the plots, so the
     # bottom margin only has to clear the x-label.
-    has_legend = len(panels[0]["series"]) > 1
-    bottom_in = 0.55
+    n_series = len(panels[0]["series"])
+    has_legend = n_series > 1
+    # The legend is stacked one row per series in the bottom of the left gutter,
+    # so past the muscle/PD pair it grows tall enough to reach the last panel's
+    # label. Give it the room rather than letting it overlap.
+    bottom_in = 0.55 if n_series <= 2 else 0.30 + 0.20 * n_series
     fig.subplots_adjust(left=AXES_LEFT_IN / FIG_W, right=0.985,
                         top=1 - 0.10 / height, bottom=bottom_in / height,
                         hspace=0.45)

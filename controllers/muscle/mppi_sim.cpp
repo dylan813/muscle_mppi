@@ -21,10 +21,16 @@
 // common/harness.h.
 //
 // Output CSV columns:
-//   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, act_m0..act_m{NUM_MUSCLES-1},
-//   tau_j0..tau_j{NUM_JOINTS-1}
+//   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
+//   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, act_m0..act_m{NUM_MUSCLES-1},
+//   act_cmd_m0..act_cmd_m{NUM_MUSCLES-1}, tau_j0..tau_j{NUM_JOINTS-1}
 //   tau is the commanded joint torque from the update() that produced the row
 //   (computed from the previous row's state, before MuJoCo's ctrlrange clamp).
+//   act_m* is the filtered activation that torque came from; act_cmd_m* is the
+//   command it was filtering toward (equal when activation dynamics are off).
+//   wx/wy/wz are body-frame angular velocity, fn_*/ft_* the normal and
+//   tangential ground reaction force per foot, and solve_ms that update()'s
+//   compute time — all written by write_csv_row_base() in common/log.h.
 //   px/py/pz are the whole-robot (trunk + legs) center of mass, i.e. the base
 //   body's subtree_com — matching what step_cost() scores against goal_pos
 //   in mppi_locomotion.cpp, not the trunk frame origin.
@@ -55,11 +61,14 @@ int main(int argc, char** argv)
 
     spec.extra_header = [](std::ostream& csv) {
         for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;
+        for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_cmd_m" << m;
         for (int j = 0; j < NUM_JOINTS; ++j)  csv << ",tau_j" << j;
     };
     spec.extra_row = [](std::ostream& csv, const MPPILocomotion& mppi) {
         const double* act = mppi.activation();
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
+        const double* cmd = mppi.act_cmd();
+        for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << cmd[j];
         const double* tau = mppi.torque();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
     };

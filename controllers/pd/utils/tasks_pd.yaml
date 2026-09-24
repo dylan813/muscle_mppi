@@ -88,8 +88,14 @@ walk:
   # against gait_ref_weights (800, pulling the legs into the 0.27 crouch) —
   # two strong terms with incompatible targets that the solver cannot satisfy
   # at once. Elevated-terrain tasks below add their platform height to 0.27.
+  # goal x = 2.0 m within 20 s, matching the muscle `walk` task
+  # (controllers/muscle/utils/tasks.yaml) so the two controllers are scored on
+  # the same distance and time budget in any muscle-vs-PD comparison. goal_pos z
+  # stays 0.27 for the reason above — it is this controller's own standing
+  # height, not a task difference.
+  sim_duration: 20.0
   phases:
-    - goal_pos:     [5.0, 0.0, 0.27]
+    - goal_pos:     [2.0, 0.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2

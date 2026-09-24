@@ -25,7 +25,17 @@
 // common/harness.h.
 //
 // Output CSV columns:
-//   t, px, py, pz, vx, vy, vz, qw, roll_deg, dq_j0..dq_j{NUM_JOINTS-1}, qdes_j0..qdes_j{NUM_JOINTS-1}
+//   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
+//   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, qdes_j0..qdes_j{NUM_JOINTS-1},
+//   tau_j0..tau_j{NUM_JOINTS-1}
+//   tau_j* is the commanded PD torque from the update() that produced the row
+//   (computed from the previous row's state, before MuJoCo's ctrlrange clamp),
+//   the same convention and column name the muscle variant uses. Logged rather
+//   than reconstructed in analysis, which only works while one command lasts
+//   exactly one logged step.
+//   wx/wy/wz are body-frame angular velocity, fn_*/ft_* the normal and
+//   tangential ground reaction force per foot, and solve_ms that update()'s
+//   compute time — all written by write_csv_row_base() in common/log.h.
 //   px/py/pz are the trunk frame origin (free-joint qpos[0:3]) — matching
 //   what step_cost() scores against goal_pos in mppi_locomotion_pd.cpp, and
 //   matching RTWholeBodyMPPI's own position cost reference.
@@ -77,10 +87,13 @@ int main(int argc, char** argv)
 
     spec.extra_header = [](std::ostream& csv) {
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_j" << j;
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_j" << j;
     };
     spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi) {
         const double* qdes = mppi.q_des();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qdes[j];
+        const double* tau = mppi.torque();
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
     };
 
     return run_sim(argc, argv, spec);

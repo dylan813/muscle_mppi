@@ -64,10 +64,13 @@ def trial_torque(csv_path, kind, params, qadr):
     """
     df, qpos = load_run(csv_path)
 
-    # Muscle runs logged since the ablation study carry the torque mppi_sim
-    # actually commanded (tau_j*, same row convention as act_m*). Use it: the
-    # Hill reconstruction below is wrong for ablated muscle models.
-    if kind == "muscle" and "tau_j0" in df.columns:
+    # Runs logged since the ablation study carry the torque the sim actually
+    # commanded (tau_j*, same row convention as act_m*/qdes_j*) -- muscle since
+    # then, and pd since the control-rate sweep. Use it whenever it is there:
+    # the Hill reconstruction below is wrong for ablated muscle models, and a
+    # logged command needs no reconstruction for either controller. Older logs
+    # without the column still fall through to the reconstruction.
+    if "tau_j0" in df.columns:
         return np.column_stack([df[f"tau_j{j}"].to_numpy()[1:] for j in range(NUM_JOINTS)])
 
     tau = np.zeros((len(df) - 1, NUM_JOINTS))

@@ -59,6 +59,9 @@ public:
     // Commanded joint targets at the most recently issued command — the
     // PD-variant analogue of MPPILocomotion::activation().
     const double*       q_des()     const { return real_q_des_; }
+    // Joint torques the most recent update() commanded, before MuJoCo's
+    // ctrlrange clamp — the PD-variant analogue of MPPILocomotion::torque().
+    const double*       torque()    const { return last_tau_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
@@ -103,4 +106,7 @@ private:
     // Tracks the desired joint positions at the most recently issued command.
     // Seeds rollouts.
     double real_q_des_[NUM_JOINTS] = {};
+
+    // Joint torques returned by the most recent update() (logged by pd_mppi_sim).
+    double last_tau_[NUM_JOINTS] = {};
 };

@@ -56,6 +56,9 @@ public:
     const TaskConfig&   task_ref()      const { return task_; }
     const double*       activation()    const { return real_act_; }
     const double*       torque()        const { return last_tau_; }
+    // The activation command the most recent update() issued, before the
+    // activation filter — activation() is what that command became.
+    const double*       act_cmd()       const { return last_act_cmd_; }
 
 private:
     double rollout(int s, const RobotState& state) override;
@@ -98,6 +101,10 @@ private:
 
     // Joint torques returned by the most recent update() (logged by mppi_sim).
     double last_tau_[NUM_JOINTS] = {};
+
+    // The activation command that update() issued, i.e. what real_act_ filters
+    // toward (logged by mppi_sim alongside the resulting activation).
+    double last_act_cmd_[NUM_MUSCLES] = {};
 
     int    base_bid_ = 1;
 };

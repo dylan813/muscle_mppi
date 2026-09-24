@@ -71,18 +71,76 @@ inline std::string gif_path_for(const std::string& csv_path)
 // CSV and qpos rows
 // ============================================================================
 
+// Foot geoms in the usual leg order (FR, FL, RR, RL — the order the joint
+// columns use), resolved by the names go2.xml gives the class="foot" geoms.
+// gid < 0 for a model without that geom, whose foot then logs zero force.
+struct FootGeoms {
+    int gid[4] = {-1, -1, -1, -1};
+};
+
+inline FootGeoms find_foot_geoms(const mjModel* m)
+{
+    static const char* kNames[4] = {"FR", "FL", "RR", "RL"};
+    FootGeoms feet;
+    for (int i = 0; i < 4; ++i) feet.gid[i] = mj_name2id(m, mjOBJ_GEOM, kNames[i]);
+    return feet;
+}
+
+// Per-foot ground reaction force, summed over that foot's contacts: fn along
+// the contact normal, ft the magnitude of the two tangential (friction)
+// components. Call right after mj_step(), where d->contact and d->efc_force
+// still describe the contacts of the step just taken — i.e. the forces that
+// produced this row's state, matching the torque convention in run_sim().
+//
+// A foot can hold several contacts at once (the foot geom is a sphere on a
+// mesh, and rough terrain adds more), so the sum is the total the foot carried,
+// not one contact point's share.
+inline void foot_contact_forces(const mjModel* m, const mjData* d, const FootGeoms& feet,
+                               double fn[4], double ft[4])
+{
+    for (int i = 0; i < 4; ++i) { fn[i] = 0.0; ft[i] = 0.0; }
+
+    for (int c = 0; c < d->ncon; ++c) {
+        const mjContact& con = d->contact[c];
+        int foot = -1;
+        for (int i = 0; i < 4; ++i)
+            if (feet.gid[i] >= 0 && (con.geom[0] == feet.gid[i] || con.geom[1] == feet.gid[i])) {
+                foot = i;
+                break;
+            }
+        if (foot < 0) continue;
+
+        // Contact-frame wrench: [0] normal, [1..2] tangential, [3..5] torques.
+        mjtNum f[6] = {};
+        mj_contactForce(m, d, c, f);
+        fn[foot] += f[0];
+        ft[foot] += std::sqrt(f[1] * f[1] + f[2] * f[2]);
+    }
+}
+
 // Columns every sim logs; each variant appends its own and then writes "\n".
 inline void write_csv_header_base(std::ostream& csv)
 {
-    csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg";
+    csv << "t,px,py,pz,vx,vy,vz,qw,roll_deg,wx,wy,wz";
     for (int j = 0; j < NUM_JOINTS; ++j) csv << ",dq_j" << j;
+    static const char* kLegs[4] = {"FR", "FL", "RR", "RL"};
+    for (int i = 0; i < 4; ++i) csv << ",fn_" << kLegs[i];
+    for (int i = 0; i < 4; ++i) csv << ",ft_" << kLegs[i];
+    csv << ",solve_ms";
 }
 
 // One row of the shared columns. `pos` is whichever position the variant's
 // cost scores (whole-robot CoM for muscle, trunk origin for PD); velocity is
 // the free joint's linear velocity in body-frame axes.
+//
+// wx/wy/wz are the free joint's angular velocity, which MuJoCo keeps in the
+// body frame — the same values a gyro reads and RobotState::gyro carries.
+// solve_ms is the compute time of the solve whose command this step ran. It is a
+// diagnostic only: the sims are lock-step, so it never affects the dynamics, and
+// it moves with machine load and contact count.
 inline void write_csv_row_base(std::ostream& csv, double t, const double pos[3],
-                               const mjData* d, const int qv[NUM_JOINTS])
+                               const mjModel* m, const mjData* d, const int qv[NUM_JOINTS],
+                               const FootGeoms& feet, double solve_ms)
 {
     const double qw  = d->qpos[3];
     const double roll = 2.0 * std::acos(std::clamp(std::abs(qw), 0.0, 1.0))
@@ -94,11 +152,18 @@ inline void write_csv_row_base(std::ostream& csv, double t, const double pos[3],
     mju_quat2Mat(xmat, d->qpos + 3);
     world_to_body(xmat, d->qvel, v_body);
 
+    double fn[4], ft[4];
+    foot_contact_forces(m, d, feet, fn, ft);
+
     csv << t << ","
         << pos[0] << "," << pos[1] << "," << pos[2] << ","
         << v_body[0] << "," << v_body[1] << "," << v_body[2] << ","
-        << qw << "," << roll;
+        << qw << "," << roll << ","
+        << d->qvel[3] << "," << d->qvel[4] << "," << d->qvel[5];
     for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << d->qvel[qv[j]];
+    for (int i = 0; i < 4; ++i) csv << "," << fn[i];
+    for (int i = 0; i < 4; ++i) csv << "," << ft[i];
+    csv << "," << solve_ms;
 }
 
 // Full qpos row, used by analysis/render_gif.py.
