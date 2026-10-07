@@ -27,7 +27,7 @@
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, qdes_j0..qdes_j{NUM_JOINTS-1},
-//   tau_j0..tau_j{NUM_JOINTS-1}
+//   qdes_filt_j0..qdes_filt_j{NUM_JOINTS-1}, tau_j0..tau_j{NUM_JOINTS-1}
 //   tau_j* is the commanded PD torque from the update() that produced the row
 //   (computed from the previous row's state, before MuJoCo's ctrlrange clamp),
 //   the same convention and column name the muscle variant uses. Logged rather
@@ -44,7 +44,9 @@
 //   uses when comparing against cmd_.vx/vy in mppi_locomotion_pd.cpp.
 //   qdes_j* are the commanded joint targets (trajectory_[0..NUM_JOINTS-1]
 //   after each solve) — the PD-variant analogue of the muscle variant's
-//   act_m* activation columns.
+//   act_cmd_m* command columns. qdes_filt_j* are those targets after the
+//   activation-dynamics filter, i.e. what the PD law acted on (the analogue of
+//   act_m*; equal to qdes_j* when the task has no activation_dynamics block).
 
 #include <ostream>
 
@@ -87,11 +89,14 @@ int main(int argc, char** argv)
 
     spec.extra_header = [](std::ostream& csv) {
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_j" << j;
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_filt_j" << j;
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_j" << j;
     };
     spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi) {
         const double* qdes = mppi.q_des();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qdes[j];
+        const double* qfilt = mppi.q_des_filt();
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qfilt[j];
         const double* tau = mppi.torque();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
     };

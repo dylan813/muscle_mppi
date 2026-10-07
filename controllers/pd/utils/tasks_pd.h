@@ -22,6 +22,14 @@ struct PDParams {
     // variant's kd_sim instead. Left at go2.xml's default this under-damps
     // the stiff kp=55 PD law and shows up as visible bouncing/jitter.
     double joint_damping[NUM_JOINTS] = {};
+
+    // Activation dynamics on the joint targets, set from the task's optional
+    // `activation_dynamics:` block (absent = plain PD). The PD law then acts on
+    // q_des passed through the muscle variant's activation filter
+    // (common/activation_dynamics.h):
+    //   q_filt += alpha * (q_des - q_filt),   alpha = act_bandwidth * dt.
+    bool   activation_dynamics = false;
+    double act_bandwidth       = 0.0;   // filter rate (1/s); time constant 1/act_bandwidth
 };
 
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase

@@ -29,8 +29,10 @@ struct CostWeights {
 // Search space: q_des[j] per joint per horizon step (NUM_JOINTS × horizon),
 // bounded by each joint's actual MJCF range (see BaseMPPIPD::action_lo_/hi_).
 // tau[j] = kp[j]*(q_des[j]-q[j]) - kd[j]*dq[j] (RTWholeBodyMPPI's PD law) is
-// computed directly in rollout()/update() — no activation dynamics, no
-// implicit smoothing from a muscle model.
+// computed directly in rollout()/update(), with no implicit smoothing from a
+// muscle model. If the task has an `activation_dynamics:` block, the PD law
+// acts on q_des passed through the muscle variant's first-order activation
+// filter instead (see real_q_filt_), in the rollouts and on the robot alike.
 //
 // Storage layout for trajectory_ (size horizon × NUM_JOINTS):
 //   [t * NUM_JOINTS + j] = q_des[t][j]
@@ -59,6 +61,9 @@ public:
     // Commanded joint targets at the most recently issued command — the
     // PD-variant analogue of MPPILocomotion::activation().
     const double*       q_des()     const { return real_q_des_; }
+    // Joint targets the PD law acted on at that command: q_des() after the
+    // activation-dynamics filter (equal to q_des() when it's off).
+    const double*       q_des_filt() const { return real_q_filt_; }
     // Joint torques the most recent update() commanded, before MuJoCo's
     // ctrlrange clamp — the PD-variant analogue of MPPILocomotion::torque().
     const double*       torque()    const { return last_tau_; }
@@ -106,6 +111,17 @@ private:
     // Tracks the desired joint positions at the most recently issued command.
     // Seeds rollouts.
     double real_q_des_[NUM_JOINTS] = {};
+
+    // Activation-dynamics state: the filtered joint targets the PD law acts on
+    // (equal to real_q_des_ when the filter is off). Persists across update()
+    // calls and seeds every rollout, as real_act_ does in the muscle variant.
+    double real_q_filt_[NUM_JOINTS] = {};
+
+    // PD torques from the filtered targets q_filt, first advancing q_filt one
+    // step toward q_des (or setting it to q_des when the filter is off).
+    void pd_torques(const double q_des[NUM_JOINTS], double q_filt[NUM_JOINTS],
+                    const double q[NUM_JOINTS], const double dq[NUM_JOINTS],
+                    double tau_out[NUM_JOINTS]) const;
 
     // Joint torques returned by the most recent update() (logged by pd_mppi_sim).
     double last_tau_[NUM_JOINTS] = {};

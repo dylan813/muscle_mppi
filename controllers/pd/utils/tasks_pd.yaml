@@ -49,6 +49,13 @@ default_control_effort_weights: &default_control_effort_weights
 # control_effort_weights 0.001 (R_diag). These are in the same units as the
 # reference (joint angle in radians), so they are not "muscle-variant numbers
 # awaiting a re-tune" — they are the reference's own tuned values.
+#
+# Optional, any task: an `activation_dynamics:` block passes the MPPI joint
+# targets through the muscle variant's first-order activation filter before the
+# PD law, in the rollouts and on the robot (see PDParams in tasks_pd.h):
+#   activation_dynamics:
+#     act_bandwidth: 20.0   # filter rate (1/s); time constant 1/act_bandwidth; act_bandwidth * dt <= 1
+# Without the block the PD law acts on q_des directly.
 walk:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   n_samples:     30

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include "../utils/tasks.h"
+#include "../../common/activation_dynamics.h"
 
 // Antagonistic Hill muscle model
 // Each joint j is driven by two virtual muscles: agonist (2*j) and antagonist (2*j+1).
@@ -129,6 +130,13 @@ inline void hill_compute_torques(
 {
     const double alpha = p.activation_dynamics ? p.act_bandwidth * dt : 1.0;
 
+    // First-order activation filter (common/activation_dynamics.h), on commands
+    // clamped to [0, 1].
+    double ctrl[NUM_MUSCLES];
+    for (int m = 0; m < NUM_MUSCLES; ++m) ctrl[m] = std::clamp(act_cmd[m], 0.0, 1.0);
+    activation_dynamics(ctrl, activation, NUM_MUSCLES, alpha);
+    for (int m = 0; m < NUM_MUSCLES; ++m) activation[m] = std::clamp(activation[m], 0.0, 1.0);
+
     for (int j = 0; j < NUM_JOINTS; ++j) {
         // Linear moment-arm parametrization: maps [phi_min, phi_max] → [lce_min, lce_max].
         // Agonist (muscle 1) lengthens as q increases; antagonist (muscle 2) shortens.
@@ -144,12 +152,6 @@ inline void hill_compute_torques(
         const double lce_dot1 = r1 * dq[j];
         const double lce_dot2 = r2 * dq[j];
 
-        // First-order activation filter (matches: act_new = bandwidth*(ctrl-act)*dt + act).
-        for (int m = 0; m < 2; ++m) {
-            const double ctrl = std::clamp(act_cmd[2 * j + m], 0.0, 1.0);
-            double& act = activation[2 * j + m];
-            act = std::clamp(act + alpha * (ctrl - act), 0.0, 1.0);
-        }
         const double act1 = activation[2 * j];
         const double act2 = activation[2 * j + 1];
 
