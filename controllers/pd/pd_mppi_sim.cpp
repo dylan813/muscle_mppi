@@ -92,7 +92,7 @@ int main(int argc, char** argv)
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_filt_j" << j;
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_j" << j;
     };
-    spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi) {
+    spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi, const RobotState&) {
         const double* qdes = mppi.q_des();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qdes[j];
         const double* qfilt = mppi.q_des_filt();

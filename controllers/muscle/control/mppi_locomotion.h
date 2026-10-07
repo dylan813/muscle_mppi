@@ -22,6 +22,23 @@ struct CostWeights {
     double gait_ref_weights[NUM_JOINTS] = {};  // per-joint activation tracking (replaces Q[7:19])
 };
 
+// Cost split by term: each is the weighted penalty step_cost() adds for the
+// matching CostWeights fields. Summed over steps for a rollout.
+struct CostTerms {
+    double pos     = 0.0;   // pos_x, pos_y, pos_z
+    double orient  = 0.0;   // orientation
+    double vel     = 0.0;   // vel_x, vel_y, vel_z
+    double ang_vel = 0.0;   // ang_vel
+    double gait    = 0.0;   // gait_ref_weights
+
+    double total() const { return pos + orient + vel + ang_vel + gait; }
+
+    CostTerms& operator+=(const CostTerms& o) {
+        pos += o.pos; orient += o.orient; vel += o.vel; ang_vel += o.ang_vel; gait += o.gait;
+        return *this;
+    }
+};
+
 // MPPI locomotion with direct per-muscle activation (co-contraction capable),
 // tracking the active phase's activation-gait reference in step_cost().
 //
@@ -60,15 +77,36 @@ public:
     // activation filter — activation() is what that command became.
     const double*       act_cmd()       const { return last_act_cmd_; }
 
+    // Analysis only: mppi_sim logs these; the controller never reads them.
+    // All refer to the most recent update().
+    //
+    // Cost of `state`, the state after the executed step, scored as the
+    // rollouts score their first step.
+    CostTerms executed_cost(const RobotState& state);
+    // The plan update() chose, rolled out over the horizon from the state
+    // update() started from (as each sample was), summed over steps.
+    CostTerms plan_cost();
+    // Lowest sample cost, and the effective sample size of the softmin
+    // weights, 1/Σw²: 1 when one sample decides the plan, n_samples when all count equally.
+    double sample_min() const { return sample_min_; }
+    double ess()        const { return ess_; }
+
 private:
     double rollout(int s, const RobotState& state) override;
 
-    double step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]);
+    // Advance d one step under activation command act_cmd: activation
+    // dynamics + Hill torques from d's joint state, then mj_step().
+    void step_model(mjData* d, const double act_cmd[NUM_MUSCLES], double activation[NUM_MUSCLES]) const;
+
+    // Cost of d's state. Call after mj_step() or set_mj_state().
+    CostTerms step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]) const;
+
+    // Recompute what step_cost() reads for d's qpos/qvel (see definition).
+    void refresh_derived(mjData* d) const;
 
     // Whole-robot (trunk + legs) CoM position (world frame) and CoM
-    // velocity (body-frame axes). Non-const mjData*: calls mj_subtreeVel,
-    // which writes into d->subtree_linvel/subtree_angmom.
-    void base_com_state(mjData* d, double com_pos[3], double com_vel_body[3]) const;
+    // velocity (body-frame axes). Reads what refresh_derived() computed.
+    void base_com_state(const mjData* d, double com_pos[3], double com_vel_body[3]) const;
 
     // Write the active phase's noise_sigma_act override (or the YAML baseline,
     // if it has none) into task_.noise_sigma_act, which sample_noise() reads.
@@ -105,6 +143,15 @@ private:
     // The activation command that update() issued, i.e. what real_act_ filters
     // toward (logged by mppi_sim alongside the resulting activation).
     double last_act_cmd_[NUM_MUSCLES] = {};
+
+    // What the most recent update() planned from, so executed_cost() and
+    // plan_cost() score against it after update() returns.
+    RobotState          solve_state_;
+    double              solve_act_[NUM_MUSCLES] = {};
+    std::vector<double> solve_gait_ref_;   // horizon × NUM_MUSCLES; zeros without an active gait
+
+    double sample_min_ = 0.0;
+    double ess_        = 0.0;
 
     int    base_bid_ = 1;
 };

@@ -23,11 +23,24 @@
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, act_m0..act_m{NUM_MUSCLES-1},
-//   act_cmd_m0..act_cmd_m{NUM_MUSCLES-1}, tau_j0..tau_j{NUM_JOINTS-1}
+//   act_cmd_m0..act_cmd_m{NUM_MUSCLES-1}, tau_j0..tau_j{NUM_JOINTS-1},
+//   cost_{pos,orient,vel,ang_vel,gait}, plan_{pos,orient,vel,ang_vel,gait},
+//   sample_min, ess
 //   tau is the commanded joint torque from the update() that produced the row
 //   (computed from the previous row's state, before MuJoCo's ctrlrange clamp).
 //   act_m* is the filtered activation that torque came from; act_cmd_m* is the
 //   command it was filtering toward (equal when activation dynamics are off).
+//   Cost columns, split by cost term (CostTerms in mppi_locomotion.h), from
+//   the update() that produced the row; analysis only, computed outside the
+//   timed solve:
+//     cost_*      cost of the row's state, i.e. what the executed step
+//                 incurred. Sums over a run to the cost the robot incurred.
+//     plan_*      the chosen plan's predicted cost over the horizon, rolled
+//                 out from the state that update() started from. A forecast:
+//                 overlapping windows, so not summable across rows.
+//     sample_min  lowest of that update()'s sample costs (horizon totals).
+//     ess         effective sample size of its softmin weights, 1/Σw²:
+//                 1 = one sample decided the plan, n_samples = all counted equally.
 //   wx/wy/wz are body-frame angular velocity, fn_*/ft_* the normal and
 //   tangential ground reaction force per foot, and solve_ms that update()'s
 //   compute time — all written by write_csv_row_base() in common/log.h.
@@ -52,7 +65,7 @@ int main(int argc, char** argv)
     spec.joint_damping = [](const MPPILocomotion& mppi) { return mppi.task_ref().muscle.kd_sim; };
 
     // Whole-robot CoM (base body's subtree_com), which step_cost() scores.
-    // Recomputed for the post-step state first, as base_com_state() does.
+    // Recomputed for the post-step state first, as step_cost() does.
     spec.log_position = [](const mjModel* m, mjData* d, int base_bid) -> const double* {
         mj_kinematics(m, d);
         mj_comPos(m, d);
@@ -63,14 +76,22 @@ int main(int argc, char** argv)
         for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;
         for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_cmd_m" << m;
         for (int j = 0; j < NUM_JOINTS; ++j)  csv << ",tau_j" << j;
+        for (const char* prefix : {"cost_", "plan_"})
+            for (const char* term : {"pos", "orient", "vel", "ang_vel", "gait"})
+                csv << "," << prefix << term;
+        csv << ",sample_min,ess";
     };
-    spec.extra_row = [](std::ostream& csv, const MPPILocomotion& mppi) {
+    spec.extra_row = [](std::ostream& csv, MPPILocomotion& mppi, const RobotState& state) {
         const double* act = mppi.activation();
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
         const double* cmd = mppi.act_cmd();
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << cmd[j];
         const double* tau = mppi.torque();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
+
+        for (const CostTerms& c : {mppi.executed_cost(state), mppi.plan_cost()})
+            csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;
+        csv << "," << mppi.sample_min() << "," << mppi.ess();
     };
 
     return run_sim(argc, argv, spec);

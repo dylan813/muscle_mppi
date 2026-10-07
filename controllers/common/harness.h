@@ -198,9 +198,11 @@ struct SimSpec {
     // can recompute what it reads (the next mj_step recomputes them anyway).
     std::function<const double*(const mjModel*, mjData*, int base_bid)> log_position;
 
-    // Variant-specific CSV columns, each written with a leading ','.
-    std::function<void(std::ostream&)>                    extra_header;
-    std::function<void(std::ostream&, const Controller&)> extra_row;
+    // Variant-specific CSV columns, each written with a leading ','. extra_row
+    // also gets the state after the step its row records; it runs outside the
+    // timed solve, so a hook may run rollouts without inflating solve_ms.
+    std::function<void(std::ostream&)>                                 extra_header;
+    std::function<void(std::ostream&, Controller&, const RobotState&)> extra_row;
 };
 
 // Standalone MuJoCo simulation around an MPPI controller. No DDS, no real-time
@@ -349,7 +351,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
         if (converged) {
             write_csv_row_base(csv, sim_t, spec.log_position(m, d, base_bid),
                                m, d, qv, feet, ms);
-            spec.extra_row(csv, mppi);
+            spec.extra_row(csv, mppi, read_state(d, qa, qv));
             csv << "\n";
 
             // save full qpos for GIF rendering
