@@ -23,13 +23,17 @@
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, act_m0..act_m{NUM_MUSCLES-1},
-//   act_cmd_m0..act_cmd_m{NUM_MUSCLES-1}, tau_j0..tau_j{NUM_JOINTS-1},
+//   act_cmd_m0..act_cmd_m{NUM_MUSCLES-1}, fl_active_m*, fv_m*, fl_passive_m*,
+//   tau_j0..tau_j{NUM_JOINTS-1},
 //   cost_{pos,orient,vel,ang_vel,gait}, plan_{pos,orient,vel,ang_vel,gait},
 //   sample_min, ess
 //   tau is the commanded joint torque from the update() that produced the row
 //   (computed from the previous row's state, before MuJoCo's ctrlrange clamp).
 //   act_m* is the filtered activation that torque came from; act_cmd_m* is the
 //   command it was filtering toward (equal when activation dynamics are off).
+//   fl_active_m*, fv_m*, fl_passive_m* are the Hill factors that torque came
+//   from (HillFactors in muscle.h): F = (fl_active·fv·act + fl_passive)·peak_force.
+//   Ablated components log their neutral value (fl_active = fv = 1, fl_passive = 0).
 //   Cost columns, split by cost term (CostTerms in mppi_locomotion.h), from
 //   the update() that produced the row; analysis only, computed outside the
 //   timed solve:
@@ -75,6 +79,8 @@ int main(int argc, char** argv)
     spec.extra_header = [](std::ostream& csv) {
         for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;
         for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_cmd_m" << m;
+        for (const char* factor : {"fl_active", "fv", "fl_passive"})
+            for (int m = 0; m < NUM_MUSCLES; ++m) csv << "," << factor << "_m" << m;
         for (int j = 0; j < NUM_JOINTS; ++j)  csv << ",tau_j" << j;
         for (const char* prefix : {"cost_", "plan_"})
             for (const char* term : {"pos", "orient", "vel", "ang_vel", "gait"})
@@ -86,6 +92,9 @@ int main(int argc, char** argv)
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
         const double* cmd = mppi.act_cmd();
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << cmd[j];
+        const HillFactors f = mppi.muscle_factors();
+        for (const double* factor : {f.fl_active, f.fv, f.fl_passive})
+            for (int m = 0; m < NUM_MUSCLES; ++m) csv << "," << factor[m];
         const double* tau = mppi.torque();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
 

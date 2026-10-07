@@ -90,6 +90,13 @@ public:
     // weights, 1/Σw²: 1 when one sample decides the plan, n_samples when all count equally.
     double sample_min() const { return sample_min_; }
     double ess()        const { return ess_; }
+    // Hill factors at the state update() started from: the ones the
+    // executed torque (torque()) came from.
+    HillFactors muscle_factors() const {
+        HillFactors f;
+        hill_factors(solve_state_.q, solve_state_.dq, muscle_, f);
+        return f;
+    }
 
 private:
     double rollout(int s, const RobotState& state) override;
