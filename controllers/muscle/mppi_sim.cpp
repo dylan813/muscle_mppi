@@ -24,11 +24,14 @@
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, act_m0..act_m{NUM_MUSCLES-1},
 //   act_cmd_m0..act_cmd_m{NUM_MUSCLES-1}, fl_active_m*, fv_m*, fl_passive_m*,
-//   tau_j0..tau_j{NUM_JOINTS-1},
+//   tau_j0..tau_j{NUM_JOINTS-1}, tau_applied_j0..tau_applied_j{NUM_JOINTS-1},
 //   cost_{pos,orient,vel,ang_vel,gait}, plan_{pos,orient,vel,ang_vel,gait},
 //   sample_min, ess
-//   tau is the commanded joint torque from the update() that produced the row
-//   (computed from the previous row's state, before MuJoCo's ctrlrange clamp).
+//   tau is the motor command (Hill torque minus driver damping) of the row's
+//   last physics step, before the torque limit and the motor's lag;
+//   tau_applied the torque the motor applied over that step (common/motor.h).
+//   With one physics step per control step and no motor lag, tau is computed
+//   from the previous row's state and tau_applied is tau within the limits.
 //   act_m* is the filtered activation that torque came from; act_cmd_m* is the
 //   command it was filtering toward (equal when activation dynamics are off).
 //   fl_active_m*, fv_m*, fl_passive_m* are the Hill factors that torque came
@@ -82,6 +85,7 @@ int main(int argc, char** argv)
         for (const char* factor : {"fl_active", "fv", "fl_passive"})
             for (int m = 0; m < NUM_MUSCLES; ++m) csv << "," << factor << "_m" << m;
         for (int j = 0; j < NUM_JOINTS; ++j)  csv << ",tau_j" << j;
+        for (int j = 0; j < NUM_JOINTS; ++j)  csv << ",tau_applied_j" << j;
         for (const char* prefix : {"cost_", "plan_"})
             for (const char* term : {"pos", "orient", "vel", "ang_vel", "gait"})
                 csv << "," << prefix << term;
@@ -97,6 +101,9 @@ int main(int argc, char** argv)
             for (int m = 0; m < NUM_MUSCLES; ++m) csv << "," << factor[m];
         const double* tau = mppi.torque();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
+        double applied[NUM_JOINTS];
+        mppi.applied_torque(state, applied);
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << applied[j];
 
         for (const CostTerms& c : {mppi.executed_cost(state), mppi.plan_cost()})
             csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;

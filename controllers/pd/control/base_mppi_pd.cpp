@@ -124,7 +124,7 @@ BaseMPPIPD::BaseMPPIPD(const TaskConfig& task)
     model_ = mj_loadXML(task_.model_path.c_str(), nullptr, error, sizeof(error));
     if (!model_) throw std::runtime_error("Failed to load model: " + std::string(error));
 
-    model_->opt.timestep = task_.dt;
+    model_->opt.timestep = task_.motor.physics_dt;
 
     // Mirrors RTWholeBodyMPPI's base_controller.py:33-34 (enableflags=1 is
     // mjENBL_OVERRIDE; o_solref=[0.02,1.0] from every mppi_gait_config_*.yml).

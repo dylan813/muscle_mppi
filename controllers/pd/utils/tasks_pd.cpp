@@ -35,11 +35,10 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
         cfg.pd.activation_dynamics = true;
         cfg.pd.act_bandwidth       = a["act_bandwidth"].as<double>();
 
-        // alpha > 1 overshoots the target every step (and oscillates past 2).
-        const double alpha = cfg.pd.act_bandwidth * cfg.dt;
-        if (!(alpha > 0.0 && alpha <= 1.0))
-            throw std::runtime_error("Task '" + task_name + "': activation_dynamics.act_bandwidth * dt must be "
-                                     "in (0, 1], got " + std::to_string(alpha));
+        // Discretized exactly (filter_alpha()), so any positive rate is valid.
+        if (!(cfg.pd.act_bandwidth > 0.0))
+            throw std::runtime_error("Task '" + task_name + "': activation_dynamics.act_bandwidth must be > 0, got "
+                                     + std::to_string(cfg.pd.act_bandwidth));
     }
 
     return cfg;

@@ -54,8 +54,18 @@ default_control_effort_weights: &default_control_effort_weights
 # targets through the muscle variant's first-order activation filter before the
 # PD law, in the rollouts and on the robot (see PDParams in tasks_pd.h):
 #   activation_dynamics:
-#     act_bandwidth: 20.0   # filter rate (1/s); time constant 1/act_bandwidth; act_bandwidth * dt <= 1
+#     act_bandwidth: 20.0   # filter rate (1/s); time constant 1/act_bandwidth; any value > 0
 # Without the block the PD law acts on q_des directly.
+#
+# Optional, any task (both variants, MotorParams in common/task_config.h): a
+# `motor:` block puts an actuator torque-bandwidth limit between the controller
+# and the robot (common/motor.h).
+#   motor:
+#     bandwidth:  .inf       # torque bandwidth (1/s); .inf = no lag
+#     driver_kd:  [0, ...]   # 12 driver velocity-feedback gains added to the PD kd
+#     physics_dt: 0.002      # physics/actuator step (s); dt / whole number; default dt
+#     damping:    explicit   # explicit | implicit: how the motor's kd is integrated
+# Without it the joints are driven directly.
 walk:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   n_samples:     30

@@ -1,6 +1,7 @@
 #include "mppi_locomotion_pd.h"
 #include "../../common/activation_dynamics.h"
 #include "../../common/control_utils.h"
+#include "../../common/harness.h"   // settle_standing() for the motor's holding torque
 
 #include <cmath>
 #include <cstdio>
@@ -94,25 +95,86 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
     std::memcpy(real_q_des_, task_.nominal_pose, sizeof(real_q_des_));
     std::memcpy(real_q_filt_, task_.nominal_pose, sizeof(real_q_filt_));
 
+    // Motor (common/motor.h): its velocity feedback is the PD law's kd (plus
+    // any driver kd), and it starts out applying the torque that holds the
+    // settled stand-up. From here on it applies the torque limits, and its
+    // implicit share joins the joint damping MuJoCo integrates.
+    {
+        const StandingEquilibrium stand = settle_standing(model_, task_.spawn_height_offset);
+        double kd[NUM_JOINTS], lo[NUM_JOINTS], hi[NUM_JOINTS];
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            kd[j] = pd_.kd[j] + task_.motor.driver_kd[j];
+            lo[j] = model_->actuator_ctrlrange[2 * j];
+            hi[j] = model_->actuator_ctrlrange[2 * j + 1];
+        }
+        motor_.init(task_.motor, kd, lo, hi);
+        motor_.settle(stand.tau, real_motor_tau_);
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            model_->dof_damping[act_qvel_adr_[j]] += motor_.implicit_damping(j);
+            model_->actuator_ctrllimited[j] = 0;
+        }
+    }
+
     if (pd_.activation_dynamics)
-        std::printf("[pd] activation dynamics on q_des: act_bandwidth %.4g /s (alpha %.4g, time constant %.4g ms)\n",
-                    pd_.act_bandwidth, pd_.act_bandwidth * task_.dt, 1000.0 / pd_.act_bandwidth);
+        std::printf("[pd] activation dynamics on q_des: act_bandwidth %.4g /s (alpha %.4g per %.4g ms step, time constant %.4g ms)\n",
+                    pd_.act_bandwidth, filter_alpha(pd_.act_bandwidth, task_.motor.physics_dt),
+                    1000.0 * task_.motor.physics_dt, 1000.0 / pd_.act_bandwidth);
 }
 
-void MPPILocomotionPD::pd_torques(const double q_des[NUM_JOINTS], double q_filt[NUM_JOINTS],
-                                  const double q[NUM_JOINTS], const double dq[NUM_JOINTS],
-                                  double tau_out[NUM_JOINTS]) const
+void MPPILocomotionPD::proportional_torques(const double q_des[NUM_JOINTS], double q_filt[NUM_JOINTS],
+                                            const double q[NUM_JOINTS], double tau_out[NUM_JOINTS]) const
 {
     // Plain PD copies q_des rather than filtering with alpha = 1, which can
     // differ from q_des in the last bit.
     if (pd_.activation_dynamics)
-        activation_dynamics(q_des, q_filt, NUM_JOINTS, pd_.act_bandwidth * task_.dt);
+        activation_dynamics(q_des, q_filt, NUM_JOINTS, filter_alpha(pd_.act_bandwidth, task_.motor.physics_dt));
     else
         std::memcpy(q_filt, q_des, NUM_JOINTS * sizeof(double));
 
     for (int j = 0; j < NUM_JOINTS; ++j)
-        tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], q_filt[j], q[j],
-                                       /*dq_des=*/0.0, dq[j], /*tau_ff=*/0.0);
+        tau_out[j] = pd_.kp[j] * (q_filt[j] - q[j]);
+}
+
+void MPPILocomotionPD::step_model(mjData* d, const double q_des[NUM_JOINTS], double q_filt[NUM_JOINTS],
+                                  double motor_tau[NUM_JOINTS]) const
+{
+    for (int i = 0; i < task_.motor.substeps; ++i) {
+        double q[NUM_JOINTS], dq[NUM_JOINTS], tau[NUM_JOINTS], ctrl[NUM_JOINTS], tau_cmd[NUM_JOINTS];
+        for (int j = 0; j < NUM_JOINTS; ++j) {
+            q[j]  = d->qpos[act_qpos_adr_[j]];
+            dq[j] = d->qvel[act_qvel_adr_[j]];
+        }
+
+        proportional_torques(q_des, q_filt, q, tau);
+        motor_.command(tau, dq, motor_tau, ctrl, tau_cmd);
+
+        for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
+        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
+
+        mj_step(model_, d);
+
+        for (int j = 0; j < NUM_JOINTS; ++j) dq[j] = d->qvel[act_qvel_adr_[j]];
+        motor_.applied(ctrl, dq, motor_tau);
+    }
+}
+
+void MPPILocomotionPD::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
+{
+    settle_motor(state);
+
+    double tau[NUM_JOINTS];
+    proportional_torques(real_q_des_, real_q_filt_, state.q, tau);
+    motor_.command(tau, state.dq, real_motor_tau_, ctrl, last_tau_);
+
+    std::memcpy(pending_ctrl_, ctrl, NUM_JOINTS * sizeof(double));
+    pending_ = true;
+}
+
+void MPPILocomotionPD::settle_motor(const RobotState& state)
+{
+    if (!pending_) return;
+    motor_.applied(pending_ctrl_, state.dq, real_motor_tau_);
+    pending_ = false;
 }
 
 void MPPILocomotionPD::apply_phase_noise()
@@ -135,26 +197,15 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
     mjData* d = data_[s];
     set_mj_state(d, state);
 
-    double q_filt[NUM_JOINTS];
+    double q_filt[NUM_JOINTS], motor_tau[NUM_JOINTS];
     std::memcpy(q_filt, real_q_filt_, NUM_JOINTS * sizeof(double));
+    std::memcpy(motor_tau, real_motor_tau_, NUM_JOINTS * sizeof(double));
 
     const int stride  = task_.horizon * NUM_JOINTS;
     double total_cost = 0.0;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        double tau_out[NUM_JOINTS];
-        double q_cur[NUM_JOINTS], dq_cur[NUM_JOINTS];
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            q_cur[j]  = d->qpos[act_qpos_adr_[j]];
-            dq_cur[j] = d->qvel[act_qvel_adr_[j]];
-        }
-
-        pd_torques(&actions_[s * stride + t * NUM_JOINTS], q_filt, q_cur, dq_cur, tau_out);
-
-        for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
-        for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = tau_out[j];
-
-        mj_step(model_, d);
+        step_model(d, &actions_[s * stride + t * NUM_JOINTS], q_filt, motor_tau);
 
         double gait_ref_q[NUM_JOINTS] = {}, gait_ref_dq[NUM_JOINTS] = {};
         if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref_q, gait_ref_dq);
@@ -264,18 +315,14 @@ double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS
 // Main solve
 // ============================================================================
 
-void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS])
+void MPPILocomotionPD::update(const RobotState& state)
 {
     const auto t_start = std::chrono::steady_clock::now();
 
-    if (!state.valid) {
-        // Hold the last applied (filtered) targets.
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            tau_out[j] = unitree_pd_torque(pd_.kp[j], pd_.kd[j], real_q_filt_[j], state.q[j],
-                                           /*dq_des=*/0.0, state.dq[j], /*tau_ff=*/0.0);
-        std::memcpy(last_tau_, tau_out, NUM_JOINTS * sizeof(double));
-        return;
-    }
+    settle_motor(state);
+
+    // Invalid state: actuate() keeps holding the last joint target.
+    if (!state.valid) return;
 
     // Goal-facing orientation target for this tick's cost, held fixed across
     // the whole rollout batch below (see common/control_utils.h).
@@ -320,8 +367,9 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
     if (++log_counter_ % LOG_INTERVAL == 0) {
         mjData* dl = data_[task_.n_samples];
         set_mj_state(dl, state);
-        double q_filt_l[NUM_JOINTS];
+        double q_filt_l[NUM_JOINTS], motor_tau_l[NUM_JOINTS];
         std::memcpy(q_filt_l, real_q_filt_, NUM_JOINTS * sizeof(double));
+        std::memcpy(motor_tau_l, real_motor_tau_, NUM_JOINTS * sizeof(double));
 
         double c_pos = 0, c_orient = 0, c_vel = 0, c_gait = 0, c_jvel = 0, c_effort = 0;
 
@@ -331,11 +379,7 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
                 q_l[j]  = dl->qpos[act_qpos_adr_[j]];
                 dq_l[j] = dl->qvel[act_qvel_adr_[j]];
             }
-            double tau_l[NUM_JOINTS];
-            pd_torques(&trajectory_[t * NUM_JOINTS], q_filt_l, q_l, dq_l, tau_l);
-            for (int j = 0; j < model_->nu; ++j) dl->ctrl[j] = 0.0;
-            for (int j = 0; j < NUM_JOINTS; ++j) dl->ctrl[j] = tau_l[j];
-            mj_step(model_, dl);
+            step_model(dl, &trajectory_[t * NUM_JOINTS], q_filt_l, motor_tau_l);
 
             double lpos[3], lvel[3];
             base_state(dl, lpos, lvel);
@@ -388,10 +432,8 @@ void MPPILocomotionPD::update(const RobotState& state, double tau_out[NUM_JOINTS
                     c_pos, c_orient, c_vel, c_gait, c_jvel, c_effort, cmin, last_compute_ms_);
     }
 
-    // Output: execute step 0 of the weighted-mean trajectory from current state.
+    // Output: step 0 of the weighted-mean trajectory, held by actuate() until the next update().
     for (int j = 0; j < NUM_JOINTS; ++j) real_q_des_[j] = trajectory_[j];
-    pd_torques(real_q_des_, real_q_filt_, state.q, state.dq, tau_out);
-    std::memcpy(last_tau_, tau_out, NUM_JOINTS * sizeof(double));
 
     if (phases_.active_gait()) phases_.active_gait()->advance();
 

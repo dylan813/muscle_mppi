@@ -2,6 +2,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -31,6 +32,47 @@ YAML::Node load_task_node(const std::string& task_name, const std::string& yaml_
     return root[task_name];
 }
 
+// Optional `motor:` block (MotorParams). Unknown keys throw, so a typo can't
+// silently run the joints without the motor.
+static void load_motor(const YAML::Node& node, double dt, MotorParams& motor)
+{
+    motor.physics_dt = dt;
+    if (!node) return;
+
+    for (const auto& kv : node) {
+        const std::string key = kv.first.as<std::string>();
+        if (key != "bandwidth" && key != "driver_kd" && key != "physics_dt" && key != "damping")
+            throw std::runtime_error("Field 'motor': unknown key '" + key
+                                     + "' (expected bandwidth, driver_kd, physics_dt, damping)");
+    }
+
+    if (node["bandwidth"]) {
+        motor.bandwidth = node["bandwidth"].as<double>();
+        if (!(motor.bandwidth > 0.0))
+            throw std::runtime_error("Field 'motor.bandwidth': expected > 0 (.inf for no lag)");
+    }
+
+    if (node["driver_kd"])
+        load_doubles(node["driver_kd"], motor.driver_kd, NUM_JOINTS, "motor.driver_kd");
+
+    if (node["physics_dt"]) {
+        const double physics_dt = node["physics_dt"].as<double>();
+        const double ratio      = dt / physics_dt;
+        motor.substeps = static_cast<int>(std::lround(ratio));
+        if (!(physics_dt > 0.0) || motor.substeps < 1 || std::abs(ratio - motor.substeps) > 1e-9)
+            throw std::runtime_error("Field 'motor.physics_dt': expected dt divided by a whole number of steps, got "
+                                     + std::to_string(physics_dt));
+        motor.physics_dt = dt / motor.substeps;
+    }
+
+    if (node["damping"]) {
+        const std::string damping = node["damping"].as<std::string>();
+        if      (damping == "explicit") motor.damping = MotorDamping::Explicit;
+        else if (damping == "implicit") motor.damping = MotorDamping::Implicit;
+        else throw std::runtime_error("Field 'motor.damping': expected explicit or implicit, got '" + damping + "'");
+    }
+}
+
 void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)
 {
     cfg.model_path    = repo_path(t["model_path"].as<std::string>());
@@ -47,6 +89,8 @@ void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)
 
     if (t["noise_sigma_act"])
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
+
+    load_motor(t["motor"], cfg.dt, cfg.motor);
 
     if (t["phases"]) {
         const YAML::Node& phases = t["phases"];

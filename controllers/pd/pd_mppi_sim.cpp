@@ -27,12 +27,13 @@
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, qdes_j0..qdes_j{NUM_JOINTS-1},
-//   qdes_filt_j0..qdes_filt_j{NUM_JOINTS-1}, tau_j0..tau_j{NUM_JOINTS-1}
-//   tau_j* is the commanded PD torque from the update() that produced the row
-//   (computed from the previous row's state, before MuJoCo's ctrlrange clamp),
-//   the same convention and column name the muscle variant uses. Logged rather
-//   than reconstructed in analysis, which only works while one command lasts
-//   exactly one logged step.
+//   qdes_filt_j0..qdes_filt_j{NUM_JOINTS-1}, tau_j0..tau_j{NUM_JOINTS-1},
+//   tau_applied_j0..tau_applied_j{NUM_JOINTS-1}
+//   tau_j* is the motor command (the PD torque) of the row's last physics step,
+//   before the torque limit and the motor's lag; tau_applied_j* the torque the
+//   motor applied over that step (common/motor.h) — the same convention and
+//   column names the muscle variant uses. Logged rather than reconstructed in
+//   analysis, which only works while one command lasts exactly one logged step.
 //   wx/wy/wz are body-frame angular velocity, fn_*/ft_* the normal and
 //   tangential ground reaction force per foot, and solve_ms that update()'s
 //   compute time — all written by write_csv_row_base() in common/log.h.
@@ -91,14 +92,18 @@ int main(int argc, char** argv)
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_j" << j;
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_filt_j" << j;
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_j" << j;
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_applied_j" << j;
     };
-    spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi, const RobotState&) {
+    spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi, const RobotState& state) {
         const double* qdes = mppi.q_des();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qdes[j];
         const double* qfilt = mppi.q_des_filt();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qfilt[j];
         const double* tau = mppi.torque();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << tau[j];
+        double applied[NUM_JOINTS];
+        mppi.applied_torque(state, applied);
+        for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << applied[j];
     };
 
     return run_sim(argc, argv, spec);

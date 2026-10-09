@@ -171,7 +171,8 @@ private:
             auto t0 = std::chrono::steady_clock::now();
             double tau_cmd[NUM_JOINTS] = {};
             mppi_.advance_phase(snap);
-            mppi_.update(snap, tau_cmd);
+            mppi_.update(snap);
+            mppi_.actuate(snap, tau_cmd);
             double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 

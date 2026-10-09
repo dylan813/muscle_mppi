@@ -5,6 +5,7 @@
 #include "base_mppi.h"
 #include "gait_scheduler.h"
 #include "muscle.h"
+#include "../../common/motor.h"
 
 struct CostWeights {
     double pos_x       = 0.0;  // L1 world-frame x-position error
@@ -54,8 +55,18 @@ public:
     explicit MPPILocomotion(const std::string& task_name,
                             const std::string& yaml_path = kDefaultTasksYaml);
 
-    // Run one MPPI solve; returns Hill-model torques directly.
-    void update(const RobotState& state, double tau_out[NUM_JOINTS]);
+    // Run one MPPI solve. Step 0 of the chosen plan becomes the activation
+    // command actuate() holds until the next update().
+    void update(const RobotState& state);
+
+    // One physics step of the actuators (task_.motor.substeps per update()):
+    // activation dynamics and Hill torques from state, then the motor
+    // (common/motor.h). ctrl: what to write to the robot's ctrl for this step.
+    void actuate(const RobotState& state, double ctrl[NUM_JOINTS]);
+
+    // Joint damping the sim adds to its physical damping for the motor
+    // (Motor::implicit_damping()).
+    double motor_damping(int j) const { return motor_.implicit_damping(j); }
 
     // Call once per control tick, before update(). Advances through the task's
     // phases (see PhaseSequencer::advance() in common/gait.h).
@@ -72,10 +83,18 @@ public:
     const MuscleParams& muscle_params() const { return muscle_; }
     const TaskConfig&   task_ref()      const { return task_; }
     const double*       activation()    const { return real_act_; }
+    // Motor command of the most recent actuate(): Hill torque minus driver
+    // damping, before the torque limit and the motor's lag.
     const double*       torque()        const { return last_tau_; }
     // The activation command the most recent update() issued, before the
     // activation filter — activation() is what that command became.
     const double*       act_cmd()       const { return last_act_cmd_; }
+    // Torque the motor applied over the most recent actuate()'s step, given
+    // `after`, the state that step ended at.
+    void applied_torque(const RobotState& after, double tau[NUM_JOINTS]) const {
+        std::copy(real_motor_tau_, real_motor_tau_ + NUM_JOINTS, tau);
+        if (pending_) motor_.applied(pending_ctrl_, after.dq, tau);
+    }
 
     // Analysis only: mppi_sim logs these; the controller never reads them.
     // All refer to the most recent update().
@@ -90,8 +109,8 @@ public:
     // weights, 1/Σw²: 1 when one sample decides the plan, n_samples when all count equally.
     double sample_min() const { return sample_min_; }
     double ess()        const { return ess_; }
-    // Hill factors at the state update() started from: the ones the
-    // executed torque (torque()) came from.
+    // Hill factors at the state update() started from: the ones the first
+    // physics step's torque came from.
     HillFactors muscle_factors() const {
         HillFactors f;
         hill_factors(solve_state_.q, solve_state_.dq, muscle_, f);
@@ -101,9 +120,14 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    // Advance d one step under activation command act_cmd: activation
-    // dynamics + Hill torques from d's joint state, then mj_step().
-    void step_model(mjData* d, const double act_cmd[NUM_MUSCLES], double activation[NUM_MUSCLES]) const;
+    // Advance d one control step under activation command act_cmd: per physics
+    // step, activation dynamics and Hill torques from d's joint state, the
+    // motor, then mj_step(). activation and motor_tau carry the actuator state.
+    void step_model(mjData* d, const double act_cmd[NUM_MUSCLES], double activation[NUM_MUSCLES],
+                    double motor_tau[NUM_JOINTS]) const;
+
+    // Finish the motor's pending step with the velocity it ended at (state.dq).
+    void settle_motor(const RobotState& state);
 
     // Cost of d's state. Call after mj_step() or set_mj_state().
     CostTerms step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]) const;
@@ -141,11 +165,19 @@ private:
     int    log_counter_     = 0;
 
     // Tracks the activation state at the most recently issued command.
-    // Seeds rollouts — updated each update() after hill_compute_torques.
+    // Seeds rollouts — updated each actuate() by hill_compute_torques.
     double real_act_[NUM_MUSCLES] = {};
 
-    // Joint torques returned by the most recent update() (logged by mppi_sim).
+    // Motor command of the most recent actuate() (logged by mppi_sim).
     double last_tau_[NUM_JOINTS] = {};
+
+    // Motor between the Hill model and the robot. real_motor_tau_ is the torque
+    // it has applied (seeds rollouts, like real_act_). The step actuate() sent
+    // stays pending until the next call reports the velocity it ended at.
+    Motor  motor_;
+    double real_motor_tau_[NUM_JOINTS] = {};
+    double pending_ctrl_[NUM_JOINTS]   = {};
+    bool   pending_ = false;
 
     // The activation command that update() issued, i.e. what real_act_ filters
     // toward (logged by mppi_sim alongside the resulting activation).
@@ -155,6 +187,7 @@ private:
     // plan_cost() score against it after update() returns.
     RobotState          solve_state_;
     double              solve_act_[NUM_MUSCLES] = {};
+    double              solve_motor_tau_[NUM_JOINTS] = {};
     std::vector<double> solve_gait_ref_;   // horizon × NUM_MUSCLES; zeros without an active gait
 
     double sample_min_ = 0.0;

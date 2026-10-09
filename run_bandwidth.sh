@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+#
+# Actuator-bandwidth sweep on the walk task: three controllers each drive the
+# robot through the same external motor (controllers/common/motor.h), and the
+# motor's torque bandwidth is swept. Runs 15 conditions back-to-back through
+# run_trials.sh (no GIFs), N trials each:
+#
+#   controllers  muscle  Hill model, with its activation dynamics (muscle.act_bandwidth)
+#                pd_act  PD on q_des filtered at the muscle's act_bandwidth
+#                pd      classical PD
+#   bandwidths   inf (no lag), 20, 8, 3.2, 1 Hz cutoff; the motor's rate is 2π·f (1/s)
+#
+# Shared physical setup, every condition:
+#   joint damping 0.1 (go2.xml's own value; muscle.kd_sim / pd.joint_damping)
+#   2 ms physics with explicit motor damping, 10 ms MPPI control step
+# The rest of each controller's original joint damping becomes motor driver
+# damping, so it passes through the motor's lag while the total stays the
+# original controller's:
+#   muscle  driver_kd = kd_sim − 0.1        = 1.9, 3.4, 3.4  (total 2, 3.5, 3.5)
+#   PD      driver_kd = joint_damping − 0.1 = 0.9, 1.9, 1.9, plus PD's own kd = 3
+#           in the motor too                                  (total 4, 5, 5)
+# Trials use the controllers' usual nondeterministic seeding.
+#
+# Each condition runs the `walk` task from controllers/muscle/utils/tasks.yaml or
+# controllers/pd/utils/tasks_pd.yaml with the blocks above added. That YAML is
+# written into the condition's folder and passed to run_trials.sh, so every
+# batch keeps the exact config it ran with. The base task files are not modified.
+#
+# Usage (from anywhere):
+#   ./run_bandwidth.sh                          # 100 trials per condition, under trials/bandwidth/
+#   ./run_bandwidth.sh -n 1 -N bandwidth_pilot  # pilot run
+#   ./run_bandwidth.sh --tee                    # also mirror each run's output to the terminal
+#
+# Output layout:
+#   analysis/log/trials/<name>/<controller>_<bandwidth>/{tasks.yaml | tasks_pd.yaml}
+#   analysis/log/trials/<name>/<controller>_<bandwidth>/{muscle | pd}/trial_NNN/{*.csv, console.log}
+#   analysis/log/trials/<name>/<controller>_<bandwidth>/batch_<timestamp>/{batch.log,summary.csv}
+#
+# Trial indices continue from whatever is already there (see run_trials.sh), so
+# use a different -N for pilots, or they count toward the real trials.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+MUSCLE_YAML="$REPO_ROOT/controllers/muscle/utils/tasks.yaml"
+PD_YAML="$REPO_ROOT/controllers/pd/utils/tasks_pd.yaml"
+TRIALS_DIR="$REPO_ROOT/analysis/log/trials"
+
+N_RUNS=100
+NAME="bandwidth"
+EXTRA=()
+
+usage() {
+    sed -n '2,/^$/s/^# \?//p' "${BASH_SOURCE[0]}"
+    exit "${1:-0}"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--runs) N_RUNS="$2"; shift 2 ;;
+        -N|--name) NAME="$2"; shift 2 ;;
+        --tee)     EXTRA+=(--tee); shift ;;
+        -h|--help) usage 0 ;;
+        *) echo "Unknown option: $1" >&2; usage 1 ;;
+    esac
+done
+
+[[ "$N_RUNS" =~ ^[0-9]+$ && "$N_RUNS" -gt 0 ]] || { echo "-n needs a positive integer" >&2; exit 1; }
+[[ "$NAME" == *".."* ]] && { echo "--name must not contain '..'" >&2; exit 1; }
+
+CONTROLLERS=(muscle pd_act pd)
+BANDWIDTHS=(inf 20 8 3.2 1)   # cutoff, Hz
+
+# Write controller $1's walk task with motor bandwidth $2 (Hz, or inf) into $3.
+write_yaml() {
+    local controller="$1" band="$2" out="$3"
+    python3 - "$controller" "$band" "$out" "$MUSCLE_YAML" "$PD_YAML" <<'EOF'
+import copy, math, sys, yaml
+controller, band, out, muscle_yaml, pd_yaml = sys.argv[1:6]
+
+PHYSICAL_DAMPING = [0.1] * 12   # go2.xml's joint damping
+
+muscle_walk = yaml.safe_load(open(muscle_yaml))["walk"]
+src = muscle_yaml if controller == "muscle" else pd_yaml
+cfg = yaml.safe_load(open(src))
+walk = cfg["walk"]
+for key in ("motor", "activation_dynamics", "ablation"):
+    if key in walk:
+        sys.exit(f"{src}: walk already has a {key} block; remove it so conditions start from the default controller")
+
+# Original joint damping = physical (kept outside the motor) + driver (inside it).
+def split_damping(original):
+    return [round(c - p, 12) for c, p in zip(original, PHYSICAL_DAMPING)]
+
+if controller == "muscle":
+    walk["muscle"] = copy.deepcopy(walk["muscle"])     # the anchor is shared with other tasks
+    driver_kd = split_damping(walk["muscle"]["kd_sim"])
+    walk["muscle"]["kd_sim"] = PHYSICAL_DAMPING
+else:
+    walk["pd"] = copy.deepcopy(walk["pd"])
+    driver_kd = split_damping(walk["pd"]["joint_damping"])   # on top of PD's own kd
+    walk["pd"]["joint_damping"] = PHYSICAL_DAMPING
+    if controller == "pd_act":
+        walk["activation_dynamics"] = {"act_bandwidth": muscle_walk["muscle"]["act_bandwidth"]}
+
+bandwidth = math.inf if band == "inf" else 2 * math.pi * float(band)
+walk["motor"] = {"bandwidth": bandwidth, "driver_kd": driver_kd, "physics_dt": 0.002, "damping": "explicit"}
+
+with open(out, "w") as f:
+    f.write(f"# Generated by run_bandwidth.sh from {src}\n")
+    f.write(f"# walk: {controller}, motor bandwidth {band} Hz cutoff = {bandwidth:.6g} /s\n")
+    yaml.safe_dump(cfg, f, sort_keys=False)
+EOF
+}
+
+ABORT=0
+trap 'ABORT=1' INT TERM
+
+START="$(date +%s)"
+for band in "${BANDWIDTHS[@]}"; do
+    for controller in "${CONTROLLERS[@]}"; do
+        (( ABORT )) && { echo "Interrupted — not starting $controller at $band Hz."; break 2; }
+
+        cond="${controller}_${band}$([[ "$band" == inf ]] || echo Hz)"
+        cond_dir="$TRIALS_DIR/$NAME/$cond"
+        mkdir -p "$cond_dir"
+        if [[ "$controller" == muscle ]]; then
+            yaml="$cond_dir/tasks.yaml";    sim=(--muscle-only --muscle-yaml "$yaml")
+        else
+            yaml="$cond_dir/tasks_pd.yaml"; sim=(--pd-only --pd-yaml "$yaml")
+        fi
+        write_yaml "$controller" "$band" "$yaml" || { echo "Could not write $yaml" >&2; exit 1; }
+
+        echo
+        echo "════ $cond  —  $N_RUNS runs ════"
+        "$REPO_ROOT/run_trials.sh" -t walk -n "$N_RUNS" -N "$NAME/$cond" "${sim[@]}" "${EXTRA[@]}"
+        rc=$?
+        (( rc != 0 )) && { echo "run_trials.sh exited $rc during $cond — stopping." >&2; exit "$rc"; }
+    done
+done
+END="$(date +%s)"
+
+echo
+echo "All conditions finished after $(( (END - START) / 3600 ))h $(( (END - START) % 3600 / 60 ))m."
+echo "Trials: $TRIALS_DIR/$NAME/<controller>_<bandwidth>/{muscle,pd}/"

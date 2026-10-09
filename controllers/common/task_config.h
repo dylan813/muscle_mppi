@@ -4,6 +4,7 @@
 // PD-actuated (controllers/pd/) variants: core types, repo-relative path
 // resolution, and the YAML loading helpers each variant's load_task() builds on.
 
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -91,6 +92,24 @@ struct MotionCommand {
     double goal_pos[3] = {};  // world-frame position target [x, y, z]
 };
 
+// How the motor's velocity feedback (Motor, common/motor.h) is integrated.
+//   Explicit: computed from the velocity at the start of each physics step.
+//             Unstable at 10 ms for the light calf once kd·Δt/I nears 2.
+//   Implicit: its α·kd share is integrated by MuJoCo as joint damping; stable
+//             at any step, but damps transient oscillations numerically.
+enum class MotorDamping { Explicit, Implicit };
+
+// External motor between every controller and the robot (common/motor.h),
+// from a task's optional `motor:` block. The defaults reproduce driving the
+// joints directly: no lag, no driver feedback, one physics step per control step.
+struct MotorParams {
+    double       bandwidth  = INFINITY;           // torque bandwidth b (1/s); INFINITY = no lag
+    double       driver_kd[NUM_JOINTS] = {};      // driver velocity feedback (N·m·s/rad), part of the motor torque
+    double       physics_dt = 0.0;                // physics and actuator step (s): dt / substeps
+    int          substeps   = 1;                  // physics steps per control step
+    MotorDamping damping    = MotorDamping::Explicit;
+};
+
 // Task fields common to both variants, parsed by load_task_base()
 // (below). Each variant's TaskConfig derives from this and adds
 // its own actuator parameters.
@@ -134,6 +153,8 @@ struct TaskConfigBase {
     // joint's sigma, each with its own independent draw (BaseMPPI::sample_noise()).
     // PD: desired joint position in radians (BaseMPPIPD::sample_actions()).
     double noise_sigma_act[NUM_JOINTS]   = {};
+
+    MotorParams  motor;
 };
 
 // ============================================================================

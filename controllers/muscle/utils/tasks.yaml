@@ -6,6 +6,16 @@
 #   3-5:  FL_hip, FL_thigh, FL_calf
 #   6-8:  RR_hip, RR_thigh, RR_calf
 #   9-11: RL_hip, RL_thigh, RL_calf
+#
+# Optional, any task (both variants, MotorParams in common/task_config.h): a
+# `motor:` block puts an actuator torque-bandwidth limit between the Hill model
+# and the robot (common/motor.h).
+#   motor:
+#     bandwidth:  .inf       # torque bandwidth (1/s); .inf = no lag
+#     driver_kd:  [2, ...]   # 12 driver velocity-feedback gains, as motor torque (muscle.kd_sim is then the physical damping alone)
+#     physics_dt: 0.002      # physics/actuator step (s); dt / whole number; default dt
+#     damping:    explicit   # explicit | implicit: how the motor's kd is integrated
+# Without it the joints are driven directly.
 
 # -----------------------------------------------------------------------
 # Quadruped muscle parameters (12 joints: (hip/thigh/calf)x(FR/FL/RR/RL))

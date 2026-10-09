@@ -178,8 +178,9 @@ inline void hill_factors(const double q[NUM_JOINTS], const double dq[NUM_JOINTS]
 //   [agonist_j0, antagonist_j0, agonist_j1, antagonist_j1, ...]
 //
 // Activation dynamics: first-order filter at act_bandwidth Hz (alpha = 1, i.e.
-// activation = command, when MuscleParams::activation_dynamics is off).
-// dt must be the physics timestep (task_.dt), not the control period.
+// activation = command, when MuscleParams::activation_dynamics is off),
+// discretized exactly (filter_alpha(), common/activation_dynamics.h).
+// dt must be the physics timestep (task_.motor.physics_dt), not the control period.
 // Hill factors (including ablated components) from hill_factors().
 inline void hill_compute_torques(
     const double        act_cmd[NUM_MUSCLES],
@@ -190,7 +191,7 @@ inline void hill_compute_torques(
     double              activation[NUM_MUSCLES],   // in/out
     double              tau_out[NUM_JOINTS])
 {
-    const double alpha = p.activation_dynamics ? p.act_bandwidth * dt : 1.0;
+    const double alpha = p.activation_dynamics ? filter_alpha(p.act_bandwidth, dt) : 1.0;
 
     // First-order activation filter (common/activation_dynamics.h), on commands
     // clamped to [0, 1].

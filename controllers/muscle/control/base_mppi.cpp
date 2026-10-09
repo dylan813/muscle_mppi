@@ -119,7 +119,7 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     model_ = mj_loadXML(task_.model_path.c_str(), nullptr, error, sizeof(error));
     if (!model_) throw std::runtime_error("Failed to load model: " + std::string(error));
 
-    model_->opt.timestep = task_.dt;
+    model_->opt.timestep = task_.motor.physics_dt;
 
     data_.resize(task_.n_samples + 1);
     for (int i = 0; i <= task_.n_samples; ++i)
@@ -136,7 +136,10 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
     }
 
     // Set joint damping to kd_sim so MuJoCo applies it automatically,
-    // matching hardware where tau_eff = tau_hill - kd*dq.
+    // matching hardware where tau_eff = tau_hill - kd*dq. (A task's
+    // motor.driver_kd instead puts the driver's damping in the motor torque, so
+    // it passes through the motor's bandwidth limit; kd_sim is then the
+    // physical joint damping alone.)
     for (int j = 0; j < NUM_JOINTS; ++j)
         model_->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j];
 

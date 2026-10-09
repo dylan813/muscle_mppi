@@ -27,6 +27,7 @@
 
 #include <mujoco/mujoco.h>
 
+#include "activation_dynamics.h"   // filter_alpha() for the motor summary
 #include "control_utils.h"
 #include "log.h"
 #include "task_config.h"
@@ -131,19 +132,30 @@ inline void place_on_ground(const mjModel* m, mjData* d, const int qa[NUM_JOINTS
     mj_forward(m, d);
 }
 
-// Run the stand-up ramp plus hold (kStandupSecs + kHoldSecs) with software PD.
-inline void run_standup(const mjModel* m, mjData* d,
-                        const int qa[NUM_JOINTS], const int qv[NUM_JOINTS], double dt)
+// Stand-up physics step, whatever the run's own step (task motor.physics_dt),
+// so every run hands over from the same standing state. At 2 ms the stand-up
+// PD's explicit damping stays stable at any joint damping (kd·Δt/I = 0.43 for
+// the calf in swing; 10 ms gives 2.1, past the explicit limit of 2).
+static constexpr double kStandupDt = 0.002;
+
+// Run the stand-up ramp plus hold (kStandupSecs + kHoldSecs) with software PD,
+// stepping m at kStandupDt; m's own timestep is restored afterwards.
+inline void run_standup(mjModel* m, mjData* d, const int qa[NUM_JOINTS], const int qv[NUM_JOINTS])
 {
-    const double total_standup = kStandupSecs + kHoldSecs;
-    for (double t = 0.0; t < total_standup; t += dt) {
+    const double run_dt = m->opt.timestep;
+    m->opt.timestep = kStandupDt;
+
+    const int steps = static_cast<int>(std::lround((kStandupSecs + kHoldSecs) / kStandupDt));
+    for (int k = 0; k < steps; ++k) {
         double kp, q_des[NUM_JOINTS];
-        standup_targets(t, kp, q_des);
+        standup_targets(k * kStandupDt, kp, q_des);
         for (int j = 0; j < NUM_JOINTS; ++j)
             d->ctrl[j] = unitree_pd_torque(
                 kp, kStandupKd, q_des[j], d->qpos[qa[j]], /*dq_des=*/0.0, d->qvel[qv[j]], /*tau_ff=*/0.0);
         mj_step(m, d);
     }
+
+    m->opt.timestep = run_dt;
 }
 
 // Settled standing state: joint angles, and the joint torques the actuators must
@@ -155,16 +167,16 @@ struct StandingEquilibrium {
 };
 
 // Stand the robot up on its own mjData for model m exactly as the sims do
-// (place_on_ground + run_standup at m's timestep) and return the settled state.
-// m's joint damping should already match the run's (e.g. muscle.kd_sim), so the
-// result is the same state the sims hand over to MPPI.
-inline StandingEquilibrium settle_standing(const mjModel* m, double spawn_height_offset)
+// (place_on_ground + run_standup) and return the settled state. m's joint
+// damping should already match the run's physical damping (e.g. muscle.kd_sim),
+// so the result is the same state the sims hand over to MPPI.
+inline StandingEquilibrium settle_standing(mjModel* m, double spawn_height_offset)
 {
     mjData* d = mj_makeData(m);
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
     joint_addresses(m, qa, qv);
     place_on_ground(m, d, qa, spawn_height_offset);
-    run_standup(m, d, qa, qv, m->opt.timestep);
+    run_standup(m, d, qa, qv);
     mj_forward(m, d);   // bias/constraint forces for the final state, stand-up PD still applied
 
     StandingEquilibrium eq;
@@ -181,8 +193,8 @@ inline StandingEquilibrium settle_standing(const mjModel* m, double spawn_height
 // ============================================================================
 
 // What a standalone sim customises about run_sim(). Controller must provide
-// task_ref() (with model_path, dt, sim_duration, spawn_height_offset),
-// advance_phase(), update() and task_success().
+// task_ref() (with model_path, dt, motor, sim_duration, spawn_height_offset),
+// advance_phase(), update(), actuate(), motor_damping() and task_success().
 template <class Controller>
 struct SimSpec {
     std::string default_yaml;   // task file when [yaml] isn't given
@@ -277,7 +289,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     char err[1000];
     mjModel* m = mj_loadXML(task.model_path.c_str(), nullptr, err, sizeof(err));
     if (!m) { fprintf(stderr, "mj_loadXML: %s\n", err); return 1; }
-    m->opt.timestep = task.dt;
+    m->opt.timestep = task.motor.physics_dt;
     mjData* d = mj_makeData(m);
 
     // Resolve the base body (mirrors the controllers' base_bid_ resolution).
@@ -307,8 +319,21 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
 
     // ── stand-up phase (software PD) ─────────────────────────────────────────
     printf("Standing up (%.1f s)...\n", kStandupSecs + kHoldSecs);
-    run_standup(m, d, qa, qv, task.dt);
+    run_standup(m, d, qa, qv);
     printf("Stand-up complete. Body height: %.3f m\n", d->qpos[2]);
+
+    // Hand over to the controller's motor (common/motor.h): from here on it
+    // applies the torque limits, and its implicit damping share joins the
+    // physical joint damping.
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        m->dof_damping[qv[j]] += mppi.motor_damping(j);
+        m->actuator_ctrllimited[j] = 0;
+    }
+    const MotorParams& motor = task.motor;
+    printf("Motor: bandwidth %.6g /s (cutoff %.6g Hz, alpha %.6g per step), %d physics steps of %.6g ms per control step, %s damping\n",
+           motor.bandwidth, motor.bandwidth / (2.0 * M_PI), filter_alpha(motor.bandwidth, motor.physics_dt),
+           motor.substeps, 1000.0 * motor.physics_dt,
+           motor.damping == MotorDamping::Implicit ? "implicit" : "explicit");
 
     // ── MPPI loop ─────────────────────────────────────────────────────────────
     printf("Running MPPI for %d convergence solves then logging...\n",
@@ -326,9 +351,8 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
         RobotState state = read_state(d, qa, qv);
 
         auto t0 = std::chrono::steady_clock::now();
-        double tau[NUM_JOINTS] = {};
         mppi.advance_phase(state);
-        mppi.update(state, tau);
+        mppi.update(state);
         double ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t0).count();
 
@@ -341,10 +365,14 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
             converged = true;
         }
 
-        // --- apply torques for one control step ---
-        for (int j = 0; j < NUM_JOINTS; ++j)
-            d->ctrl[j] = tau[j];
-        mj_step(m, d);
+        // --- one control step: the actuators run every physics step on the
+        //     command update() chose ---
+        for (int i = 0; i < task.motor.substeps; ++i) {
+            double ctrl[NUM_JOINTS];
+            mppi.actuate(read_state(d, qa, qv), ctrl);
+            for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
+            mj_step(m, d);
+        }
         sim_t += task.dt;
 
         // --- log ---
