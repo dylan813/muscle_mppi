@@ -217,7 +217,8 @@ AXES_LEFT_IN  = 1.70   # left edge of the axes (tick labels fill the gap)
 
 
 def plot_joints(panels, out_path, shared_scale=False,
-                x_scale=1e3, x_label="Time (ms)", linewidth=1.0, panel_h=PANEL_H):
+                x_scale=1e3, x_label="Time (ms)", linewidth=1.0, panel_h=PANEL_H,
+                fig_w=FIG_W):
     """Stacked torque panels, one per (leg, joint), each overlaying its series.
 
     x_scale/x_label default to milliseconds, which suits the short single-run
@@ -227,9 +228,11 @@ def plot_joints(panels, out_path, shared_scale=False,
     lighter slots need the extra weight to read against the surface. panel_h is
     the inches of height per panel: one or two series read fine in a 1 inch
     panel, but four or five overlaid traces need more vertical room to separate.
+    fig_w is the figure width in inches; a wider figure spreads long rollouts
+    out along the time axis.
     """
     n = len(panels)
-    fig, axes = plt.subplots(n, 1, figsize=(FIG_W, panel_h * n), sharex=True)
+    fig, axes = plt.subplots(n, 1, figsize=(fig_w, panel_h * n), sharex=True)
     axes = np.atleast_1d(axes)
     # Header offset is in inches so it holds at any panel count.
     height = panel_h * n
@@ -278,16 +281,17 @@ def plot_joints(panels, out_path, shared_scale=False,
     # so past the muscle/PD pair it grows tall enough to reach the last panel's
     # label. Give it the room rather than letting it overlap.
     bottom_in = 0.55 if n_series <= 2 else 0.30 + 0.20 * n_series
-    fig.subplots_adjust(left=AXES_LEFT_IN / FIG_W, right=0.985,
+    fig.subplots_adjust(left=AXES_LEFT_IN / fig_w, right=0.985,
                         top=1 - 0.10 / height, bottom=bottom_in / height,
                         hspace=0.45)
 
-    fig.text(UNITS_X_IN / FIG_W, (bottom_in / height + 1) / 2, "Torque (N·m)",
+    fig.text(UNITS_X_IN / fig_w, (bottom_in / height + 1) / 2, "Torque (N·m)",
              rotation=90, ha="center", va="center", fontsize=10)
     for ax, panel in zip(axes, panels):
         box = ax.get_position()
-        fig.text(LABEL_X_IN / FIG_W, 0.5 * (box.y0 + box.y1),
-                 f"{panel['leg']} {panel['name'].capitalize()}",
+        fig.text(LABEL_X_IN / fig_w, 0.5 * (box.y0 + box.y1),
+                 f"{panel['leg']} {panel['name'].capitalize()}"
+                 + (f"\n{panel['note']}" if panel.get("note") else ""),
                  ha="right", va="center", fontsize=10)
 
     if has_legend:
@@ -297,7 +301,7 @@ def plot_joints(panels, out_path, shared_scale=False,
         leg = fig.legend(handles, labels, loc="lower right", ncol=1,
                          fontsize=9, frameon=True, handlelength=1.6,
                          labelspacing=0.4, borderaxespad=0, borderpad=0.6,
-                         bbox_to_anchor=(LEGEND_X_IN / FIG_W, 0.08 / height))
+                         bbox_to_anchor=(LEGEND_X_IN / fig_w, 0.08 / height))
         leg.get_frame().set_linewidth(0.8)
         leg.get_frame().set_edgecolor("black")
         leg.get_frame().set_facecolor("white")

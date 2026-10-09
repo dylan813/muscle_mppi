@@ -24,8 +24,20 @@ scripts' "fl" is the active force-length and "passive" is the parallel elastic
 force-length, so no_fl reads as no_active_fl and passive_only as
 passive_fl_only. Folder names on disk are unchanged.
 
+Bandwidth sweep (reps from the bandwidth study): ten figures, one per outcome
+and motor bandwidth -- torque_{success,fail}_{inf,20Hz,8Hz,3.2Hz,1Hz}.png --
+each overlaying muscle, pd_act and pd. A fail trace is the fall pick, or the
+timeout pick where the controller never fell at that bandwidth; its legend
+names which. A controller with no trial of the outcome is left out.
+
+Plus six single-joint figures, torque_FR_thigh_<controller>_{success,fail}.png:
+one controller each (named under the joint label), its bandwidths overlaid on
+the FR thigh (BW_JOINT), each bandwidth in its own colour (BW_SWEEP_COLOURS).
+
 Colours are the validated categorical slots (see the dataviz palette): each
-figure takes the first N slots in their fixed order, never cycled.
+figure takes the first N slots in their fixed order, never cycled. The
+bandwidth sweep uses its own three (BW_COLOURS), one per controller in every
+figure.
 
 Torque is the commanded torque logged by mppi_sim (tau_j*), read through
 torque_stats.trial_torque() -- not a Hill reconstruction, which would be wrong
@@ -103,6 +115,31 @@ FIGURES = {
 FREQ_RATES = ["hz_100", "hz_50", "hz_25", "hz_12p5"]
 FREQ_CONTROLLERS = ["muscle", "pd"]
 
+# Bandwidth sweep (run_bandwidth.sh): condition folders are <controller>_<bandwidth>.
+# Each controller keeps its colour in every figure. Violet, orange and aqua
+# (slots 7, 2, 3) also step in lightness, which separates the three dense,
+# overlapping traces better than the default first three slots (validated
+# all-pairs: worst normal-vision ΔE 27.6, worst CVD ΔE 9.2).
+BW_BANDWIDTHS  = ["inf", "20Hz", "8Hz", "3.2Hz", "1Hz"]
+BW_CONTROLLERS = ["muscle", "pd_act", "pd"]
+BW_COLOURS     = ["#4a3aa7", "#eb6834", "#1baf7a"]
+
+# Single-joint view of the bandwidth sweep: one figure per controller and
+# outcome, the bandwidths overlaid on one joint. FR thigh: the thighs change
+# most with bandwidth (PD mean |tau| ~8-10x from inf to 1 Hz, 20-28% of steps
+# past the limit; muscle 1.6x, none), the front legs slightly more than the rear.
+# Each bandwidth has its own hue, the same in all six figures (inf, 20, 8, 3.2,
+# 1 Hz: blue, yellow, magenta, green, violet). These are the only five
+# validated slots that clear the floors for every pair, as overlaid traces need
+# (worst CVD ΔE 13.0, worst normal-vision ΔE 16.3); shades of one hue did not
+# separate. Yellow and magenta sit below 3:1 on the surface, so they carry the
+# middle bandwidths; the legend names every trace.
+BW_JOINT   = ("FR", "thigh")
+BW_JOINT_H = 5.0    # inches: one panel, five overlaid traces
+BW_JOINT_W = 24.0   # inches: ~1.1 in per second of a 20 s rollout
+BW_SWEEP_COLOURS = ["#2a78d6", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
+BW_LABEL = {"inf": "∞", "20Hz": "20 Hz", "8Hz": "8 Hz", "3.2Hz": "3.2 Hz", "1Hz": "1 Hz"}
+
 
 def dominant_row(reps, cond, controller):
     """The representative of that cell's largest outcome class.
@@ -124,6 +161,56 @@ def freq_figures(reps):
                 if r is not None]
         if rows:
             out.append((f"torque_{rate}", rows))
+    return out
+
+
+def bandwidth_figures(reps):
+    """[(stem, rows, colours)] for the bandwidth sweep."""
+    out = []
+    for outcome in ["success", "fail"]:
+        for bw in BW_BANDWIDTHS:
+            rows, colours = [], []
+            for slot, controller in zip(BW_COLOURS, BW_CONTROLLERS):
+                cond = f"{controller}_{bw}"
+                if outcome == "success":
+                    r = reps[(reps.condition == cond) & (reps.outcome == "success")]
+                    r = r.iloc[0] if len(r) else None
+                else:
+                    r = fail_row(reps, cond)
+                if r is not None:
+                    rows.append(r)
+                    colours.append(slot)
+            if rows:
+                out.append((f"torque_{outcome}_{bw}", rows, colours))
+    return out
+
+
+def bandwidth_joint_figures(reps, trials_root):
+    """[(stem, panel)] for the single-joint bandwidth view: one figure per
+    controller and outcome, one panel (BW_JOINT) overlaying the bandwidths."""
+    leg, jname = BW_JOINT
+    j = LEG_OFFSET[leg] + JOINT_NAMES.index(jname)
+    out = []
+    for outcome in ["success", "fail"]:
+        for controller in BW_CONTROLLERS:
+            series, limit = [], None
+            for colour, bw in zip(BW_SWEEP_COLOURS, BW_BANDWIDTHS):
+                cond = f"{controller}_{bw}"
+                if outcome == "success":
+                    r = reps[(reps.condition == cond) & (reps.outcome == "success")]
+                    r = r.iloc[0] if len(r) else None
+                else:
+                    r = fail_row(reps, cond)
+                if r is None:
+                    continue
+                t, tau, ctrlrange = trial_series(r, trials_root)
+                label = BW_LABEL[bw] + ("" if outcome == "success" else f"  [{r.outcome}]")
+                series.append((t, tau[:, j], f"{label}  ({r.t_end:.1f}s)", colour))
+                limit = ctrlrange[j][1]
+            if series:
+                out.append((f"torque_{leg}_{jname}_{controller}_{outcome}",
+                            {"name": jname, "leg": leg, "note": f"{controller}, {outcome}",
+                             "limit": limit, "series": series}))
     return out
 
 
@@ -151,17 +238,23 @@ def trial_series(row, trials_root):
     return t, tau, ctrlrange
 
 
-def build_panels(rows, trials_root, legs):
-    """plot_joints panels: one per (leg, joint), one series per condition."""
+def build_panels(rows, trials_root, legs, colours=None):
+    """plot_joints panels: one per (leg, joint), one series per condition.
+    colours: one per row (default: the first len(rows) slots)."""
     loaded = []
-    for colour, row in zip(SLOTS, rows):
+    for colour, row in zip(colours or SLOTS, rows):
         t, tau, ctrlrange = trial_series(row, trials_root)
         # The outcome is the figure's subject, so the label only carries the
         # condition and how long its rollout lasted.
         # In the ablation figures the condition is what varies; in the rate
-        # sweep the rate is the figure and the controller is what varies.
+        # and bandwidth sweeps the rate is the figure and the controller is
+        # what varies. A bandwidth fail is a fall or a timeout, so it says which.
         if "controller" in row and row.study == "freq_sweep":
             name = f"{row.controller}  [{row.outcome}]"
+        elif row.study == "bandwidth":
+            name = row.condition.rsplit("_", 1)[0]
+            if row.outcome != "success":
+                name += f"  [{row.outcome}]"
         else:
             name = DISPLAY_NAME.get(row.condition, row.condition)
         label = f"{name}  ({row.t_end:.1f}s)"
@@ -205,7 +298,9 @@ def main():
     legs = [args.leg] if args.leg else sorted(LEG_OFFSET, key=LEG_OFFSET.get)
 
     if (reps.study == "freq_sweep").any():
-        figures = freq_figures(reps)
+        figures = [(stem, rows, None) for stem, rows in freq_figures(reps)]
+    elif (reps.study == "bandwidth").any():
+        figures = bandwidth_figures(reps)
     else:
         figures = []
         for stem, spec in FIGURES.items():
@@ -221,17 +316,24 @@ def main():
             if missing:
                 print(f"{stem}: no representative for {', '.join(missing)} — skipped")
             if rows:
-                figures.append((stem, rows))
+                figures.append((stem, rows, None))
 
-    for stem, rows in figures:
+    for stem, rows, colours in figures:
         print(f"{stem}: " + ", ".join(
             f"{r.controller if r.study == 'freq_sweep' else r.condition}"
             f"({r.outcome}, n={r.n})" for r in rows))
-        panels = build_panels(rows, trials_root, legs)
+        panels = build_panels(rows, trials_root, legs, colours)
         plot_joints(panels, os.path.join(args.out, f"{stem}.png"),
                     shared_scale=not args.per_panel_scale,
                     x_scale=1.0, x_label="Time (s)", linewidth=1.3,
                     panel_h=args.panel_height)
+
+    if (reps.study == "bandwidth").any():
+        for stem, panel in bandwidth_joint_figures(reps, trials_root):
+            print(f"{stem}: " + ", ".join(label for _, _, label, _ in panel["series"]))
+            plot_joints([panel], os.path.join(args.out, f"{stem}.png"),
+                        x_scale=1.0, x_label="Time (s)", linewidth=1.3,
+                        panel_h=BW_JOINT_H, fig_w=BW_JOINT_W)
 
 
 if __name__ == "__main__":
