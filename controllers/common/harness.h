@@ -82,10 +82,55 @@ inline void standup_targets(double t, double& kp, double q_des[NUM_JOINTS])
 // (muscle/mppi_sim.cpp, pd/pd_mppi_sim.cpp): model setup, spawn placement,
 // running the stand-up and state readout.
 
-// The sims stop once the trunk drops below this height (m).
-static constexpr double kFallHeight = 0.1;
+// Fall, as Isaac Lab ends a Go2 velocity-task episode (base_contact:
+// mdp.illegal_contact on body "base", 1 N; isaaclab_tasks
+// manager_based/locomotion/velocity) with the head added, as robot_lab's SATA
+// task does (head_contact on "Head.*"): the net contact force from outside the
+// robot on the trunk box, Head_upper or Head_lower exceeds kFallForce. Isaac
+// Lab's Go2 keeps those as three bodies; go2.xml merges them into the base
+// body's three collision geoms, so each geom is checked on its own.
+static constexpr double kFallForce = 1.0;   // N
 
-inline bool has_fallen(const mjData* d) { return d->qpos[2] < kFallHeight; }
+// Collision geoms of the base body, and the robot's root body (contacts with
+// the robot itself don't count; Isaac Lab's Go2 has self-collision off).
+struct FallGeoms {
+    std::vector<int> gid;
+    int root = 0;
+};
+
+inline FallGeoms find_fall_geoms(const mjModel* m, int base_bid)
+{
+    FallGeoms fall;
+    fall.root = m->body_rootid[base_bid];
+    for (int g = 0; g < m->ngeom; ++g)
+        if (m->geom_bodyid[g] == base_bid && (m->geom_contype[g] || m->geom_conaffinity[g]))
+            fall.gid.push_back(g);
+    return fall;
+}
+
+// Whether the step just taken pushed any fall geom with more than kFallForce of
+// net contact force. Call right after mj_step() (see foot_contact_forces() in log.h).
+inline bool has_fallen(const mjModel* m, const mjData* d, const FallGeoms& fall)
+{
+    for (int g : fall.gid) {
+        mjtNum net[3] = {};
+        for (int c = 0; c < d->ncon; ++c) {
+            const mjContact& con = d->contact[c];
+            const int side = con.geom[0] == g ? 0 : con.geom[1] == g ? 1 : -1;
+            if (side < 0 || m->body_rootid[m->geom_bodyid[con.geom[1 - side]]] == fall.root) continue;
+
+            // Contact-frame force in world axes: the force on geom[1] (the
+            // frame's normal points from geom[0] to geom[1]).
+            mjtNum f[6], fw[3];
+            mj_contactForce(m, d, c, f);
+            mju_mulMatTVec(fw, con.frame, f, 3, 3);
+            const double sign = side == 1 ? 1.0 : -1.0;
+            for (int k = 0; k < 3; ++k) net[k] += sign * fw[k];
+        }
+        if (mju_norm3(net) > kFallForce) return true;
+    }
+    return false;
+}
 
 // qpos/qvel addresses of the joint driven by each of the first NUM_JOINTS actuators.
 inline void joint_addresses(const mjModel* m, int qa[NUM_JOINTS], int qv[NUM_JOINTS])
@@ -298,6 +343,13 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     // Foot geoms, for the per-foot contact forces logged with every row.
     const FootGeoms feet = find_foot_geoms(m);
 
+    // Base-body geoms, for the fall check (has_fallen()).
+    const FallGeoms fall_geoms = find_fall_geoms(m, base_bid);
+    if (fall_geoms.gid.empty()) {
+        fprintf(stderr, "Base body has no collision geoms, so falls can't be detected.\n");
+        return 1;
+    }
+
     // set joint damping to match MPPI's internal model
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
     joint_addresses(m, qa, qv);
@@ -366,12 +418,15 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
         }
 
         // --- one control step: the actuators run every physics step on the
-        //     command update() chose ---
+        //     command update() chose. Falls are checked every physics step and
+        //     end the run after the control step, as in Isaac Lab ---
+        bool fell = false;
         for (int i = 0; i < task.motor.substeps; ++i) {
             double ctrl[NUM_JOINTS];
             mppi.actuate(read_state(d, qa, qv), ctrl);
             for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
             mj_step(m, d);
+            if (has_fallen(m, d, fall_geoms)) fell = true;
         }
         sim_t += task.dt;
 
@@ -387,8 +442,8 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
             ++logged_rows;
         }
 
-        // --- safety: stop if robot falls ---
-        if (has_fallen(d)) {
+        // --- stop if robot fell ---
+        if (fell) {
             printf("Robot fell at t=%.2f s — stopping.\n", sim_t);
             break;
         }
