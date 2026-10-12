@@ -31,7 +31,7 @@ struct MuscleParams {
     double stiffness = 0.75;
 
     // Ablation switches, set from the task's optional `ablation:` block (all
-    // true = the full model; see run_ablation_walk.sh). The Hill switches apply to both
+    // true = the full model; see run_breakdown.sh). The Hill switches apply to both
     // hill_compute_torques and hill_invert_torque, so the gait reference, the
     // gait-tracking cost and the warm start use the same muscle model as the
     // rollouts. All Hill switches off leaves a linear actuator:

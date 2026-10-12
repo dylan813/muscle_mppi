@@ -42,7 +42,7 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     // Ablation switches live at task level rather than inside `muscle:`, so one
     // task can be switched without touching the shared *default_muscle_quad
     // anchor (yaml-cpp has no merge keys, <<:). Each is optional and defaults to
-    // true; run_ablation_walk.sh writes this block into per-condition YAMLs.
+    // true; run_breakdown.sh writes this block into per-condition YAMLs.
     // Unknown keys throw, so a typo can't silently run the full model.
     if (const YAML::Node& a = t["ablation"]) {
         for (const auto& kv : a) {

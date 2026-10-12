@@ -110,7 +110,7 @@ walk:
 
   # Component ablation study settings: goal x = 2.0 m within 20 s. The ablation
   # switches (MuscleParams in tasks.h) are added per condition by
-  # run_ablation_walk.sh, which runs this task with each generated YAML.
+  # run_breakdown.sh, which runs this task with each generated YAML.
   sim_duration: 20.0
 
   # Single phase — same target/gait/cmd_vel this task used before the phases: migration.
