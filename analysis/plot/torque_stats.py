@@ -102,13 +102,21 @@ def find_trials(controller_dir):
     return out
 
 
-def summarize(controller_dir, kind, params, qadr, ctrlrange, clip):
+def summarize(controller_dir, kind, params, qadr, ctrlrange, clip, t_end=None):
     """Per-trial totals plus the per-trial, per-joint arrays the joint-type
-    breakdown is derived from — all shaped (n_trials, 12)."""
+    breakdown is derived from — all shaped (n_trials, 12).
+
+    t_end: optional {trial_name: time (s)}. A listed trial counts only the
+    commands logged up to that time, e.g. a fall relabelled after review,
+    whose run kept logging past it."""
     rows, joint_means, joint_peaks, joint_over = [], [], [], []
 
     for name, csv_path in find_trials(controller_dir):
         tau = trial_torque(csv_path, kind, params, qadr)
+        if t_end and name in t_end:
+            # tau's rows are the CSV's rows from the second on (see trial_torque()).
+            t = pd.read_csv(csv_path, usecols=["t"])["t"].to_numpy()[1:]
+            tau = tau[t <= t_end[name] + 1e-6]
 
         lo = np.array([ctrlrange[j][0] for j in range(NUM_JOINTS)])
         hi = np.array([ctrlrange[j][1] for j in range(NUM_JOINTS)])

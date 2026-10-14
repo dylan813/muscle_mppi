@@ -5,8 +5,8 @@ Each condition folder holds muscle/trial_*/ directories written by run_trials.sh
 (mppi_sim.csv, mppi_sim_qpos.csv, console.log) and the tasks.yaml it ran with.
 
 Outcome, from console.log — every trial is exactly one of:
+  fall      "Robot fell at t=..."  (also a manual relabel appended to the log)
   success   "[phase] task complete."
-  fall      "Robot fell at t=..."
   timeout   neither: still upright when the sim_duration clock ran out
 
 Trials are grouped by (condition, outcome) before anything is chosen. Within one
@@ -104,16 +104,18 @@ def parse_outcome(path):
     """(outcome, event_time) from a run's console.log.
 
     A run stops on the first of: falling, reaching the final phase, or the
-    sim_duration clock. The three are mutually exclusive in the log.
+    sim_duration clock, so the sim never logs more than one. Fall is checked
+    first so a manual relabel (a "Robot fell" line appended to the log after
+    review) overrides a logged success.
     """
     with open(path) as f:
         text = f.read()
-    if re.search(r"^\[phase\] task complete\.", text, re.M):
-        m = re.search(r"^Task complete at t=([0-9.]+)", text, re.M)
-        return "success", float(m.group(1)) if m else np.nan
     if re.search(r"^Robot fell at t=", text, re.M):
         m = re.search(r"^Robot fell at t=([0-9.]+)", text, re.M)
         return "fall", float(m.group(1)) if m else np.nan
+    if re.search(r"^\[phase\] task complete\.", text, re.M):
+        m = re.search(r"^Task complete at t=([0-9.]+)", text, re.M)
+        return "success", float(m.group(1)) if m else np.nan
     return "timeout", np.nan
 
 
