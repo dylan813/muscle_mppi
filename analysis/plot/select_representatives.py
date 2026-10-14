@@ -14,16 +14,20 @@ condition the outcome classes differ in torque — no_passive's successes averag
 ~33% more |tau| than its timeouts — so a single pick per condition would let the
 dominant class speak for the rest.
 
-Selection. For each class, mean |tau| is taken per joint type (hip, thigh, calf),
-pooling the 4 legs, giving each trial a 3-vector. The class target is the mean of
-those vectors over the trials in the class, and the representative is the trial
-whose vector is nearest the target in Euclidean distance (N.m):
+Selection is on the joint the torque figures plot (SELECT_LEG, SELECT_JOINT;
+plot_joint_torque.py draws the same one), so a pick is typical in what is shown:
+its mean |tau| and its peak |tau|. Each is scaled by its spread within the
+class, so the two count equally, and the target is the class median, since
+peaks are skewed (a few trials spike far above the rest). The representative
+is the trial nearest the target:
 
-    target_p = mean_i( tau_p(i) )                     p in {hip, thigh, calf}
-    pick     = argmin_i sqrt( sum_p ( tau_p(i) - target_p )^2 )
+    target_f = median_i( x_f(i) )                     f in {mean, peak}
+    s_f      = std_i( x_f(i) )                        (1 where it is 0)
+    pick     = argmin_i sqrt( sum_f ( (x_f(i) - target_f) / s_f )^2 )
 
-Distances are in raw N.m with no per-feature scaling, so the calf — whose mean
-|tau| runs 2-3x the hip's — carries the most weight in the choice.
+A fall counts only up to its fall time, as in the figures: the sim stops logging
+at a fall it detects, and a fall relabelled after review, whose run kept going,
+is cut to match.
 
 Other torque metrics are reported for the pick but take no part in choosing it:
   tau_mean        mean |tau| over every logged step and joint (N.m)
@@ -77,8 +81,10 @@ OUTCOMES = ["success", "fall", "timeout"]
 CONTROLLERS = {"muscle": ("tasks.yaml", "muscle", DEFAULT_YAML),
                "pd":     ("tasks_pd.yaml", "pd", DEFAULT_PD_YAML)}
 
-# The 3 values the representative is matched on: mean |tau| per joint type.
-SELECT_ON = [f"{part}_mean" for part in JOINT_NAMES]
+# The joint the representative is matched on, and the 2 values matched: its
+# mean and peak |tau|.
+SELECT_LEG, SELECT_JOINT = "FR", "calf"
+SELECT_ON = [f"{SELECT_LEG}_{SELECT_JOINT}_mean", f"{SELECT_LEG}_{SELECT_JOINT}_peak"]
 
 # Reported alongside, but not used to choose.
 REPORTED = {
@@ -119,9 +125,14 @@ def parse_outcome(path):
     return "timeout", np.nan
 
 
-def trial_metrics(csv_path, task, qadr, ctrlrange, controller="muscle"):
+def trial_metrics(csv_path, task, qadr, ctrlrange, controller="muscle", t_end=None):
+    """Torque metrics of one trial; t_end (s) drops the commands logged after it."""
     params_key = CONTROLLERS[controller][1]
     tau = trial_torque(csv_path, controller, task.get(params_key), qadr)
+    if t_end is not None:
+        # tau's rows are the CSV's rows from the second on (see trial_torque()).
+        t = pd.read_csv(csv_path, usecols=["t"])["t"].to_numpy()[1:]
+        tau = tau[t <= t_end + 1e-6]
     lo = np.array([ctrlrange[j][0] for j in range(NUM_JOINTS)])
     hi = np.array([ctrlrange[j][1] for j in range(NUM_JOINTS)])
 
@@ -141,6 +152,9 @@ def trial_metrics(csv_path, task, qadr, ctrlrange, controller="muscle"):
     for k, part in enumerate(JOINT_NAMES):
         cols = [k + off for off in sorted(LEG_OFFSET.values())]
         out[f"{part}_mean"] = joint_mean[cols].mean()
+    j = LEG_OFFSET[SELECT_LEG] + JOINT_NAMES.index(SELECT_JOINT)
+    out[SELECT_ON[0]] = mag[:, j].mean()
+    out[SELECT_ON[1]] = mag[:, j].max()
     out["steps"] = len(tau)
     return out
 
@@ -180,7 +194,8 @@ def collect(trials_dir, conditions):
                     "final_px":   df["px"].iloc[-1],
                     "csv":        os.path.relpath(csv_path, _MODEL_BASE),
                 }
-                row.update(trial_metrics(csv_path, task, qadr, ctrlrange, controller))
+                t_end = t_event if outcome == "fall" else None
+                row.update(trial_metrics(csv_path, task, qadr, ctrlrange, controller, t_end))
                 rows.append(row)
             counts = pd.Series([r["outcome"] for r in rows
                                 if r["condition"] == cond
@@ -193,14 +208,16 @@ def collect(trials_dir, conditions):
 
 
 def pick_representatives(df, min_n):
-    """The trial nearest its class's mean per-joint-type torque vector."""
+    """The trial nearest its class's median of SELECT_ON, each scaled by its spread."""
     rows = []
     keys = ["study", "condition", "controller", "outcome"]
     for (study, cond, controller, outcome), g in df.groupby(keys, sort=False):
         g = g.reset_index(drop=True)
-        vecs = g[SELECT_ON].to_numpy(dtype=float)        # (n_trials, 3)
-        target = vecs.mean(axis=0)
-        dist = np.linalg.norm(vecs - target, axis=1)
+        vecs = g[SELECT_ON].to_numpy(dtype=float)        # (n_trials, 2)
+        target = np.median(vecs, axis=0)
+        spread = vecs.std(axis=0)
+        spread[~(spread > 0)] = 1.0                     # one trial, or all equal
+        dist = np.linalg.norm((vecs - target) / spread, axis=1)
         order = np.argsort(dist)
         i = int(order[0])
         pick = g.loc[i]
@@ -277,7 +294,8 @@ def main():
     reps.to_csv(os.path.join(out, "representatives.csv"), index=False)
 
     pd.set_option("display.width", 220)
-    print("\n=== REPRESENTATIVES (nearest the class mean of per-joint-type mean |τ|) ===")
+    print(f"\n=== REPRESENTATIVES (nearest the class median of {SELECT_LEG} {SELECT_JOINT} "
+          "mean and peak |τ|, each scaled by its spread) ===")
     show = pd.DataFrame({
         "condition": reps.condition,
         "controller": reps.controller,
@@ -288,10 +306,9 @@ def main():
         "t_end":     reps.t_end.round(2),
         "dist":      reps.dist.round(3),
     })
-    for part in JOINT_NAMES:
-        col = f"{part}_mean"
-        show[f"{part} |τ| (target)"] = [f"{v:.2f} ({t:.2f})"
-                                        for v, t in zip(reps[col], reps[f"{col}_target"])]
+    for col in SELECT_ON:
+        show[f"{col} (target)"] = [f"{v:.2f} ({t:.2f})"
+                                   for v, t in zip(reps[col], reps[f"{col}_target"])]
     for col, label in REPORTED.items():
         show[label] = reps[col].round(3 if col == "over_limit" else 1)
     show["thin"] = np.where(reps.thin, "*", "")

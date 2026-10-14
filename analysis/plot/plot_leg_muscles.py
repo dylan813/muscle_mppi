@@ -221,6 +221,9 @@ def plot_joints(panels, out_path, shared_scale=False,
                 fig_w=FIG_W):
     """Stacked torque panels, one per (leg, joint), each overlaying its series.
 
+    Each series is (t, tau, label, colour), optionally followed by a matplotlib
+    linestyle (default solid) for series whose colours need a second cue.
+
     x_scale/x_label default to milliseconds, which suits the short single-run
     traces this was written for; the ablation comparison passes seconds, whose
     rollouts run to 20 s. linewidth is raised there too, because its series
@@ -240,7 +243,7 @@ def plot_joints(panels, out_path, shared_scale=False,
     # Each panel is scaled to its own peak. A shared per-joint-type scale reads
     # better when the legs are similar, but one leg's saturation transient can
     # be 4x the others and flattens the rest; --shared-scale opts back into it.
-    lim_by_panel = [1.05 * max(np.abs(tau).max() for _, tau, _, _ in p["series"])
+    lim_by_panel = [1.05 * max(np.abs(tau).max() for _, tau, *_ in p["series"])
                     for p in panels]
     if shared_scale:
         by_type = {}
@@ -258,8 +261,9 @@ def plot_joints(panels, out_path, shared_scale=False,
                            linestyle=(0, (4, 3)), zorder=1)
         # Painted front-to-back in list order, so the first series sits on top
         # while the legend still reads in that same order.
-        for i, (t, tau, label, color) in enumerate(panel["series"]):
+        for i, (t, tau, label, color, *style) in enumerate(panel["series"]):
             ax.plot(t * x_scale, tau, color=color, linewidth=linewidth, label=label,
+                    linestyle=style[0] if style else "-",
                     zorder=len(panel["series"]) - i + 1)
 
         ax.set_ylim(-ylim, ylim)
