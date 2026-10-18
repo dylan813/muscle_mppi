@@ -83,8 +83,9 @@ public:
     // Torque the motor applied over the most recent actuate()'s step, given
     // `after`, the state that step ended at.
     void applied_torque(const RobotState& after, double tau[NUM_JOINTS]) const {
-        std::copy(real_motor_tau_, real_motor_tau_ + NUM_JOINTS, tau);
-        if (pending_) motor_.applied(pending_ctrl_, after.dq, tau);
+        MotorState s = real_motor_;
+        if (pending_) motor_.applied(pending_ctrl_, after.dq, s);
+        std::copy(s.tau, s.tau + NUM_JOINTS, tau);
     }
 
 private:
@@ -144,9 +145,9 @@ private:
 
     // Advance d one control step toward q_des: per physics step, target filter
     // and PD law from d's joint state, the motor, then mj_step(). q_filt and
-    // motor_tau carry the actuator state.
+    // motor carry the actuator state.
     void step_model(mjData* d, const double q_des[NUM_JOINTS], double q_filt[NUM_JOINTS],
-                    double motor_tau[NUM_JOINTS]) const;
+                    MotorState& motor) const;
 
     // Finish the motor's pending step with the velocity it ended at (state.dq).
     void settle_motor(const RobotState& state);
@@ -154,11 +155,11 @@ private:
     // Motor command of the most recent actuate() (logged by pd_mppi_sim).
     double last_tau_[NUM_JOINTS] = {};
 
-    // Motor between the PD law and the robot. real_motor_tau_ is the torque it
-    // has applied (seeds rollouts, like real_q_filt_). The step actuate() sent
-    // stays pending until the next call reports the velocity it ended at.
-    Motor  motor_;
-    double real_motor_tau_[NUM_JOINTS] = {};
-    double pending_ctrl_[NUM_JOINTS]   = {};
-    bool   pending_ = false;
+    // Motor between the PD law and the robot. real_motor_ is its state on the
+    // robot (seeds rollouts, like real_q_filt_). The step actuate() sent stays
+    // pending until the next call reports the velocity it ended at.
+    Motor      motor_;
+    MotorState real_motor_;
+    double     pending_ctrl_[NUM_JOINTS] = {};
+    bool       pending_ = false;
 };

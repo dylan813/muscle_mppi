@@ -2,13 +2,19 @@
 #
 # Actuator-bandwidth sweep on the walk task: three controllers each drive the
 # robot through the same external motor (controllers/common/motor.h), and the
-# motor's torque bandwidth is swept. Runs 15 conditions back-to-back through
-# run_trials.sh (no GIFs), N trials each:
+# motor's lag is swept. Runs 15 conditions back-to-back through run_trials.sh
+# (no GIFs), N trials each:
 #
 #   controllers  muscle  Hill model, with its activation dynamics (muscle.act_bandwidth)
 #                pd_act  PD on q_des filtered at the muscle's act_bandwidth
 #                pd      classical PD
-#   bandwidths   inf (no lag), 20, 8, 3.2, 1 Hz cutoff; the motor's rate is 2π·f (1/s)
+#
+# The motor's lag (--lag):
+#   first_order      dτ/dt = b·(τ_cmd − τ); cutoffs inf (no lag), 20, 8, 3.2, 1 Hz,
+#                    the motor's rate b = 2π·f (1/s). Default; under trials/bandwidth/.
+#   zero_order_hold  the motor takes a new command at 500 (every physics step: no
+#                    lag), 250, 100, 50, 25 Hz and holds it in between. Under
+#                    trials/bandwidth_zoh/.
 #
 # Shared physical setup, every condition:
 #   joint damping 0.1 (go2.xml's own value; muscle.kd_sim / pd.joint_damping)
@@ -28,13 +34,14 @@
 #
 # Usage (from anywhere):
 #   ./run_bandwidth.sh                          # 100 trials per condition, under trials/bandwidth/
+#   ./run_bandwidth.sh --lag zero_order_hold    # the same with the hold, under trials/bandwidth_zoh/
 #   ./run_bandwidth.sh -n 1 -N bandwidth_pilot  # pilot run
 #   ./run_bandwidth.sh --tee                    # also mirror each run's output to the terminal
 #
-# Output layout:
-#   analysis/log/trials/<name>/<controller>_<bandwidth>/{tasks.yaml | tasks_pd.yaml}
-#   analysis/log/trials/<name>/<controller>_<bandwidth>/{muscle | pd}/trial_NNN/{*.csv, console.log}
-#   analysis/log/trials/<name>/<controller>_<bandwidth>/batch_<timestamp>/{batch.log,summary.csv}
+# Output layout (<condition> is e.g. muscle_20Hz, pd_inf; muscle_100Hz under the hold):
+#   analysis/log/trials/<name>/<condition>/{tasks.yaml | tasks_pd.yaml}
+#   analysis/log/trials/<name>/<condition>/{muscle | pd}/trial_NNN/{*.csv, console.log}
+#   analysis/log/trials/<name>/<condition>/batch_<timestamp>/{batch.log,summary.csv}
 #
 # Trial indices continue from whatever is already there (see run_trials.sh), so
 # use a different -N for pilots, or they count toward the real trials.
@@ -47,7 +54,8 @@ PD_YAML="$REPO_ROOT/controllers/pd/utils/tasks_pd.yaml"
 TRIALS_DIR="$REPO_ROOT/analysis/log/trials"
 
 N_RUNS=100
-NAME="bandwidth"
+LAG="first_order"
+NAME=""          # default depends on --lag
 EXTRA=()
 
 usage() {
@@ -59,24 +67,32 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--runs) N_RUNS="$2"; shift 2 ;;
         -N|--name) NAME="$2"; shift 2 ;;
+        --lag)     LAG="$2"; shift 2 ;;
         --tee)     EXTRA+=(--tee); shift ;;
         -h|--help) usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
     esac
 done
 
+case "$LAG" in
+    first_order)     RATES=(inf 20 8 3.2 1);      DEFAULT_NAME="bandwidth" ;;       # cutoff, Hz
+    zero_order_hold) RATES=(500 250 100 50 25);   DEFAULT_NAME="bandwidth_zoh" ;;   # update rate, Hz
+    *) echo "--lag must be first_order or zero_order_hold" >&2; exit 1 ;;
+esac
+NAME="${NAME:-$DEFAULT_NAME}"
+
 [[ "$N_RUNS" =~ ^[0-9]+$ && "$N_RUNS" -gt 0 ]] || { echo "-n needs a positive integer" >&2; exit 1; }
 [[ "$NAME" == *".."* ]] && { echo "--name must not contain '..'" >&2; exit 1; }
 
 CONTROLLERS=(muscle pd_act pd)
-BANDWIDTHS=(inf 20 8 3.2 1)   # cutoff, Hz
 
-# Write controller $1's walk task with motor bandwidth $2 (Hz, or inf) into $3.
+# Write controller $1's walk task with the motor at rate $2 (Hz, or inf) into
+# $3: a first_order cutoff or a zero_order_hold update rate, per $LAG.
 write_yaml() {
-    local controller="$1" band="$2" out="$3"
-    python3 - "$controller" "$band" "$out" "$MUSCLE_YAML" "$PD_YAML" <<'EOF'
+    local controller="$1" rate="$2" out="$3"
+    python3 - "$controller" "$rate" "$out" "$MUSCLE_YAML" "$PD_YAML" "$LAG" <<'EOF'
 import copy, math, sys, yaml
-controller, band, out, muscle_yaml, pd_yaml = sys.argv[1:6]
+controller, rate, out, muscle_yaml, pd_yaml, lag = sys.argv[1:7]
 
 PHYSICAL_DAMPING = [0.1] * 12   # go2.xml's joint damping
 
@@ -103,12 +119,19 @@ else:
     if controller == "pd_act":
         walk["activation_dynamics"] = {"act_bandwidth": muscle_walk["muscle"]["act_bandwidth"]}
 
-bandwidth = math.inf if band == "inf" else 2 * math.pi * float(band)
-walk["motor"] = {"bandwidth": bandwidth, "driver_kd": driver_kd, "physics_dt": 0.002, "damping": "explicit"}
+motor = {"driver_kd": driver_kd, "physics_dt": 0.002, "damping": "explicit"}
+if lag == "first_order":
+    bandwidth = math.inf if rate == "inf" else 2 * math.pi * float(rate)
+    motor = {"bandwidth": bandwidth, **motor}
+    summary = f"motor bandwidth {rate} Hz cutoff = {bandwidth:.6g} /s"
+else:
+    motor = {"lag": "zero_order_hold", "update_rate": float(rate), **motor}
+    summary = f"motor zero-order hold at {rate} Hz ({1000 / float(rate):.6g} ms per command)"
+walk["motor"] = motor
 
 with open(out, "w") as f:
     f.write(f"# Generated by run_bandwidth.sh from {src}\n")
-    f.write(f"# walk: {controller}, motor bandwidth {band} Hz cutoff = {bandwidth:.6g} /s\n")
+    f.write(f"# walk: {controller}, {summary}\n")
     yaml.safe_dump(cfg, f, sort_keys=False)
 EOF
 }
@@ -117,11 +140,11 @@ ABORT=0
 trap 'ABORT=1' INT TERM
 
 START="$(date +%s)"
-for band in "${BANDWIDTHS[@]}"; do
+for rate in "${RATES[@]}"; do
     for controller in "${CONTROLLERS[@]}"; do
-        (( ABORT )) && { echo "Interrupted — not starting $controller at $band Hz."; break 2; }
+        (( ABORT )) && { echo "Interrupted — not starting $controller at $rate Hz."; break 2; }
 
-        cond="${controller}_${band}$([[ "$band" == inf ]] || echo Hz)"
+        cond="${controller}_${rate}$([[ "$rate" == inf ]] || echo Hz)"
         cond_dir="$TRIALS_DIR/$NAME/$cond"
         mkdir -p "$cond_dir"
         if [[ "$controller" == muscle ]]; then
@@ -129,7 +152,7 @@ for band in "${BANDWIDTHS[@]}"; do
         else
             yaml="$cond_dir/tasks_pd.yaml"; sim=(--pd-only --pd-yaml "$yaml")
         fi
-        write_yaml "$controller" "$band" "$yaml" || { echo "Could not write $yaml" >&2; exit 1; }
+        write_yaml "$controller" "$rate" "$yaml" || { echo "Could not write $yaml" >&2; exit 1; }
 
         echo
         echo "════ $cond  —  $N_RUNS runs ════"
@@ -142,4 +165,4 @@ END="$(date +%s)"
 
 echo
 echo "All conditions finished after $(( (END - START) / 3600 ))h $(( (END - START) % 3600 / 60 ))m."
-echo "Trials: $TRIALS_DIR/$NAME/<controller>_<bandwidth>/{muscle,pd}/"
+echo "Trials: $TRIALS_DIR/$NAME/<condition>/{muscle,pd}/"

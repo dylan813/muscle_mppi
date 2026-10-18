@@ -5,10 +5,11 @@
 //
 // Per joint, the controller supplies its torque without velocity feedback
 // (τ_other) and that feedback's gain kd (PD's kd, the muscle's driver kd). The
-// motor then
-//   commands  τ_cmd = clamp(τ_other − kd·q̇)    the driver's torque limit
-//   applies   dτ/dt = b·(τ_cmd − τ)            first-order lag, bandwidth b
-// with b = ∞ giving τ = τ_cmd. Per physics step, α = filter_alpha(b, Δt):
+// motor commands τ_cmd = clamp(τ_other − kd·q̇), the driver's torque limit, and
+// applies it through one of two lags (MotorLag):
+//
+// FirstOrder, dτ/dt = b·(τ_cmd − τ), with b = ∞ giving τ = τ_cmd. Per physics
+// step, α = filter_alpha(b, Δt):
 //
 //   Explicit  τ ← (1−α)·τ + α·clamp(τ_other − kd·q̇ₖ),  ctrl = τ
 //   Implicit  ctrl = (1−α)·τ + α·(clamp(τ_other − kd·q̇ₖ) + kd·q̇ₖ), with α·kd
@@ -18,6 +19,16 @@
 //             the + kd·q̇ₖ offset keeps it at the limit to first order.
 //             Afterwards τ ← that applied torque (applied()).
 //
+// ZeroOrderHold, every hold_steps physics steps (1/update_rate s) the motor
+// takes clamp(τ_other − kd·q̇ₖ) and applies it unchanged until the next one:
+//
+//   ctrl = clamp(τ_other − kd·q̇ₖ) on the step a command is taken, τ otherwise;
+//   afterwards τ ← ctrl.
+//
+// The velocity feedback is held with the rest of the command, so damping is
+// explicit. hold_steps = 1 takes a command every step: no lag, the same as
+// FirstOrder at b = ∞.
+//
 // ctrl can leave the torque limits under Implicit, so the model's own
 // ctrlrange clamp must be off while the motor drives it.
 
@@ -26,14 +37,22 @@
 #include "activation_dynamics.h"
 #include "task_config.h"
 
+// What the motor carries from one physics step to the next.
+struct MotorState {
+    double tau[NUM_JOINTS] = {};   // torque applied so far; the held torque under ZeroOrderHold
+    int    step = 0;               // ZeroOrderHold: physics steps since the held command was taken
+};
+
 class Motor {
 public:
     // kd: velocity-feedback gain per joint. lo, hi: torque limits per joint.
     void init(const MotorParams& p, const double kd[NUM_JOINTS],
               const double lo[NUM_JOINTS], const double hi[NUM_JOINTS])
     {
-        alpha_   = filter_alpha(p.bandwidth, p.physics_dt);
-        damping_ = p.damping;
+        lag_        = p.lag;
+        alpha_      = p.lag == MotorLag::FirstOrder ? filter_alpha(p.bandwidth, p.physics_dt) : 1.0;
+        hold_steps_ = p.lag == MotorLag::ZeroOrderHold ? p.hold_steps : 1;
+        damping_    = p.damping;
         std::copy(kd, kd + NUM_JOINTS, kd_);
         std::copy(lo, lo + NUM_JOINTS, lo_);
         std::copy(hi, hi + NUM_JOINTS, hi_);
@@ -46,37 +65,47 @@ public:
     }
 
     // ctrl for one physics step, from the joint velocity dq at its start and
-    // tau, the torque applied so far. tau_cmd: the command before the torque
-    // limit (for logging).
+    // the motor's state s. tau_cmd: the command before the torque limit (for
+    // logging).
     void command(const double tau_other[NUM_JOINTS], const double dq[NUM_JOINTS],
-                 const double tau[NUM_JOINTS], double ctrl[NUM_JOINTS], double tau_cmd[NUM_JOINTS]) const
+                 const MotorState& s, double ctrl[NUM_JOINTS], double tau_cmd[NUM_JOINTS]) const
     {
         for (int j = 0; j < NUM_JOINTS; ++j) {
             tau_cmd[j] = tau_other[j] - kd_[j] * dq[j];
             const double limited = std::clamp(tau_cmd[j], lo_[j], hi_[j]);
-            const double input   = damping_ == MotorDamping::Implicit ? limited + kd_[j] * dq[j] : limited;
-            ctrl[j] = (1.0 - alpha_) * tau[j] + alpha_ * input;
+
+            if (lag_ == MotorLag::ZeroOrderHold) {
+                ctrl[j] = s.step == 0 ? limited : s.tau[j];
+                continue;
+            }
+
+            const double input = damping_ == MotorDamping::Implicit ? limited + kd_[j] * dq[j] : limited;
+            ctrl[j] = (1.0 - alpha_) * s.tau[j] + alpha_ * input;
         }
     }
 
-    // tau ← torque applied over the step, from its ctrl and the joint velocity
-    // dq_after at its end.
-    void applied(const double ctrl[NUM_JOINTS], const double dq_after[NUM_JOINTS],
-                 double tau[NUM_JOINTS]) const
+    // s ← state after the step, from its ctrl and the joint velocity dq_after
+    // at its end.
+    void applied(const double ctrl[NUM_JOINTS], const double dq_after[NUM_JOINTS], MotorState& s) const
     {
         for (int j = 0; j < NUM_JOINTS; ++j)
-            tau[j] = ctrl[j] - implicit_damping(j) * dq_after[j];
+            s.tau[j] = ctrl[j] - implicit_damping(j) * dq_after[j];
+        s.step = (s.step + 1) % hold_steps_;
     }
 
-    // tau ← t clamped to the torque limits (e.g. a settled holding torque).
-    void settle(const double t[NUM_JOINTS], double tau[NUM_JOINTS]) const
+    // s ← applying t clamped to the torque limits (e.g. a settled holding
+    // torque), with a new command due on the next step.
+    void settle(const double t[NUM_JOINTS], MotorState& s) const
     {
-        for (int j = 0; j < NUM_JOINTS; ++j) tau[j] = std::clamp(t[j], lo_[j], hi_[j]);
+        for (int j = 0; j < NUM_JOINTS; ++j) s.tau[j] = std::clamp(t[j], lo_[j], hi_[j]);
+        s.step = 0;
     }
 
 private:
-    double       alpha_   = 1.0;
-    MotorDamping damping_ = MotorDamping::Explicit;
+    MotorLag     lag_        = MotorLag::FirstOrder;
+    double       alpha_      = 1.0;
+    int          hold_steps_ = 1;
+    MotorDamping damping_    = MotorDamping::Explicit;
     double       kd_[NUM_JOINTS] = {};
     double       lo_[NUM_JOINTS] = {};
     double       hi_[NUM_JOINTS] = {};

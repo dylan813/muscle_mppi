@@ -382,10 +382,15 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
         m->actuator_ctrllimited[j] = 0;
     }
     const MotorParams& motor = task.motor;
-    printf("Motor: bandwidth %.6g /s (cutoff %.6g Hz, alpha %.6g per step), %d physics steps of %.6g ms per control step, %s damping\n",
-           motor.bandwidth, motor.bandwidth / (2.0 * M_PI), filter_alpha(motor.bandwidth, motor.physics_dt),
-           motor.substeps, 1000.0 * motor.physics_dt,
-           motor.damping == MotorDamping::Implicit ? "implicit" : "explicit");
+    if (motor.lag == MotorLag::ZeroOrderHold)
+        printf("Motor: zero-order hold at %.6g Hz (each command held %d physics steps = %.6g ms), %d physics steps of %.6g ms per control step, explicit damping\n",
+               motor.update_rate, motor.hold_steps, 1000.0 * motor.hold_steps * motor.physics_dt,
+               motor.substeps, 1000.0 * motor.physics_dt);
+    else
+        printf("Motor: bandwidth %.6g /s (cutoff %.6g Hz, alpha %.6g per step), %d physics steps of %.6g ms per control step, %s damping\n",
+               motor.bandwidth, motor.bandwidth / (2.0 * M_PI), filter_alpha(motor.bandwidth, motor.physics_dt),
+               motor.substeps, 1000.0 * motor.physics_dt,
+               motor.damping == MotorDamping::Implicit ? "implicit" : "explicit");
 
     // ── MPPI loop ─────────────────────────────────────────────────────────────
     printf("Running MPPI for %d convergence solves then logging...\n",

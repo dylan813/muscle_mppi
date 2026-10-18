@@ -108,7 +108,7 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
             hi[j] = model_->actuator_ctrlrange[2 * j + 1];
         }
         motor_.init(task_.motor, kd, lo, hi);
-        motor_.settle(stand.tau, real_motor_tau_);
+        motor_.settle(stand.tau, real_motor_);
         for (int j = 0; j < NUM_JOINTS; ++j) {
             model_->dof_damping[act_qvel_adr_[j]] += motor_.implicit_damping(j);
             model_->actuator_ctrllimited[j] = 0;
@@ -136,7 +136,7 @@ void MPPILocomotionPD::proportional_torques(const double q_des[NUM_JOINTS], doub
 }
 
 void MPPILocomotionPD::step_model(mjData* d, const double q_des[NUM_JOINTS], double q_filt[NUM_JOINTS],
-                                  double motor_tau[NUM_JOINTS]) const
+                                  MotorState& motor) const
 {
     for (int i = 0; i < task_.motor.substeps; ++i) {
         double q[NUM_JOINTS], dq[NUM_JOINTS], tau[NUM_JOINTS], ctrl[NUM_JOINTS], tau_cmd[NUM_JOINTS];
@@ -146,7 +146,7 @@ void MPPILocomotionPD::step_model(mjData* d, const double q_des[NUM_JOINTS], dou
         }
 
         proportional_torques(q_des, q_filt, q, tau);
-        motor_.command(tau, dq, motor_tau, ctrl, tau_cmd);
+        motor_.command(tau, dq, motor, ctrl, tau_cmd);
 
         for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
         for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
@@ -154,7 +154,7 @@ void MPPILocomotionPD::step_model(mjData* d, const double q_des[NUM_JOINTS], dou
         mj_step(model_, d);
 
         for (int j = 0; j < NUM_JOINTS; ++j) dq[j] = d->qvel[act_qvel_adr_[j]];
-        motor_.applied(ctrl, dq, motor_tau);
+        motor_.applied(ctrl, dq, motor);
     }
 }
 
@@ -164,7 +164,7 @@ void MPPILocomotionPD::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
 
     double tau[NUM_JOINTS];
     proportional_torques(real_q_des_, real_q_filt_, state.q, tau);
-    motor_.command(tau, state.dq, real_motor_tau_, ctrl, last_tau_);
+    motor_.command(tau, state.dq, real_motor_, ctrl, last_tau_);
 
     std::memcpy(pending_ctrl_, ctrl, NUM_JOINTS * sizeof(double));
     pending_ = true;
@@ -173,7 +173,7 @@ void MPPILocomotionPD::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
 void MPPILocomotionPD::settle_motor(const RobotState& state)
 {
     if (!pending_) return;
-    motor_.applied(pending_ctrl_, state.dq, real_motor_tau_);
+    motor_.applied(pending_ctrl_, state.dq, real_motor_);
     pending_ = false;
 }
 
@@ -197,15 +197,15 @@ double MPPILocomotionPD::rollout(int s, const RobotState& state)
     mjData* d = data_[s];
     set_mj_state(d, state);
 
-    double q_filt[NUM_JOINTS], motor_tau[NUM_JOINTS];
+    double q_filt[NUM_JOINTS];
     std::memcpy(q_filt, real_q_filt_, NUM_JOINTS * sizeof(double));
-    std::memcpy(motor_tau, real_motor_tau_, NUM_JOINTS * sizeof(double));
+    MotorState motor = real_motor_;
 
     const int stride  = task_.horizon * NUM_JOINTS;
     double total_cost = 0.0;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        step_model(d, &actions_[s * stride + t * NUM_JOINTS], q_filt, motor_tau);
+        step_model(d, &actions_[s * stride + t * NUM_JOINTS], q_filt, motor);
 
         double gait_ref_q[NUM_JOINTS] = {}, gait_ref_dq[NUM_JOINTS] = {};
         if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref_q, gait_ref_dq);
@@ -367,9 +367,9 @@ void MPPILocomotionPD::update(const RobotState& state)
     if (++log_counter_ % LOG_INTERVAL == 0) {
         mjData* dl = data_[task_.n_samples];
         set_mj_state(dl, state);
-        double q_filt_l[NUM_JOINTS], motor_tau_l[NUM_JOINTS];
+        double q_filt_l[NUM_JOINTS];
         std::memcpy(q_filt_l, real_q_filt_, NUM_JOINTS * sizeof(double));
-        std::memcpy(motor_tau_l, real_motor_tau_, NUM_JOINTS * sizeof(double));
+        MotorState motor_l = real_motor_;
 
         double c_pos = 0, c_orient = 0, c_vel = 0, c_gait = 0, c_jvel = 0, c_effort = 0;
 
@@ -379,7 +379,7 @@ void MPPILocomotionPD::update(const RobotState& state)
                 q_l[j]  = dl->qpos[act_qpos_adr_[j]];
                 dq_l[j] = dl->qvel[act_qvel_adr_[j]];
             }
-            step_model(dl, &trajectory_[t * NUM_JOINTS], q_filt_l, motor_tau_l);
+            step_model(dl, &trajectory_[t * NUM_JOINTS], q_filt_l, motor_l);
 
             double lpos[3], lvel[3];
             base_state(dl, lpos, lvel);

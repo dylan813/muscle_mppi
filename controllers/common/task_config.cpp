@@ -41,10 +41,27 @@ static void load_motor(const YAML::Node& node, double dt, MotorParams& motor)
 
     for (const auto& kv : node) {
         const std::string key = kv.first.as<std::string>();
-        if (key != "bandwidth" && key != "driver_kd" && key != "physics_dt" && key != "damping")
+        if (key != "lag" && key != "bandwidth" && key != "update_rate" && key != "driver_kd"
+            && key != "physics_dt" && key != "damping")
             throw std::runtime_error("Field 'motor': unknown key '" + key
-                                     + "' (expected bandwidth, driver_kd, physics_dt, damping)");
+                                     + "' (expected lag, bandwidth, update_rate, driver_kd, physics_dt, damping)");
     }
+
+    if (node["lag"]) {
+        const std::string lag = node["lag"].as<std::string>();
+        if      (lag == "first_order")     motor.lag = MotorLag::FirstOrder;
+        else if (lag == "zero_order_hold") motor.lag = MotorLag::ZeroOrderHold;
+        else throw std::runtime_error("Field 'motor.lag': expected first_order or zero_order_hold, got '" + lag + "'");
+    }
+
+    // Each lag has its own rate key; the other one would be silently ignored.
+    const bool hold = motor.lag == MotorLag::ZeroOrderHold;
+    if (hold && node["bandwidth"])
+        throw std::runtime_error("Field 'motor.bandwidth': first_order only; zero_order_hold takes update_rate");
+    if (!hold && node["update_rate"])
+        throw std::runtime_error("Field 'motor.update_rate': zero_order_hold only; first_order takes bandwidth");
+    if (hold && !node["update_rate"])
+        throw std::runtime_error("Field 'motor.update_rate': required for zero_order_hold");
 
     if (node["bandwidth"]) {
         motor.bandwidth = node["bandwidth"].as<double>();
@@ -71,6 +88,21 @@ static void load_motor(const YAML::Node& node, double dt, MotorParams& motor)
         else if (damping == "implicit") motor.damping = MotorDamping::Implicit;
         else throw std::runtime_error("Field 'motor.damping': expected explicit or implicit, got '" + damping + "'");
     }
+
+    if (!hold) return;
+
+    // The hold samples the whole command, velocity feedback included, so there
+    // is no share left for MuJoCo to integrate implicitly.
+    if (motor.damping == MotorDamping::Implicit)
+        throw std::runtime_error("Field 'motor.damping': zero_order_hold needs explicit damping");
+
+    motor.update_rate = node["update_rate"].as<double>();
+    const double steps = 1.0 / (motor.update_rate * motor.physics_dt);
+    motor.hold_steps = static_cast<int>(std::lround(steps));
+    if (!(motor.update_rate > 0.0) || motor.hold_steps < 1 || std::abs(steps - motor.hold_steps) > 1e-9)
+        throw std::runtime_error("Field 'motor.update_rate': expected 1/(a whole number of physics steps), i.e. "
+                                 + std::to_string(1.0 / motor.physics_dt) + " Hz divided by a whole number, got "
+                                 + std::to_string(motor.update_rate));
 }
 
 void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)

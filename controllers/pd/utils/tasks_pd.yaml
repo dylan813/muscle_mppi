@@ -61,10 +61,12 @@ default_control_effort_weights: &default_control_effort_weights
 # `motor:` block puts an actuator torque-bandwidth limit between the controller
 # and the robot (common/motor.h).
 #   motor:
-#     bandwidth:  .inf       # torque bandwidth (1/s); .inf = no lag
+#     lag:         first_order   # first_order | zero_order_hold; default first_order
+#     bandwidth:   .inf          # first_order: torque bandwidth (1/s); .inf = no lag
+#     update_rate: 100           # zero_order_hold: commands taken per second (Hz); 1/physics_dt divided by a whole number
 #     driver_kd:  [0, ...]   # 12 driver velocity-feedback gains added to the PD kd
 #     physics_dt: 0.002      # physics/actuator step (s); dt / whole number; default dt
-#     damping:    explicit   # explicit | implicit: how the motor's kd is integrated
+#     damping:    explicit   # explicit | implicit: how the motor's kd is integrated (zero_order_hold: explicit)
 # Without it the joints are driven directly.
 walk:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"

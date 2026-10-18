@@ -99,15 +99,24 @@ struct MotionCommand {
 //             at any step, but damps transient oscillations numerically.
 enum class MotorDamping { Explicit, Implicit };
 
+// How the motor's applied torque lags its command (Motor, common/motor.h).
+//   FirstOrder     dτ/dt = b·(τ_cmd − τ): the torque glides toward each command.
+//   ZeroOrderHold  the motor takes a new command every 1/update_rate s and
+//                  holds it until the next one (a staircase).
+enum class MotorLag { FirstOrder, ZeroOrderHold };
+
 // External motor between every controller and the robot (common/motor.h),
 // from a task's optional `motor:` block. The defaults reproduce driving the
 // joints directly: no lag, no driver feedback, one physics step per control step.
 struct MotorParams {
-    double       bandwidth  = INFINITY;           // torque bandwidth b (1/s); INFINITY = no lag
+    MotorLag     lag         = MotorLag::FirstOrder;
+    double       bandwidth   = INFINITY;          // FirstOrder: torque bandwidth b (1/s); INFINITY = no lag
+    double       update_rate = INFINITY;          // ZeroOrderHold: commands taken per second (Hz)
+    int          hold_steps  = 1;                 // ZeroOrderHold: physics steps each command is held
     double       driver_kd[NUM_JOINTS] = {};      // driver velocity feedback (N·m·s/rad), part of the motor torque
-    double       physics_dt = 0.0;                // physics and actuator step (s): dt / substeps
-    int          substeps   = 1;                  // physics steps per control step
-    MotorDamping damping    = MotorDamping::Explicit;
+    double       physics_dt  = 0.0;               // physics and actuator step (s): dt / substeps
+    int          substeps    = 1;                 // physics steps per control step
+    MotorDamping damping     = MotorDamping::Explicit;
 };
 
 // Task fields common to both variants, parsed by load_task_base()

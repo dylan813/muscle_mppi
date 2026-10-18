@@ -92,8 +92,9 @@ public:
     // Torque the motor applied over the most recent actuate()'s step, given
     // `after`, the state that step ended at.
     void applied_torque(const RobotState& after, double tau[NUM_JOINTS]) const {
-        std::copy(real_motor_tau_, real_motor_tau_ + NUM_JOINTS, tau);
-        if (pending_) motor_.applied(pending_ctrl_, after.dq, tau);
+        MotorState s = real_motor_;
+        if (pending_) motor_.applied(pending_ctrl_, after.dq, s);
+        std::copy(s.tau, s.tau + NUM_JOINTS, tau);
     }
 
     // Analysis only: mppi_sim logs these; the controller never reads them.
@@ -122,9 +123,9 @@ private:
 
     // Advance d one control step under activation command act_cmd: per physics
     // step, activation dynamics and Hill torques from d's joint state, the
-    // motor, then mj_step(). activation and motor_tau carry the actuator state.
+    // motor, then mj_step(). activation and motor carry the actuator state.
     void step_model(mjData* d, const double act_cmd[NUM_MUSCLES], double activation[NUM_MUSCLES],
-                    double motor_tau[NUM_JOINTS]) const;
+                    MotorState& motor) const;
 
     // Finish the motor's pending step with the velocity it ended at (state.dq).
     void settle_motor(const RobotState& state);
@@ -171,13 +172,13 @@ private:
     // Motor command of the most recent actuate() (logged by mppi_sim).
     double last_tau_[NUM_JOINTS] = {};
 
-    // Motor between the Hill model and the robot. real_motor_tau_ is the torque
-    // it has applied (seeds rollouts, like real_act_). The step actuate() sent
-    // stays pending until the next call reports the velocity it ended at.
-    Motor  motor_;
-    double real_motor_tau_[NUM_JOINTS] = {};
-    double pending_ctrl_[NUM_JOINTS]   = {};
-    bool   pending_ = false;
+    // Motor between the Hill model and the robot. real_motor_ is its state on
+    // the robot (seeds rollouts, like real_act_). The step actuate() sent stays
+    // pending until the next call reports the velocity it ended at.
+    Motor      motor_;
+    MotorState real_motor_;
+    double     pending_ctrl_[NUM_JOINTS] = {};
+    bool       pending_ = false;
 
     // The activation command that update() issued, i.e. what real_act_ filters
     // toward (logged by mppi_sim alongside the resulting activation).
@@ -187,7 +188,7 @@ private:
     // plan_cost() score against it after update() returns.
     RobotState          solve_state_;
     double              solve_act_[NUM_MUSCLES] = {};
-    double              solve_motor_tau_[NUM_JOINTS] = {};
+    MotorState          solve_motor_;
     std::vector<double> solve_gait_ref_;   // horizon × NUM_MUSCLES; zeros without an active gait
 
     double sample_min_ = 0.0;

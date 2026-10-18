@@ -111,7 +111,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
             hi[j] = model_->actuator_ctrlrange[2 * j + 1];
         }
         motor_.init(task_.motor, task_.motor.driver_kd, lo, hi);
-        motor_.settle(stand.tau, real_motor_tau_);
+        motor_.settle(stand.tau, real_motor_);
         for (int j = 0; j < NUM_JOINTS; ++j) {
             model_->dof_damping[act_qvel_adr_[j]] += motor_.implicit_damping(j);
             model_->actuator_ctrllimited[j] = 0;
@@ -140,9 +140,9 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
     mjData* d = data_[s];
     set_mj_state(d, state);
 
-    double activation[NUM_MUSCLES], motor_tau[NUM_JOINTS];
+    double activation[NUM_MUSCLES];
     std::memcpy(activation, real_act_, NUM_MUSCLES * sizeof(double));
-    std::memcpy(motor_tau, real_motor_tau_, NUM_JOINTS * sizeof(double));
+    MotorState motor = real_motor_;
 
     const int stride  = task_.horizon * NUM_MUSCLES;
     double total_cost = 0.0;
@@ -155,7 +155,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
             act_cmd[m] = std::clamp(noisy, 0.0, 1.0);
         }
 
-        step_model(d, act_cmd, activation, motor_tau);
+        step_model(d, act_cmd, activation, motor);
 
         double gait_ref[NUM_MUSCLES] = {};
         if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref);
@@ -166,7 +166,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 }
 
 void MPPILocomotion::step_model(mjData* d, const double act_cmd[NUM_MUSCLES],
-                                double activation[NUM_MUSCLES], double motor_tau[NUM_JOINTS]) const
+                                double activation[NUM_MUSCLES], MotorState& motor) const
 {
     for (int i = 0; i < task_.motor.substeps; ++i) {
         double q[NUM_JOINTS], dq[NUM_JOINTS], tau[NUM_JOINTS], ctrl[NUM_JOINTS], tau_cmd[NUM_JOINTS];
@@ -176,7 +176,7 @@ void MPPILocomotion::step_model(mjData* d, const double act_cmd[NUM_MUSCLES],
         }
 
         hill_compute_torques(act_cmd, q, dq, muscle_, task_.motor.physics_dt, activation, tau);
-        motor_.command(tau, dq, motor_tau, ctrl, tau_cmd);
+        motor_.command(tau, dq, motor, ctrl, tau_cmd);
 
         for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
         for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
@@ -184,7 +184,7 @@ void MPPILocomotion::step_model(mjData* d, const double act_cmd[NUM_MUSCLES],
         mj_step(model_, d);
 
         for (int j = 0; j < NUM_JOINTS; ++j) dq[j] = d->qvel[act_qvel_adr_[j]];
-        motor_.applied(ctrl, dq, motor_tau);
+        motor_.applied(ctrl, dq, motor);
     }
 }
 
@@ -194,7 +194,7 @@ void MPPILocomotion::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
 
     double tau[NUM_JOINTS];
     hill_compute_torques(last_act_cmd_, state.q, state.dq, muscle_, task_.motor.physics_dt, real_act_, tau);
-    motor_.command(tau, state.dq, real_motor_tau_, ctrl, last_tau_);
+    motor_.command(tau, state.dq, real_motor_, ctrl, last_tau_);
 
     std::memcpy(pending_ctrl_, ctrl, NUM_JOINTS * sizeof(double));
     pending_ = true;
@@ -203,7 +203,7 @@ void MPPILocomotion::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
 void MPPILocomotion::settle_motor(const RobotState& state)
 {
     if (!pending_) return;
-    motor_.applied(pending_ctrl_, state.dq, real_motor_tau_);
+    motor_.applied(pending_ctrl_, state.dq, real_motor_);
     pending_ = false;
 }
 
@@ -303,13 +303,13 @@ CostTerms MPPILocomotion::plan_cost()
     mjData* d = data_[task_.n_samples];
     set_mj_state(d, solve_state_);
 
-    double activation[NUM_MUSCLES], motor_tau[NUM_JOINTS];
+    double activation[NUM_MUSCLES];
     std::memcpy(activation, solve_act_, NUM_MUSCLES * sizeof(double));
-    std::memcpy(motor_tau, solve_motor_tau_, NUM_JOINTS * sizeof(double));
+    MotorState motor = solve_motor_;
 
     CostTerms sum;
     for (int t = 0; t < task_.horizon; ++t) {
-        step_model(d, &trajectory_[t * NUM_MUSCLES], activation, motor_tau);
+        step_model(d, &trajectory_[t * NUM_MUSCLES], activation, motor);
         sum += step_cost(d, &solve_gait_ref_[t * NUM_MUSCLES]);
     }
     return sum;
@@ -337,7 +337,7 @@ void MPPILocomotion::update(const RobotState& state)
     // What this solve plans from, for executed_cost() and plan_cost().
     solve_state_ = state;
     std::memcpy(solve_act_, real_act_, NUM_MUSCLES * sizeof(double));
-    std::memcpy(solve_motor_tau_, real_motor_tau_, NUM_JOINTS * sizeof(double));
+    solve_motor_ = real_motor_;
     for (int t = 0; t < task_.horizon; ++t) {
         double* ref = &solve_gait_ref_[t * NUM_MUSCLES];
         std::fill(ref, ref + NUM_MUSCLES, 0.0);
