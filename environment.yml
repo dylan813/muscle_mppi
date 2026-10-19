@@ -1,0 +1,39 @@
+# Python environment for muscle_mppi: analysis/plots, rollout GIFs, CMA-ES and learning/.
+#
+#   PYTHONNOUSERSITE=1 conda env create -f environment.yml
+#   conda activate muscle
+#
+# PYTHONNOUSERSITE=1 on create keeps pip from counting packages in ~/.local as
+# installed, so every dependency lands in the env.
+
+name: muscle
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.7.1+cu128        # CUDA 12.8 build: runs on the RTX 5080 (sm_120)
+      - mujoco==3.3.6             # matches the C++ libmujoco in unitree_mujoco/simulate/mujoco
+      - onnxruntime==1.22.1       # matches the C++ ONNX Runtime 1.22 in /usr/local
+      - onnx==1.23.2
+      - numpy==2.5.4
+      - pandas==3.0.6
+      - matplotlib==3.11.2
+      - pyyaml==6.0.3
+      - pillow==13.0.0
+      - cma==4.5.0
+      - wandb==0.31.0
+      - pytest==9.1.1
+
+# Set on `conda activate`.
+#   LD_LIBRARY_PATH:  ~/.bashrc adds /usr/local/cuda-12.8/lib64, whose CUDA libs
+#                     would shadow the ones torch ships with.
+#   PYTHONNOUSERSITE: ignore packages in ~/.local.
+#   PYTHONPATH:       ~/.bashrc sources ROS Jazzy, whose Python packages (and
+#                     pytest plugins) would otherwise load inside this env.
+variables:
+  LD_LIBRARY_PATH: ""
+  PYTHONNOUSERSITE: "1"
+  PYTHONPATH: ""
