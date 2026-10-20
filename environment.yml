@@ -2,6 +2,7 @@
 #
 #   PYTHONNOUSERSITE=1 conda env create -f environment.yml
 #   conda activate muscle
+#   pip install -e .        # learning/ as a package (pyproject.toml)
 #
 # PYTHONNOUSERSITE=1 on create keeps pip from counting packages in ~/.local as
 # installed, so every dependency lands in the env.

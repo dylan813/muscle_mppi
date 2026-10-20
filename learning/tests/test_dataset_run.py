@@ -17,21 +17,15 @@ import pandas as pd
 import pytest
 import yaml
 
+from learning.observation import (NUM_JOINTS, NUM_MUSCLES, OBS_ACT, OBS_ANG_VEL, OBS_DIM, OBS_DQ,
+                                  OBS_GOAL, OBS_LIN_VEL)
+
 REPO  = Path(__file__).resolve().parents[2]
 RUN   = REPO / "analysis/data/mppi_sim/mppi_sim"
 CSV   = RUN.parent / f"{RUN.name}.csv"
 OBS   = RUN.parent / f"{RUN.name}_obs.npy"
 PLAN  = RUN.parent / f"{RUN.name}_plan.npy"
 TASKS = REPO / "controllers/muscle/utils/tasks.yaml"
-
-NUM_JOINTS, NUM_MUSCLES = 12, 24
-
-# Start index of each term in y (controllers/muscle/control/observation.h).
-OBS_GOAL, OBS_GRAVITY, OBS_LIN_VEL, OBS_ANG_VEL = 0, 3, 6, 9
-OBS_Q   = 12
-OBS_DQ  = OBS_Q + NUM_JOINTS
-OBS_ACT = OBS_DQ + NUM_JOINTS
-OBS_DIM = OBS_ACT + NUM_MUSCLES
 
 CSV_DIGITS = dict(rtol=1e-5, atol=1e-6)   # 6 significant digits, stored as float32
 

@@ -1,0 +1,21 @@
+# Makes learning/ an installed package, as gpc does for itself, so `import
+# learning` works from any directory. Install once into the muscle env
+# (environment.yml holds the dependencies):
+#
+#   pip install -e .
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "muscle_mppi"
+version = "0.0.1"
+description = "Flow-matching policy for muscle MPPI, ported from gpc"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+packages = ["learning"]
+
+[tool.pytest.ini_options]
+testpaths = ["learning/tests"]
