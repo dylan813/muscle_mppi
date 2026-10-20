@@ -4,7 +4,7 @@
 // worrying about latency.
 //
 // Run from any directory (e.g. controllers/build/):
-//   ./mppi_sim [task] [yaml] [output.csv] [--name <run>] [--save <name>] [--no-gif]
+//   ./mppi_sim [task] [yaml] [output.csv] [--name <run>] [--save <name>] [--no-gif] [--dataset <prefix>]
 //   ./mppi_sim walk_rough --name rough_test1   # -> analysis/data/mppi_sim/rough_test1.csv/_qpos.csv/.gif
 // Defaults read controllers/muscle/utils/tasks.yaml and write to
 // analysis/data/mppi_sim/mppi_sim.csv (created on first run if missing), both
@@ -19,6 +19,15 @@
 // (copied into the trial with --save). Any previous GIF of that name is always
 // deleted first, so --no-gif leaves no GIF there at all. See run_sim() in
 // common/harness.h.
+//
+// --dataset <prefix> also writes the policy's training data (learning/), one
+// row per CSV row, from the update() that row's step ran:
+//   <prefix>_obs.npy   (N, OBS_DIM)               observation() (control/observation.h)
+//   <prefix>_plan.npy  (N, horizon, NUM_MUSCLES)  plan()
+// Created, with any missing folders, when the first row is logged. Like the
+// GIF, the prefix's old files are deleted first, at startup, so a run that
+// falls before logging starts leaves none rather than another run's.
+// <prefix> is relative to the current directory, like [output.csv].
 //
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
@@ -58,13 +67,73 @@
 //   world-frame qvel[0:3]), matching the body-frame convention step_cost()
 //   uses when comparing against cmd_.vx/vy in mppi_locomotion.cpp.
 
+#include <filesystem>
+#include <memory>
 #include <ostream>
+#include <string>
+#include <system_error>
+#include <vector>
 
 #include "control/mppi_locomotion.h"
 #include "../common/harness.h"
+#include "../common/npy_writer.h"
+
+// The --dataset files (see the top of this file).
+struct Dataset {
+    static constexpr const char* kObsSuffix  = "_obs.npy";
+    static constexpr const char* kPlanSuffix = "_plan.npy";
+
+    NpyWriter obs;
+    NpyWriter plan;
+
+    Dataset(const std::string& prefix, int horizon)
+        : obs(prefix + kObsSuffix, {OBS_DIM}), plan(prefix + kPlanSuffix, {horizon, NUM_MUSCLES}) {}
+
+    void append(MPPILocomotion& mppi)
+    {
+        double y[OBS_DIM];
+        mppi.observation(y);
+        obs.append(y);
+        plan.append(mppi.plan().data());
+    }
+};
+
+// Moves argv into rest, except `--dataset <prefix>` (or `--dataset=<prefix>`),
+// which goes to prefix, so run_sim() (shared with the PD sim) never sees it.
+// Returns false if the prefix is missing.
+static bool take_dataset_arg(int argc, char** argv, std::vector<char*>& rest, std::string& prefix)
+{
+    for (int i = 0; i < argc; ++i) {
+        const std::string arg = argv[i];
+        const bool spaced = i > 0 && arg == "--dataset";
+        const bool joined = i > 0 && arg.rfind("--dataset=", 0) == 0;
+        if (!spaced && !joined) {
+            rest.push_back(argv[i]);
+            continue;
+        }
+
+        prefix = joined ? arg.substr(10) : (i + 1 < argc ? argv[++i] : "");
+        if (prefix.empty()) {
+            fprintf(stderr, "--dataset needs a file prefix\n");
+            return false;
+        }
+    }
+    return true;
+}
 
 int main(int argc, char** argv)
 {
+    std::vector<char*> args;
+    std::string dataset_prefix;
+    if (!take_dataset_arg(argc, argv, args, dataset_prefix)) return 1;
+    std::unique_ptr<Dataset> dataset;
+
+    if (!dataset_prefix.empty())
+        for (const char* suffix : {Dataset::kObsSuffix, Dataset::kPlanSuffix}) {
+            std::error_code ec;
+            std::filesystem::remove(dataset_prefix + suffix, ec);
+        }
+
     SimSpec<MPPILocomotion> spec;
     spec.default_yaml = kDefaultTasksYaml;
     spec.default_csv  = repo_path("analysis/data/mppi_sim/mppi_sim.csv");
@@ -91,7 +160,8 @@ int main(int argc, char** argv)
                 csv << "," << prefix << term;
         csv << ",sample_min,ess";
     };
-    spec.extra_row = [](std::ostream& csv, MPPILocomotion& mppi, const RobotState& state) {
+    spec.extra_row = [&dataset, &dataset_prefix](std::ostream& csv, MPPILocomotion& mppi,
+                                                 const RobotState& state) {
         const double* act = mppi.activation();
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
         const double* cmd = mppi.act_cmd();
@@ -108,7 +178,18 @@ int main(int argc, char** argv)
         for (const CostTerms& c : {mppi.executed_cost(state), mppi.plan_cost()})
             csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;
         csv << "," << mppi.sample_min() << "," << mppi.ess();
+
+        if (dataset_prefix.empty()) return;
+        if (!dataset) {
+            // Opened with the first row: the horizon comes from the controller
+            // run_sim() builds. Missing folders are created, as for the CSV.
+            const std::filesystem::path dir = std::filesystem::path(dataset_prefix).parent_path();
+            std::error_code ec;
+            if (!dir.empty()) std::filesystem::create_directories(dir, ec);
+            dataset = std::make_unique<Dataset>(dataset_prefix, mppi.task_ref().horizon);
+        }
+        dataset->append(mppi);
     };
 
-    return run_sim(argc, argv, spec);
+    return run_sim(static_cast<int>(args.size()), args.data(), spec);
 }

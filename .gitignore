@@ -32,6 +32,7 @@ __pycache__/
 .pytest_cache/
 
 *.csv
+*.npy
 
 analysis/log/*
 analysis/optimize/results/*

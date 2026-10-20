@@ -315,6 +315,17 @@ CostTerms MPPILocomotion::plan_cost()
     return sum;
 }
 
+void MPPILocomotion::observation(double y[OBS_DIM])
+{
+    mjData* d = data_[task_.n_samples];
+    set_mj_state(d, solve_state_);
+    refresh_derived(d);
+
+    double com[3], com_vel_body[3];
+    base_com_state(d, com, com_vel_body);
+    build_observation(solve_state_, com, solve_act_, command().goal_pos, y);
+}
+
 // ============================================================================
 // Main solve
 // ============================================================================

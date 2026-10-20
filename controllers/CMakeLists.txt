@@ -57,3 +57,32 @@ add_executable(pd_mppi_sim
     common/task_config.cpp
 )
 target_link_libraries(pd_mppi_sim ${COMMON_LIBS})
+
+# --- Unit tests (controllers/tests/): build, then run `ctest` in this build dir ---
+enable_testing()
+
+add_executable(test_control_utils tests/test_control_utils.cpp)
+target_link_libraries(test_control_utils mujoco)
+add_test(NAME control_utils COMMAND test_control_utils)
+
+add_executable(test_observation tests/test_observation.cpp)
+target_link_libraries(test_observation mujoco)
+add_test(NAME observation COMMAND test_observation)
+
+add_executable(test_npy_writer tests/test_npy_writer.cpp)
+add_test(NAME npy_writer COMMAND test_npy_writer)
+
+add_executable(test_mppi_labels
+    tests/test_mppi_labels.cpp
+    muscle/control/base_mppi.cpp
+    muscle/control/mppi_locomotion.cpp
+    muscle/control/activation_gait.cpp
+    muscle/utils/tasks.cpp
+    common/task_config.cpp
+)
+target_link_libraries(test_mppi_labels mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
+add_test(NAME mppi_labels COMMAND test_mppi_labels)
+
+add_executable(test_check_fails tests/test_check_fails.cpp)
+add_test(NAME check_fails COMMAND test_check_fails)
+set_tests_properties(check_fails PROPERTIES WILL_FAIL TRUE)

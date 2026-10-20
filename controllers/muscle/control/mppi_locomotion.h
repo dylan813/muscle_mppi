@@ -5,6 +5,7 @@
 #include "base_mppi.h"
 #include "gait_scheduler.h"
 #include "muscle.h"
+#include "observation.h"
 #include "../../common/motor.h"
 
 struct CostWeights {
@@ -117,6 +118,13 @@ public:
         hill_factors(solve_state_.q, solve_state_.dq, muscle_, f);
         return f;
     }
+
+    // Training data for the learned policy (learning/), from the most recent update():
+    //   observation()  y at the state it planned from (control/observation.h)
+    //   plan()         the plan it chose, horizon × NUM_MUSCLES as [t * NUM_MUSCLES + m];
+    //                  step 0 is the command actuate() holds
+    void observation(double y[OBS_DIM]);
+    const std::vector<double>& plan() const { return trajectory_; }
 
 private:
     double rollout(int s, const RobotState& state) override;

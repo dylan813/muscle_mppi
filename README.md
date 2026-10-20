@@ -84,6 +84,7 @@ Output goes to `analysis/data/mppi_sim/` (or `pd_mppi_sim/`): `<name>.csv`, `<na
 | `--name <run>` | name the output files, e.g. `--name rough/test1` → `analysis/data/mppi_sim/rough/test1.*` |
 | `--no-gif` | skip the GIF (and delete any old GIF of that name) |
 | `--save <name>` | also copy the run into `analysis/log/trials/<name>/trial_NNN/` |
+| `--dataset <prefix>` | `mppi_sim` only: also write the learned policy's training data, one row per CSV row, to `<prefix>_obs.npy` and `<prefix>_plan.npy` |
 
 Flags go in any order. A third positional argument sets a full output path instead of `--name`: `./mppi_sim walk <yaml> /tmp/x.csv`.
 
