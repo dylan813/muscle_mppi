@@ -11,7 +11,8 @@
 
 Settings come from --config (default learning/config.yaml). MPPI's plans are
 converted to the task's knots (mppi.KnotSpline). The policy is saved to
-<out>/policy.pt, and wandb keeps its local files in <out>.
+<out>/policy.pt, and exported for the C++ controller to <out>/policy.onnx
+(policy.export_onnx). wandb keeps its local files in <out>.
 """
 
 import argparse
@@ -25,7 +26,7 @@ import yaml
 from torch import nn
 
 from learning.mppi import KnotSpline, load_round, repo_path
-from learning.policy import ModelConfig, Policy, to_network
+from learning.policy import ModelConfig, Policy, export_onnx, to_network
 
 # ── Settings (config.yaml; see it for each value's source) ───────────────────
 
@@ -220,7 +221,8 @@ def main() -> None:
     logger.log_round(0, {"fit/loss": losses[-1].item(), "fit/time": time.time() - start})
 
     policy.save(args.out / "policy.pt")
-    print(f"saved {args.out / 'policy.pt'}")
+    export_onnx(policy, spline, args.out / "policy.onnx", cfg.mppi_task.name)
+    print(f"saved {args.out / 'policy.pt'} and {args.out / 'policy.onnx'}")
     logger.finish()
 
 

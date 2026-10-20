@@ -1,12 +1,14 @@
 """Training on the stage-3 mppi_sim run (see test_dataset_run.py for how to make
 it): fitting one round with config.yaml's settings lowers the loss, and
-`python -m learning.training` runs end to end and saves a loadable policy.
+`python -m learning.training` runs end to end and saves a loadable policy and
+ONNX file.
 A smoke test of the pipeline on real data, not a claim about policy quality."""
 
 import subprocess
 import sys
 from pathlib import Path
 
+import onnxruntime as ort
 import pytest
 import torch
 import yaml
@@ -49,3 +51,4 @@ def test_train_command_saves_a_loadable_policy(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "round 0 | fit/loss" in result.stdout
     Policy.load(out / "policy.pt")
+    ort.InferenceSession(str(out / "policy.onnx"), providers=["CPUExecutionProvider"])

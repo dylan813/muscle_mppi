@@ -8,6 +8,7 @@ list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(onnxruntime REQUIRED)   # ONNX Runtime's own config, /usr/local/lib/cmake/onnxruntime
 
 set(MUJOCO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../unitree_mujoco/simulate/mujoco")
 include_directories(${MUJOCO_DIR}/include)
@@ -82,6 +83,14 @@ add_executable(test_mppi_labels
 )
 target_link_libraries(test_mppi_labels mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
 add_test(NAME mppi_labels COMMAND test_mppi_labels)
+
+# Not a CTest test: it needs a policy file, which learning/tests/test_flow_policy.py
+# exports and runs it on.
+add_executable(test_flow_policy
+    tests/test_flow_policy.cpp
+    muscle/control/flow_policy.cpp
+)
+target_link_libraries(test_flow_policy onnxruntime::onnxruntime)
 
 add_executable(test_check_fails tests/test_check_fails.cpp)
 add_test(NAME check_fails COMMAND test_check_fails)
