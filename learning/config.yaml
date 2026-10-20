@@ -1,0 +1,26 @@
+# Flow-matching policy training settings (learning/). Values follow gpc's
+# humanoid example (gpc/examples/humanoid.py) unless noted. Every key is
+# required, and unknown keys are rejected so a typo can't be ignored.
+
+seed: 0                        # gpc: jax.random.key(0)
+
+mppi_task:                     # the mppi_sim task whose plans the policy learns; its
+  name: walk                   # horizon and n_knots set the policy's output (learning/knots.py)
+  tasks_yaml: controllers/muscle/utils/tasks.yaml   # relative to the repo root
+
+model:                         # DenoisingCNN (learning/model.py)
+  feature_dims: [128, 128, 128]
+  timestep_embedding_dim: 64
+  kernel_size: 3               # gpc's default
+
+fit:                           # gpc's fit_policy (gpc/training.py)
+  learning_rate: 1.0e-3
+  batch_size: 128
+  num_epochs: 10
+
+checkpoint_every: 1            # rounds between policy checkpoints (humanoid example: 1)
+
+wandb:
+  project: muscle-mppi-gpc
+  run_name: null               # null: wandb picks one
+  mode: online                 # online | offline | disabled

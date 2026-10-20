@@ -17,13 +17,13 @@ def small_net() -> DenoisingCNN:
     return DenoisingCNN(NUM_MUSCLES, OBS_DIM, feature_dims=(16, 16), timestep_embedding_dim=8)
 
 
-def inputs(batch: int):
-    return torch.randn(batch, HORIZON, NUM_MUSCLES), torch.randn(batch, OBS_DIM), torch.rand(batch, 1)
+def inputs(batch: int, horizon: int = HORIZON):
+    return torch.randn(batch, horizon, NUM_MUSCLES), torch.randn(batch, OBS_DIM), torch.rand(batch, 1)
 
 
-@pytest.mark.parametrize("batch", [1, 5])
-def test_output_shape(batch):
-    assert small_net().eval()(*inputs(batch)).shape == (batch, HORIZON, NUM_MUSCLES)
+@pytest.mark.parametrize("batch, horizon", [(1, 4), (5, 4), (5, 40)])   # 4 knots, or a whole plan
+def test_output_shape(batch, horizon):
+    assert small_net().eval()(*inputs(batch, horizon)).shape == (batch, horizon, NUM_MUSCLES)
 
 
 def test_time_embedding_formula():
