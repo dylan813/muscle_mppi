@@ -1,4 +1,4 @@
-"""KnotSpline (learning/knots.py) matches the controller's cubic noise
+"""KnotSpline (learning/mppi.py) matches the controller's cubic noise
 (base_mppi.cpp): knot steps, the not-a-knot spline and its 2- and 3-knot cases,
 reading a task's knots, and plans to knots as values at the knot steps."""
 
@@ -7,9 +7,8 @@ import pytest
 import torch
 import yaml
 
-from learning.config import load_config, repo_path
-from learning.knots import KnotSpline, knot_steps
-from learning.observation import NUM_MUSCLES
+from learning.mppi import NUM_MUSCLES, KnotSpline, knot_steps, repo_path
+from learning.training import load_config
 
 HORIZON = 40
 

@@ -1,20 +1,55 @@
-"""The policy's plans as cubic knots. The policy outputs n_knots values per
-muscle, and a plan's horizon steps are the spline through them, built exactly
-as the controller builds its cubic noise (controllers/muscle/control/base_mppi.cpp:
-the knot steps in BaseMPPI's constructor, and not_a_knot_cubic_spline()).
+"""What the C++ controller defines and writes, mirrored for Python. gpc has no
+counterpart: its planner runs inside its own JAX program.
 
-Knots replace whole-horizon plans because gpc's network sees only a short
-window of a plan. gpc's own plans are 3-4 steps, which the window covers. On
-40-step plans the network mixed two modes within one plan; on 4 knots it
-doesn't.
+  observation layout   controllers/muscle/control/observation.h
+  repo_path()          controllers/common/task_config.h
+  KnotSpline           the knot steps and not_a_knot_cubic_spline() of
+                       controllers/muscle/control/base_mppi.cpp
+  load_round()         the files mppi_sim --dataset writes (controllers/muscle/mppi_sim.cpp)
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import torch
 import yaml
 
+# ── Observation layout (observation.h; see it for what each term is) ─────────
+
+NUM_JOINTS  = 12
+NUM_MUSCLES = 2 * NUM_JOINTS   # antagonistic pair per joint
+
+# Start index of each term in y.
+OBS_GOAL    = 0
+OBS_GRAVITY = OBS_GOAL + 3
+OBS_LIN_VEL = OBS_GRAVITY + 3
+OBS_ANG_VEL = OBS_LIN_VEL + 3
+OBS_Q       = OBS_ANG_VEL + 3
+OBS_DQ      = OBS_Q + NUM_JOINTS
+OBS_ACT     = OBS_DQ + NUM_JOINTS
+OBS_DIM     = OBS_ACT + NUM_MUSCLES
+
+# ── Repo paths (task_config.h) ───────────────────────────────────────────────
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def repo_path(path: str | Path) -> Path:
+    """A repo-relative path made absolute (absolute paths pass through), as the
+    C++ side's repo_path() does."""
+    path = Path(path)
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+# ── Knots (base_mppi.cpp) ────────────────────────────────────────────────────
+#
+# The policy outputs n_knots values per muscle, and a plan's horizon steps are
+# the spline through them, built exactly as the controller builds its cubic
+# noise. Knots replace whole-horizon plans because gpc's network sees only a
+# short window of a plan. gpc's own plans are 3-4 steps, which the window
+# covers. On 40-step plans the network mixed two modes within one plan; on
+# 4 knots it doesn't.
 
 def knot_steps(horizon: int, n_knots: int) -> list[int]:
     """BaseMPPI's knot steps: round(k · (horizon - 1) / (n_knots - 1)), with
@@ -106,3 +141,44 @@ class KnotSpline:
         if plans.shape[1] != self.horizon:
             raise ValueError(f"plans have {plans.shape[1]} steps, the task's horizon is {self.horizon}")
         return plans[:, self.steps, :]
+
+
+# ── Dataset files (mppi_sim --dataset) ───────────────────────────────────────
+
+OBS_SUFFIX  = "_obs.npy"    # mppi_sim.cpp's Dataset::kObsSuffix
+PLAN_SUFFIX = "_plan.npy"   # mppi_sim.cpp's Dataset::kPlanSuffix
+
+
+def load_round(prefixes: Sequence[str | Path]) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
+    """Join the episodes at prefixes into one round.
+
+    Returns observations [N, OBS_DIM], plans [N, horizon, NUM_MUSCLES] in
+    activations (both float32, episodes in order), and the prefixes skipped
+    because they have neither file: mppi_sim writes none for an episode that
+    falls before logging starts.
+    """
+    obs, plans, skipped = [], [], []
+    for prefix in prefixes:
+        obs_path, plan_path = Path(f"{prefix}{OBS_SUFFIX}"), Path(f"{prefix}{PLAN_SUFFIX}")
+        if not obs_path.exists() and not plan_path.exists():
+            skipped.append(str(prefix))
+            continue
+        if obs_path.exists() != plan_path.exists():
+            raise FileNotFoundError(f"{prefix}: has only one of {OBS_SUFFIX}, {PLAN_SUFFIX}")
+
+        y, u = np.load(obs_path), np.load(plan_path)
+        if y.ndim != 2 or y.shape[1] != OBS_DIM:
+            raise ValueError(f"{obs_path}: shape {y.shape}, expected (N, {OBS_DIM})")
+        if u.ndim != 3 or u.shape[2] != NUM_MUSCLES:
+            raise ValueError(f"{plan_path}: shape {u.shape}, expected (N, horizon, {NUM_MUSCLES})")
+        if len(y) != len(u):
+            raise ValueError(f"{prefix}: {len(y)} observations but {len(u)} plans")
+        if plans and u.shape[1] != plans[0].shape[1]:
+            raise ValueError(f"{plan_path}: horizon {u.shape[1]}, earlier episodes {plans[0].shape[1]}")
+
+        obs.append(y)
+        plans.append(u)
+
+    if not obs:
+        raise ValueError(f"no episode data at any of {[str(p) for p in prefixes]}")
+    return torch.from_numpy(np.concatenate(obs)), torch.from_numpy(np.concatenate(plans)), skipped

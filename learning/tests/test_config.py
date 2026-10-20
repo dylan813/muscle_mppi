@@ -1,10 +1,10 @@
-"""Settings (learning/config.py): the repo's config.yaml loads, and an unknown
+"""Settings (learning/training.py): the repo's config.yaml loads, and an unknown
 or missing key is an error rather than silently ignored."""
 
 import pytest
 import yaml
 
-from learning.config import DEFAULT_PATH, load_config
+from learning.training import DEFAULT_PATH, load_config
 
 
 def write_modified(tmp_path, change):

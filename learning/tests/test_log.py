@@ -1,8 +1,7 @@
-"""RunLogger (learning/log.py) with wandb disabled: logs a round and prints its
+"""RunLogger (learning/training.py) with wandb disabled: logs a round and prints its
 summary line, without contacting wandb."""
 
-from learning.config import WandbConfig
-from learning.log import RunLogger
+from learning.training import RunLogger, WandbConfig
 
 
 def test_logs_a_round_offline(tmp_path, capsys):

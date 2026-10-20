@@ -1,11 +1,10 @@
-"""Loading a round of mppi_sim --dataset episodes (learning/data.py)."""
+"""Loading a round of mppi_sim --dataset episodes (learning/mppi.py)."""
 
 import numpy as np
 import pytest
 import torch
 
-from learning.data import OBS_SUFFIX, PLAN_SUFFIX, load_round
-from learning.observation import NUM_MUSCLES, OBS_DIM
+from learning.mppi import NUM_MUSCLES, OBS_DIM, OBS_SUFFIX, PLAN_SUFFIX, load_round
 
 HORIZON = 40
 

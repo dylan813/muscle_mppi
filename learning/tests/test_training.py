@@ -7,12 +7,9 @@ import matplotlib.pyplot as plt
 import pytest
 import torch
 
-from learning import flow_matching
-from learning.config import FitConfig, ModelConfig
-from learning.knots import KnotSpline
-from learning.observation import NUM_MUSCLES, OBS_DIM
-from learning.policy import Policy
-from learning.training import checkpoint_due, fit_round, make_optimizer
+from learning.mppi import NUM_MUSCLES, OBS_DIM, KnotSpline
+from learning.policy import ModelConfig, Policy, sample
+from learning.training import FitConfig, checkpoint_due, fit_round, make_optimizer
 
 HORIZON = 40
 SPLINE = KnotSpline(HORIZON, 4)   # the walk task's knots
@@ -79,7 +76,7 @@ def test_policy_samples_with_running_statistics():
     torch.manual_seed(1)
     out = policy.sample(y, prev)
     torch.manual_seed(1)
-    torch.testing.assert_close(flow_matching.sample(policy.model, policy.normalizer(y), prev), out)
+    torch.testing.assert_close(sample(policy.model, policy.normalizer(y), prev), out)
 
 
 def two_plan_knots():

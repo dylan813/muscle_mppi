@@ -1,13 +1,13 @@
-"""Flow matching (learning/flow_matching.py): network units, the noised path,
-the loss's target, and the sampler, using velocity fields with known answers
-in place of a trained network."""
+"""Flow matching (learning/policy.py, learning/training.py): network units,
+the noised path, the loss's target, and the sampler, using velocity fields
+with known answers in place of a trained network."""
 
 import pytest
 import torch
 
-from learning.flow_matching import (SIGMA_MIN, from_network, loss, noised_plan, sample,
-                                    to_network)
-from learning.observation import NUM_MUSCLES, OBS_DIM
+from learning.mppi import NUM_MUSCLES, OBS_DIM
+from learning.policy import from_network, sample, to_network
+from learning.training import SIGMA_MIN, loss, noised_plan
 
 SHAPE = (2, 40, NUM_MUSCLES)   # batch, horizon, muscles
 

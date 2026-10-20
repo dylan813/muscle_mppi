@@ -17,8 +17,8 @@ import pandas as pd
 import pytest
 import yaml
 
-from learning.observation import (NUM_JOINTS, NUM_MUSCLES, OBS_ACT, OBS_ANG_VEL, OBS_DIM, OBS_DQ,
-                                  OBS_GOAL, OBS_LIN_VEL)
+from learning.mppi import (NUM_JOINTS, NUM_MUSCLES, OBS_ACT, OBS_ANG_VEL, OBS_DIM, OBS_DQ,
+                           OBS_GOAL, OBS_LIN_VEL)
 
 REPO  = Path(__file__).resolve().parents[2]
 RUN   = REPO / "analysis/data/mppi_sim/mppi_sim"

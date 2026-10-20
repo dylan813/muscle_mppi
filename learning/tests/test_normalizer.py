@@ -1,10 +1,10 @@
-"""ObsNormalizer (learning/normalizer.py) behaves as gpc's: each round is
+"""ObsNormalizer (learning/policy.py) behaves as gpc's: each round is
 standardized with its own statistics, the running statistics start at mean 0,
 variance 1 and become 0.1 · old + 0.9 · round, and runtime uses them."""
 
 import torch
 
-from learning.normalizer import EPS, ObsNormalizer
+from learning.policy import NORM_EPS, ObsNormalizer
 
 SCALE  = torch.tensor([1.0, 0.01, 5.0])
 OFFSET = torch.tensor([0.0, -1.0, 2.0])
@@ -22,7 +22,7 @@ def biased_var(y: torch.Tensor) -> torch.Tensor:
 def test_round_is_standardized_with_its_own_statistics():
     y = round_data(0)
     out = ObsNormalizer(3).fit_round(y)
-    torch.testing.assert_close(out, (y - y.mean(0)) / torch.sqrt(biased_var(y) + EPS))
+    torch.testing.assert_close(out, (y - y.mean(0)) / torch.sqrt(biased_var(y) + NORM_EPS))
 
 
 def test_running_statistics_follow_gpc():
@@ -43,7 +43,7 @@ def test_runtime_uses_running_statistics():
     norm = ObsNormalizer(3)
     norm.fit_round(round_data(3))
     y = round_data(4)
-    torch.testing.assert_close(norm(y), (y - norm.mean) / torch.sqrt(norm.var + EPS))
+    torch.testing.assert_close(norm(y), (y - norm.mean) / torch.sqrt(norm.var + NORM_EPS))
 
 
 def test_constant_feature_stays_finite():

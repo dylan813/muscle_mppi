@@ -1,6 +1,6 @@
 """Training on the stage-3 mppi_sim run (see test_dataset_run.py for how to make
 it): fitting one round with config.yaml's settings lowers the loss, and
-`python -m learning.train` runs end to end and saves a loadable policy.
+`python -m learning.training` runs end to end and saves a loadable policy.
 A smoke test of the pipeline on real data, not a claim about policy quality."""
 
 import subprocess
@@ -11,11 +11,9 @@ import pytest
 import torch
 import yaml
 
-from learning.config import DEFAULT_PATH, load_config, repo_path
-from learning.data import OBS_SUFFIX, PLAN_SUFFIX, load_round
-from learning.knots import KnotSpline
+from learning.mppi import OBS_SUFFIX, PLAN_SUFFIX, KnotSpline, load_round, repo_path
 from learning.policy import Policy
-from learning.training import fit_round, make_optimizer
+from learning.training import DEFAULT_PATH, fit_round, load_config, make_optimizer
 
 REPO = Path(__file__).resolve().parents[2]
 RUN  = REPO / "analysis/data/mppi_sim/mppi_sim"
@@ -45,7 +43,7 @@ def test_train_command_saves_a_loadable_policy(tmp_path):
     config.write_text(yaml.safe_dump(node))
 
     out = tmp_path / "run"
-    result = subprocess.run([sys.executable, "-m", "learning.train", "--config", str(config),
+    result = subprocess.run([sys.executable, "-m", "learning.training", "--config", str(config),
                              "--data", str(RUN), "--out", str(out)],
                             capture_output=True, text=True, cwd=REPO)
     assert result.returncode == 0, result.stderr

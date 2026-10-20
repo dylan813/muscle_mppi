@@ -1,4 +1,4 @@
-"""DenoisingCNN (learning/model.py): shapes, gpc's time embedding, the Flax
+"""DenoisingCNN (learning/architectures.py): shapes, gpc's time embedding, the Flax
 settings it was ported with, its structure, and dropout."""
 
 import math
@@ -6,8 +6,8 @@ import math
 import pytest
 import torch
 
-from learning.model import TRUNCATED_STD, DenoisingCNN, PositionalEmbedding
-from learning.observation import NUM_MUSCLES, OBS_DIM
+from learning.architectures import TRUNCATED_STD, DenoisingCNN, PositionalEmbedding
+from learning.mppi import NUM_MUSCLES, OBS_DIM
 
 HORIZON = 40
 
