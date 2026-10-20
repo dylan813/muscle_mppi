@@ -121,8 +121,8 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
 
     model_->opt.timestep = task_.motor.physics_dt;
 
-    data_.resize(task_.n_samples + 1);
-    for (int i = 0; i <= task_.n_samples; ++i)
+    data_.resize(total_samples() + 1);
+    for (int i = 0; i <= total_samples(); ++i)
         data_[i] = mj_makeData(model_);
 
     // Detect freejoint (freejoint adds 1 extra qpos DOF via quaternion, so nq != nv).
@@ -144,8 +144,8 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
         model_->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j];
 
     trajectory_.assign(task_.horizon * NUM_MUSCLES, 0.0);
-    actions_.assign(task_.n_samples * task_.horizon * NUM_MUSCLES, 0.0);
-    costs_.resize(task_.n_samples);
+    actions_.assign(total_samples() * task_.horizon * NUM_MUSCLES, 0.0);
+    costs_.resize(total_samples());
 
     if (task_.sample_type == "cubic") {
         // Evenly spaced knot timesteps spanning [0, horizon-1], rounded to the nearest

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+#include <memory>
 #include <string>
 
 #include "base_mppi.h"
@@ -50,11 +52,17 @@ struct CostTerms {
 //
 // Storage layout for trajectory_ (size horizon × NUM_MUSCLES):
 //   [t * NUM_MUSCLES + m] = act[t][m]
+//
+// With the task's `policy:` block, a learned policy's plans join MPPI's
+// samples in every update() (sample_policy()).
+
+class FlowPolicy;   // control/flow_policy.h
 
 class MPPILocomotion : public BaseMPPI {
 public:
     explicit MPPILocomotion(const std::string& task_name,
                             const std::string& yaml_path = kDefaultTasksYaml);
+    ~MPPILocomotion() override;
 
     // Run one MPPI solve. Step 0 of the chosen plan becomes the activation
     // command actuate() holds until the next update().
@@ -111,6 +119,10 @@ public:
     // weights, 1/Σw²: 1 when one sample decides the plan, n_samples when all count equally.
     double sample_min() const { return sample_min_; }
     double ess()        const { return ess_; }
+    // Lowest cost among MPPI's samples and among the policy's (gpc's J_spc and
+    // J_policy, gpc/training.py:86-95); NaN when that group has no samples.
+    double mppi_min()   const { return mppi_min_; }
+    double policy_min() const { return policy_min_; }
     // Hill factors at the state update() started from: the ones the first
     // physics step's torque came from.
     HillFactors muscle_factors() const {
@@ -128,6 +140,12 @@ public:
 
 private:
     double rollout(int s, const RobotState& state) override;
+
+    // The policy's samples, rows n_samples onward of actions_. Call after the
+    // shift: each is flowed from noise, conditioned on observation(), starting
+    // from the plan MPPI samples around (as gpc's BootstrappedPredictiveSampling
+    // passes its mean, gpc/sampling.py:74).
+    void sample_policy();
 
     // Advance d one control step under activation command act_cmd: per physics
     // step, activation dynamics and Hill torques from d's joint state, the
@@ -201,6 +219,10 @@ private:
 
     double sample_min_ = 0.0;
     double ess_        = 0.0;
+    double mppi_min_   = std::numeric_limits<double>::quiet_NaN();
+    double policy_min_ = std::numeric_limits<double>::quiet_NaN();
+
+    std::unique_ptr<FlowPolicy> policy_;   // task_.policy; null without one
 
     int    base_bid_ = 1;
 };

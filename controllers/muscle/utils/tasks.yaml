@@ -18,6 +18,15 @@
 #     physics_dt: 0.002      # physics/actuator step (s); dt / whole number; default dt
 #     damping:    explicit   # explicit | implicit: how the motor's kd is integrated (zero_order_hold: explicit)
 # Without it the joints are driven directly.
+#
+# Optional, any cubic-sampling task (PolicyParams in utils/tasks.h): a `policy:`
+# block adds a learned policy's plans (learning/) to MPPI's samples every update.
+# All keys required.
+#   policy:
+#     path:        analysis/log/gpc/<run>/policy.onnx   # repo-relative or absolute
+#     num_samples: 30    # policy samples per update, on top of n_samples (gpc: as many as MPPI's)
+#     warm_start:  0.0   # in [0, 1]: flow from noise (0, as gpc trains) or from MPPI's plan (1)
+# n_samples: 0 then leaves the policy's samples alone. Without it, MPPI samples alone.
 
 # -----------------------------------------------------------------------
 # Quadruped muscle parameters (12 joints: (hip/thigh/calf)x(FR/FL/RR/RL))

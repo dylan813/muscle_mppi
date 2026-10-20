@@ -31,22 +31,24 @@ add_executable(muscle_mppi_controller
     muscle/mppi_controller.cpp
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
+    muscle/control/flow_policy.cpp
     muscle/control/activation_gait.cpp
     muscle/utils/tasks.cpp
     common/task_config.cpp
 )
-target_link_libraries(muscle_mppi_controller ${COMMON_LIBS})
+target_link_libraries(muscle_mppi_controller ${COMMON_LIBS} onnxruntime::onnxruntime)
 
 # --- Standalone MuJoCo simulation test (no DDS, no real-time constraint) ---
 add_executable(mppi_sim
     muscle/mppi_sim.cpp
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
+    muscle/control/flow_policy.cpp
     muscle/control/activation_gait.cpp
     muscle/utils/tasks.cpp
     common/task_config.cpp
 )
-target_link_libraries(mppi_sim ${COMMON_LIBS})
+target_link_libraries(mppi_sim ${COMMON_LIBS} onnxruntime::onnxruntime)
 
 # --- PD-actuated standalone MuJoCo simulation test (mirrors mppi_sim, but ---
 # --- with direct joint-space PD control instead of the muscle model)     ---
@@ -77,11 +79,12 @@ add_executable(test_mppi_labels
     tests/test_mppi_labels.cpp
     muscle/control/base_mppi.cpp
     muscle/control/mppi_locomotion.cpp
+    muscle/control/flow_policy.cpp
     muscle/control/activation_gait.cpp
     muscle/utils/tasks.cpp
     common/task_config.cpp
 )
-target_link_libraries(test_mppi_labels mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
+target_link_libraries(test_mppi_labels mujoco yaml-cpp pthread OpenMP::OpenMP_CXX onnxruntime::onnxruntime)
 add_test(NAME mppi_labels COMMAND test_mppi_labels)
 
 add_executable(test_sampling
@@ -92,6 +95,27 @@ add_executable(test_sampling
 )
 target_link_libraries(test_sampling mujoco yaml-cpp OpenMP::OpenMP_CXX)
 add_test(NAME sampling COMMAND test_sampling)
+
+add_executable(test_task_policy
+    tests/test_task_policy.cpp
+    muscle/utils/tasks.cpp
+    common/task_config.cpp
+)
+target_link_libraries(test_task_policy yaml-cpp)
+add_test(NAME task_policy COMMAND test_task_policy)
+
+# Not a CTest test: it needs a policy file, which learning/tests/test_mppi_policy.py
+# writes and runs it on.
+add_executable(test_mppi_policy
+    tests/test_mppi_policy.cpp
+    muscle/control/base_mppi.cpp
+    muscle/control/mppi_locomotion.cpp
+    muscle/control/flow_policy.cpp
+    muscle/control/activation_gait.cpp
+    muscle/utils/tasks.cpp
+    common/task_config.cpp
+)
+target_link_libraries(test_mppi_policy mujoco yaml-cpp pthread OpenMP::OpenMP_CXX onnxruntime::onnxruntime)
 
 # Not a CTest test: it needs a policy file, which learning/tests/test_flow_policy.py
 # exports and runs it on.

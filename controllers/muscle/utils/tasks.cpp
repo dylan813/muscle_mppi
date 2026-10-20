@@ -58,5 +58,39 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
         flag("use_passive",         cfg.muscle.use_passive);
     }
 
+    // Optional `policy:` block (PolicyParams). Every key is required and
+    // unknown keys throw. The policy outputs the plan's knots, so it needs
+    // cubic sampling.
+    if (const YAML::Node& p = t["policy"]) {
+        for (const auto& kv : p) {
+            const std::string key = kv.first.as<std::string>();
+            if (key != "path" && key != "num_samples" && key != "warm_start")
+                throw std::runtime_error("Task '" + task_name + "': unknown policy key '" + key
+                                         + "' (expected path, num_samples, warm_start)");
+        }
+        for (const char* key : {"path", "num_samples", "warm_start"})
+            if (!p[key])
+                throw std::runtime_error("Task '" + task_name + "': policy needs '" + key + "'");
+
+        cfg.policy.path        = repo_path(p["path"].as<std::string>());
+        cfg.policy.num_samples = p["num_samples"].as<int>();
+        cfg.policy.warm_start  = p["warm_start"].as<double>();
+
+        if (cfg.policy.num_samples < 1)
+            throw std::runtime_error("Field 'policy.num_samples': expected at least 1, got "
+                                     + std::to_string(cfg.policy.num_samples));
+        if (!(cfg.policy.warm_start >= 0.0 && cfg.policy.warm_start <= 1.0))
+            throw std::runtime_error("Field 'policy.warm_start': expected a value in [0, 1], got "
+                                     + std::to_string(cfg.policy.warm_start));
+        if (cfg.sample_type != "cubic")
+            throw std::runtime_error("Task '" + task_name + "': policy needs sample_type cubic "
+                                     "(it outputs the plan's knots), got '" + cfg.sample_type + "'");
+    }
+
+    if (cfg.n_samples < 0 || cfg.n_samples + cfg.policy.num_samples < 1)
+        throw std::runtime_error("Task '" + task_name + "': n_samples (" + std::to_string(cfg.n_samples)
+                                 + ") plus policy.num_samples (" + std::to_string(cfg.policy.num_samples)
+                                 + ") must be at least 1");
+
     return cfg;
 }

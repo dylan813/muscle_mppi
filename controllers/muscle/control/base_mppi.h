@@ -14,22 +14,26 @@ public:
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
-    // Fills actions_[s][t][m] with this iteration's sampled activation
-    // sequences, already clamped to [0, 1], for both the rollouts and the
-    // weighted-average update (as BaseMPPIPD and RTWholeBodyMPPI's
+    // Fills actions_[s][t][m], s < n_samples, with this iteration's sampled
+    // activation sequences, already clamped to [0, 1], for both the rollouts
+    // and the weighted-average update (as BaseMPPIPD and RTWholeBodyMPPI's
     // perturb_action() do; see sample_actions_cubic()).
     void sample_actions();
     void sample_actions_cubic();
     void set_mj_state(mjData* d, const RobotState& state);
 
+    // Samples per update: MPPI's n_samples, then the policy's num_samples
+    // (task_.policy), as gpc's PolicyAugmentedController appends them.
+    int total_samples() const { return task_.n_samples + task_.policy.num_samples; }
+
     TaskConfig task_;
 
     mjModel*             model_ = nullptr;
-    std::vector<mjData*> data_;        // [n_samples + 1]: rollout slots + prediction
+    std::vector<mjData*> data_;        // [total_samples() + 1]: rollout slots + prediction
 
     std::vector<double> trajectory_;
-    std::vector<double> actions_;
-    std::vector<double> costs_;
+    std::vector<double> actions_;      // [total_samples() × horizon × NUM_MUSCLES]
+    std::vector<double> costs_;        // [total_samples()]
 
     // Knot timesteps (0..horizon-1) used by sample_actions_cubic() when
     // task_.sample_type == "cubic". Built once in the constructor.

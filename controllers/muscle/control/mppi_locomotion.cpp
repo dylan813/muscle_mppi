@@ -1,5 +1,6 @@
 #include "mppi_locomotion.h"
 #include "activation_gait.h"
+#include "flow_policy.h"
 #include "../../common/control_utils.h"
 #include "../../common/harness.h"   // settle_standing() for the warm start
 
@@ -8,6 +9,7 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 
@@ -117,7 +119,12 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
             model_->actuator_ctrllimited[j] = 0;
         }
     }
+
+    if (!task_.policy.path.empty())
+        policy_ = std::make_unique<FlowPolicy>(task_.policy.path, task_.horizon, knot_x_);
 }
+
+MPPILocomotion::~MPPILocomotion() = default;
 
 void MPPILocomotion::apply_phase_noise()
 {
@@ -286,14 +293,14 @@ CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES
 
 CostTerms MPPILocomotion::executed_cost(const RobotState& state)
 {
-    mjData* d = data_[task_.n_samples];
+    mjData* d = data_[total_samples()];
     set_mj_state(d, state);
     return step_cost(d, solve_gait_ref_.data());
 }
 
 CostTerms MPPILocomotion::plan_cost()
 {
-    mjData* d = data_[task_.n_samples];
+    mjData* d = data_[total_samples()];
     set_mj_state(d, solve_state_);
 
     double activation[NUM_MUSCLES];
@@ -310,13 +317,42 @@ CostTerms MPPILocomotion::plan_cost()
 
 void MPPILocomotion::observation(double y[OBS_DIM])
 {
-    mjData* d = data_[task_.n_samples];
+    mjData* d = data_[total_samples()];
     set_mj_state(d, solve_state_);
     refresh_derived(d);
 
     double com[3], com_vel_body[3];
     base_com_state(d, com, com_vel_body);
     build_observation(solve_state_, com, solve_act_, command().goal_pos, y);
+}
+
+// ============================================================================
+// Policy samples
+// ============================================================================
+
+void MPPILocomotion::sample_policy()
+{
+    const int K      = task_.policy.num_samples;
+    const int stride = task_.horizon * NUM_MUSCLES;
+
+    double y[OBS_DIM];
+    observation(y);
+
+    std::vector<double> prev(K * stride), noise(K * task_.n_knots * NUM_MUSCLES);
+    for (int k = 0; k < K; ++k) std::copy(trajectory_.begin(), trajectory_.end(), prev.begin() + k * stride);
+    for (double& v : noise) v = normal_(rng_);
+
+    // Clamped as every sample is (gpc: hydrax clips all samples, policy's included).
+    double* plans = &actions_[task_.n_samples * stride];
+    policy_->sample(y, K, prev.data(), noise.data(), task_.policy.warm_start, plans);
+    for (int i = 0; i < K * stride; ++i) plans[i] = std::clamp(plans[i], 0.0, 1.0);
+}
+
+// Lowest of costs[begin, end); NaN for an empty range.
+static double lowest(const std::vector<double>& costs, int begin, int end)
+{
+    if (begin == end) return std::numeric_limits<double>::quiet_NaN();
+    return *std::min_element(costs.begin() + begin, costs.begin() + end);
 }
 
 // ============================================================================
@@ -353,12 +389,16 @@ void MPPILocomotion::update(const RobotState& state)
     shift_trajectory(trajectory_, task_.horizon, NUM_MUSCLES);
 
     sample_actions();
+    if (policy_) sample_policy();
 
+    // MPPI's and the policy's samples alike, as gpc's PolicyAugmentedController
+    // rolls out and weighs them together.
+    const int n = total_samples();
     #pragma omp parallel for schedule(dynamic)
-    for (int s = 0; s < task_.n_samples; ++s)
+    for (int s = 0; s < n; ++s)
         costs_[s] = rollout(s, state);
 
-    // Softmin weights (normalised); cmin and ESS are diagnostics only.
+    // Softmin weights (normalised); cmin, ESS and the group minima are diagnostics only.
     std::vector<double> weights;
     const double cmin = softmin_weights(costs_, task_.lambda, weights);
 
@@ -366,10 +406,12 @@ void MPPILocomotion::update(const RobotState& state)
     for (double w : weights) w_sq += w * w;
     sample_min_ = cmin;
     ess_        = 1.0 / w_sq;
+    mppi_min_   = lowest(costs_, 0, task_.n_samples);
+    policy_min_ = lowest(costs_, task_.n_samples, n);
 
-    // Weighted average update. actions_ is already clamped (sample_actions()).
+    // Weighted average update. actions_ is already clamped (sample_actions(), sample_policy()).
     std::vector<double> new_traj(stride, 0.0);
-    for (int s = 0; s < task_.n_samples; ++s) {
+    for (int s = 0; s < n; ++s) {
         const double w = weights[s];
         for (int idx = 0; idx < stride; ++idx)
             new_traj[idx] += w * actions_[s * stride + idx];

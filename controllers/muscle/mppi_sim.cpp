@@ -158,7 +158,7 @@ int main(int argc, char** argv)
         for (const char* prefix : {"cost_", "plan_"})
             for (const char* term : {"pos", "orient", "vel", "ang_vel", "gait"})
                 csv << "," << prefix << term;
-        csv << ",sample_min,ess";
+        csv << ",sample_min,ess,mppi_min,policy_min";
     };
     spec.extra_row = [&dataset, &dataset_prefix](std::ostream& csv, MPPILocomotion& mppi,
                                                  const RobotState& state) {
@@ -177,7 +177,7 @@ int main(int argc, char** argv)
 
         for (const CostTerms& c : {mppi.executed_cost(state), mppi.plan_cost()})
             csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;
-        csv << "," << mppi.sample_min() << "," << mppi.ess();
+        csv << "," << mppi.sample_min() << "," << mppi.ess() << "," << mppi.mppi_min() << "," << mppi.policy_min();
 
         if (dataset_prefix.empty()) return;
         if (!dataset) {
