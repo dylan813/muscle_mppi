@@ -149,7 +149,7 @@ private:
     void base_com_state(const mjData* d, double com_pos[3], double com_vel_body[3]) const;
 
     // Write the active phase's noise_sigma_act override (or the YAML baseline,
-    // if it has none) into task_.noise_sigma_act, which sample_noise() reads.
+    // if it has none) into task_.noise_sigma_act, which sample_actions() reads.
     void apply_phase_noise();
 
     MuscleParams   muscle_;

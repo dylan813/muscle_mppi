@@ -14,8 +14,12 @@ public:
 protected:
     virtual double rollout(int s, const RobotState& state) = 0;
 
-    void sample_noise();
-    void sample_noise_cubic();
+    // Fills actions_[s][t][m] with this iteration's sampled activation
+    // sequences, already clamped to [0, 1], for both the rollouts and the
+    // weighted-average update (as BaseMPPIPD and RTWholeBodyMPPI's
+    // perturb_action() do; see sample_actions_cubic()).
+    void sample_actions();
+    void sample_actions_cubic();
     void set_mj_state(mjData* d, const RobotState& state);
 
     TaskConfig task_;
@@ -24,10 +28,10 @@ protected:
     std::vector<mjData*> data_;        // [n_samples + 1]: rollout slots + prediction
 
     std::vector<double> trajectory_;
-    std::vector<double> noise_;
+    std::vector<double> actions_;
     std::vector<double> costs_;
 
-    // Knot timesteps (0..horizon-1) used by sample_noise_cubic() when
+    // Knot timesteps (0..horizon-1) used by sample_actions_cubic() when
     // task_.sample_type == "cubic". Built once in the constructor.
     std::vector<double> knot_x_;
 

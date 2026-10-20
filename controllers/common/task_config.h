@@ -149,17 +149,17 @@ struct TaskConfigBase {
     // OpenMP runtime default in place (typically all available cores).
     int          num_threads  = 0;
 
-    // Noise sampling. "normal": iid Gaussian per timestep (default).
-    // "cubic": draw n_knots iid Gaussians spread evenly across the horizon and
-    // interpolate between them with a not-a-knot cubic spline (natural when
-    // n_knots is 3), matching RTWholeBodyMPPI's spline-parameterized sampling
-    // (scipy CubicSpline's default) — smoother, lower-dimensional search.
+    // Sampling around the plan. "normal": plan + iid Gaussian per timestep (default).
+    // "cubic": a not-a-knot cubic spline (natural when n_knots is 3; scipy
+    // CubicSpline's default) through the plan's values at n_knots timesteps
+    // spread evenly across the horizon, each plus an iid Gaussian, as
+    // RTWholeBodyMPPI's perturb_action() samples — smoother, lower-dimensional search.
     std::string  sample_type  = "normal";
     int          n_knots      = 4;
 
     // Per-joint exploration noise sigma, in the variant's action units.
     // Muscle: activation — both muscles of each antagonistic pair use this
-    // joint's sigma, each with its own independent draw (BaseMPPI::sample_noise()).
+    // joint's sigma, each with its own independent draw (BaseMPPI::sample_actions()).
     // PD: desired joint position in radians (BaseMPPIPD::sample_actions()).
     double noise_sigma_act[NUM_JOINTS]   = {};
 

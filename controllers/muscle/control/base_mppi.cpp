@@ -144,7 +144,7 @@ BaseMPPI::BaseMPPI(const TaskConfig& task)
         model_->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j];
 
     trajectory_.assign(task_.horizon * NUM_MUSCLES, 0.0);
-    noise_.assign(task_.n_samples * task_.horizon * NUM_MUSCLES, 0.0);
+    actions_.assign(task_.n_samples * task_.horizon * NUM_MUSCLES, 0.0);
     costs_.resize(task_.n_samples);
 
     if (task_.sample_type == "cubic") {
@@ -165,9 +165,9 @@ BaseMPPI::~BaseMPPI() {
     mj_deleteModel(model_);
 }
 
-void BaseMPPI::sample_noise() {
+void BaseMPPI::sample_actions() {
     if (task_.sample_type == "cubic") {
-        sample_noise_cubic();
+        sample_actions_cubic();
         return;
     }
 
@@ -177,14 +177,24 @@ void BaseMPPI::sample_noise() {
         for (int ti = 0; ti < H; ++ti) {
             for (int j = 0; j < NUM_JOINTS; ++j) {
                 const double sigma = task_.noise_sigma_act[j];
-                const int base = s * H * NUM_MUSCLES + ti * NUM_MUSCLES + 2 * j;
-                noise_[base]     = sigma * normal_(rng_);
-                noise_[base + 1] = sigma * normal_(rng_);
+                for (int side = 0; side < 2; ++side) {
+                    const int idx = s * H * NUM_MUSCLES + ti * NUM_MUSCLES + 2 * j + side;
+                    const double v = trajectory_[ti * NUM_MUSCLES + 2 * j + side] + sigma * normal_(rng_);
+                    actions_[idx] = std::clamp(v, 0.0, 1.0);
+                }
             }
         }
 }
 
-void BaseMPPI::sample_noise_cubic() {
+// Mirrors RTWholeBodyMPPI's perturb_action() cubic branch (base_controller.py),
+// as BaseMPPIPD::sample_actions_cubic() does: the spline is fit through
+// trajectory_[knot] + noise at just n_knots points, then evaluated over the
+// whole horizon. So each iteration re-projects the plan itself onto the
+// n_knots-point cubic, not just the noise, and the plan is always a cubic
+// through its knots (apart from clamping) — the plans the learned policy
+// (learning/) outputs. Splining only the noise and adding it to the raw
+// trajectory_ lets the plan build up detail between knots across iterations.
+void BaseMPPI::sample_actions_cubic() {
     const int H = task_.horizon;
     const int K = task_.n_knots;
 
@@ -196,10 +206,13 @@ void BaseMPPI::sample_noise_cubic() {
             const double sigma = task_.noise_sigma_act[j];
             for (int side = 0; side < 2; ++side) {
                 const int m = 2 * j + side;
-                for (int k = 0; k < K; ++k) knot_y[k] = sigma * normal_(rng_);
+                for (int k = 0; k < K; ++k) {
+                    const int t_idx = static_cast<int>(knot_x_[k]);
+                    knot_y[k] = trajectory_[t_idx * NUM_MUSCLES + m] + sigma * normal_(rng_);
+                }
                 not_a_knot_cubic_spline(knot_x_, knot_y, yt.data(), H);
                 for (int t = 0; t < H; ++t)
-                    noise_[s * H * NUM_MUSCLES + t * NUM_MUSCLES + m] = yt[t];
+                    actions_[s * H * NUM_MUSCLES + t * NUM_MUSCLES + m] = std::clamp(yt[t], 0.0, 1.0);
             }
         }
     }

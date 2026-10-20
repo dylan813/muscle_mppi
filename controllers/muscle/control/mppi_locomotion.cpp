@@ -48,9 +48,9 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     muscle_ = task_.muscle;
     solve_gait_ref_.assign(task_.horizon * NUM_MUSCLES, 0.0);
 
-    // BaseMPPI already initializes trajectory_, noise_, costs_ to the correct
-    // sizes (horizon × NUM_MUSCLES). Activations are clamped to [0, 1] directly
-    // in rollout() and update().
+    // BaseMPPI already initializes trajectory_, actions_, costs_ to the correct
+    // sizes (horizon × NUM_MUSCLES). Activations are clamped to [0, 1] in
+    // sample_actions() and update().
 
     base_bid_ = find_base_body(model_);
 
@@ -148,14 +148,7 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
     double total_cost = 0.0;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        double act_cmd[NUM_MUSCLES];
-        for (int m = 0; m < NUM_MUSCLES; ++m) {
-            double noisy = trajectory_[t * NUM_MUSCLES + m]
-                         + noise_[s * stride + t * NUM_MUSCLES + m];
-            act_cmd[m] = std::clamp(noisy, 0.0, 1.0);
-        }
-
-        step_model(d, act_cmd, activation, motor);
+        step_model(d, &actions_[s * stride + t * NUM_MUSCLES], activation, motor);
 
         double gait_ref[NUM_MUSCLES] = {};
         if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref);
@@ -359,7 +352,7 @@ void MPPILocomotion::update(const RobotState& state)
     const int stride = task_.horizon * NUM_MUSCLES;
     shift_trajectory(trajectory_, task_.horizon, NUM_MUSCLES);
 
-    sample_noise();
+    sample_actions();
 
     #pragma omp parallel for schedule(dynamic)
     for (int s = 0; s < task_.n_samples; ++s)
@@ -374,16 +367,12 @@ void MPPILocomotion::update(const RobotState& state)
     sample_min_ = cmin;
     ess_        = 1.0 / w_sq;
 
-    // Weighted average update.
+    // Weighted average update. actions_ is already clamped (sample_actions()).
     std::vector<double> new_traj(stride, 0.0);
     for (int s = 0; s < task_.n_samples; ++s) {
         const double w = weights[s];
-        for (int t = 0; t < task_.horizon; ++t)
-            for (int m = 0; m < NUM_MUSCLES; ++m) {
-                const int idx = t * NUM_MUSCLES + m;
-                new_traj[idx] += w * std::clamp(
-                    trajectory_[idx] + noise_[s * stride + idx], 0.0, 1.0);
-            }
+        for (int idx = 0; idx < stride; ++idx)
+            new_traj[idx] += w * actions_[s * stride + idx];
     }
     for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
     trajectory_ = std::move(new_traj);

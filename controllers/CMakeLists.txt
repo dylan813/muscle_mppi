@@ -84,6 +84,15 @@ add_executable(test_mppi_labels
 target_link_libraries(test_mppi_labels mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)
 add_test(NAME mppi_labels COMMAND test_mppi_labels)
 
+add_executable(test_sampling
+    tests/test_sampling.cpp
+    muscle/control/base_mppi.cpp
+    muscle/utils/tasks.cpp
+    common/task_config.cpp
+)
+target_link_libraries(test_sampling mujoco yaml-cpp OpenMP::OpenMP_CXX)
+add_test(NAME sampling COMMAND test_sampling)
+
 # Not a CTest test: it needs a policy file, which learning/tests/test_flow_policy.py
 # exports and runs it on.
 add_executable(test_flow_policy

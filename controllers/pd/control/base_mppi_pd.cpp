@@ -224,10 +224,6 @@ void BaseMPPIPD::sample_actions() {
 // values per joint survive into each rollout batch. Splining the noise alone
 // and adding it to the raw, unsplined trajectory_ drops that regularization
 // and lets trajectory_ accumulate per-timestep artifacts across iterations.
-//
-// NOTE: the muscle variant's sample_noise_cubic() (muscle/control/base_mppi.cpp)
-// still does the noise-only form, so the two explore differently; they must
-// agree before a controlled comparison.
 void BaseMPPIPD::sample_actions_cubic() {
     const int H = task_.horizon;
     const int K = task_.n_knots;
