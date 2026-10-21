@@ -9,6 +9,9 @@ study's representative rollouts (select_representatives.py).
       passive_only
   torque_bandwidth_FR_calf.png
       a panel per motor bandwidth (inf to 1 Hz), muscle, pd_act and pd overlaid
+  torque_bandwidth_zoh_FR_calf.png
+      the same for the zero-order-hold sweep: a panel per motor update rate
+      (500 to 25 Hz)
 
 Joint: the knee is where the breakdown conditions differ most (range of
 condition-mean |tau| 4.0-4.3 N.m, against at most 1.7 for any thigh), and the
@@ -47,7 +50,7 @@ import os
 
 import pandas as pd
 
-from plot_ablation_bars import FAMILY_COLOR, bandwidth_heading
+from plot_ablation_bars import FAMILY_COLOR, ZOH_RATES, bandwidth_heading, hold_heading
 from plot_box_height import JOINT_LABEL, STYLE
 from plot_condition_torque import BW_BANDWIDTHS, BW_CONTROLLERS, DISPLAY_NAME
 from plot_leg_muscles import JOINT_NAMES, LEG_OFFSET, _MODEL_BASE, model_joint_info, plot_joints
@@ -62,8 +65,15 @@ LEG, JOINT = SELECT_LEG, SELECT_JOINT   # the joint the representatives are pick
 J = LEG_OFFSET[LEG] + JOINT_NAMES.index(JOINT)
 
 FIG_W = 16.0     # inches: ~0.8 in per second of a 20 s rollout
-PANEL_H = {"breakdown": 1.5, "bandwidth": 2.0}   # one trace, or three overlaid
+PANEL_H = {"breakdown": 1.5, "bandwidth": 2.0, "bandwidth_zoh": 2.0}   # one trace, or three overlaid
 NEAR_TIE = 10    # trials
+
+# Bandwidth sweeps: each one's motor rates (folder suffixes, fastest first) and
+# the panel heading for a rate.
+SWEEPS = {
+    "bandwidth":     (BW_BANDWIDTHS, bandwidth_heading),
+    "bandwidth_zoh": (ZOH_RATES, hold_heading),
+}
 
 BREAKDOWN_GROUPS = {
     "act_dyn_hill": ["full", "no_actdyn", "no_hill", "no_actdyn_no_hill"],
@@ -123,30 +133,32 @@ def breakdown_figures():
         save(panels, "breakdown", f"torque_breakdown_{group}_{LEG}_{JOINT}")
 
 
-def bandwidth_figure():
-    reps = pd.read_csv(os.path.join(TRIALS, "bandwidth", "videos", "representatives.csv"))
-    print("bandwidth:")
+def bandwidth_figure(study):
+    rates, heading = SWEEPS[study]
+    reps = pd.read_csv(os.path.join(TRIALS, study, "videos", "representatives.csv"))
+    print(f"{study}:")
     panels = []
-    for band in BW_BANDWIDTHS:
+    for band in rates:
         series, outcomes = [], []
         for controller in BW_CONTROLLERS:
             row = most_common(reps, f"{controller}_{band}")
-            t, tau, limit = knee_trace("bandwidth", row)
+            t, tau, limit = knee_trace(study, row)
             # Labelled by controller alone, the same in every panel, so the
             # legend (taken from the first panel) names all of them.
             series.append((t, tau, controller, CONTROLLER_COLOUR[controller],
                            CONTROLLER_LINESTYLE[controller]))
             outcomes.append(f"{controller}: {row.outcome}")
         panels.append({"name": JOINT_LABEL[JOINT], "leg": LEG, "limit": limit,
-                       "note": "\n".join([bandwidth_heading(band)] + outcomes),
+                       "note": "\n".join([heading(band)] + outcomes),
                        "series": series})
-    save(panels, "bandwidth", f"torque_bandwidth_{LEG}_{JOINT}")
+    save(panels, study, f"torque_{study}_{LEG}_{JOINT}")
 
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     breakdown_figures()
-    bandwidth_figure()
+    for study in SWEEPS:
+        bandwidth_figure(study)
 
 
 if __name__ == "__main__":

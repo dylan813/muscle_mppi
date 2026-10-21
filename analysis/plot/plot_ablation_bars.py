@@ -12,6 +12,9 @@ Studies, each on an x axis split into headed sections:
     bandwidth   run_bandwidth.sh: motor bandwidth inf | 20 | 8 | 3.2 | 1 Hz,
                 with muscle, pd_act and pd in each section. Each heading
                 gives the cutoff f and the motor's time constant 1/(2*pi*f).
+    bandwidth_zoh   run_bandwidth.sh --lag zero_order_hold: motor update rate
+                500 | 250 | 100 | 50 | 25 Hz, same controllers. Each heading
+                gives the rate f and how long each command is held, 1/f.
 
 Outcome comes from each trial's console.log through
 select_representatives.parse_outcome(): success, fall (including falls
@@ -87,6 +90,16 @@ def bandwidth_heading(band):
     return f"{cutoff} Hz ({1000.0 / (2 * math.pi * f):.3g} ms)"
 
 
+# Zero-order-hold variant of the bandwidth sweep: motor update rates, fastest first.
+ZOH_RATES = ["500Hz", "250Hz", "100Hz", "50Hz", "25Hz"]
+
+
+def hold_heading(rate):
+    """'100 Hz (10 ms)': motor update rate f and how long each command is held, 1/f."""
+    f = float(rate.removesuffix("Hz"))
+    return f"{f:g} Hz ({1000.0 / f:g} ms)"
+
+
 # Each study: headed sections of conditions, in x order. A condition names its
 # folder, its bar colour family and its tick label. Sections are separated by a
 # divider rather than coloured, which would add a second encoding.
@@ -104,12 +117,17 @@ STUDIES = {
          [dict(cond=f"{c}_{b}", family=c, label=c) for c in BW_CONTROLLERS])
         for b in BW_BANDWIDTHS
     ],
+    "bandwidth_zoh": [
+        (hold_heading(r),
+         [dict(cond=f"{c}_{r}", family=c, label=c) for c in BW_CONTROLLERS])
+        for r in ZOH_RATES
+    ],
 }
 
 # Torque y-axis headroom above the tallest bar (mean + SD). The breakdown's
-# legend needs room above its bars; the bandwidth's tallest bars are at 1 Hz,
-# on the right, clear of its legend at upper left.
-TORQUE_HEADROOM = {"breakdown": 1.34, "bandwidth": 1.05}
+# legend needs room above its bars; the bandwidth sweeps' tallest bars are at
+# their slowest rate, on the right, clear of the legend at upper left.
+TORQUE_HEADROOM = {"breakdown": 1.34, "bandwidth": 1.05, "bandwidth_zoh": 1.05}
 
 # Torque bars: BAR_COLOR's muscle and pd ramps, plus pd_act's (see docstring).
 FAMILY_COLOR = {**BAR_COLOR,
