@@ -5,9 +5,14 @@
   fitting       fit_policy, fit_round (gpc's jit_fit), the optimizer
   checkpoints   gpc's rule
   logging       to wandb, as analysis/optimize/cmaes_walk.py does
-  command       gpc's train(); for now one round, fitted to existing episodes:
+  commands      train: gpc's train(), rounds of mppi_sim episodes with the
+                current policy, each round fitted (needs controllers/build/mppi_sim):
 
-    python -m learning.training --data analysis/data/mppi_sim/mppi_sim --out analysis/log/gpc/<run>
+                  python -m learning.training train --out analysis/log/gpc/<run>
+
+                fit: one round, fitted to existing episodes (mppi_sim --dataset):
+
+                  python -m learning.training fit --data analysis/data/mppi_sim/mppi_sim --out analysis/log/gpc/<run>
 
 Settings come from --config (default learning/config.yaml). MPPI's plans are
 converted to the task's knots (mppi.KnotSpline). The policy is saved to
@@ -25,7 +30,8 @@ import wandb
 import yaml
 from torch import nn
 
-from learning.mppi import KnotSpline, load_round, repo_path
+from learning.mppi import (FELL, GOAL, KnotSpline, delete_dataset_files, load_round, repo_path,
+                           round_costs, run_episodes, write_task_yaml)
 from learning.policy import ModelConfig, Policy, export_onnx, to_network
 
 # ── Settings (config.yaml; see it for each value's source) ───────────────────
@@ -47,6 +53,17 @@ class FitConfig:
 
 
 @dataclass
+class LoopConfig:
+    num_rounds: int
+    episodes_per_round: int
+    parallel_episodes: int
+    threads_per_episode: int
+    policy_samples: int
+    warm_start: float
+    gifs_per_round: int
+
+
+@dataclass
 class WandbConfig:
     project: str
     run_name: str | None
@@ -60,6 +77,7 @@ class Config:
     model: ModelConfig
     fit: FitConfig
     checkpoint_every: int
+    loop: LoopConfig
     wandb: WandbConfig
 
 
@@ -190,40 +208,131 @@ class RunLogger:
         self.run.finish()
 
 
-# ── Command (gpc's train()) ──────────────────────────────────────────────────
+# ── Commands (gpc's train()) ─────────────────────────────────────────────────
+
+@dataclass
+class Session:
+    """What both commands train with: the policy, its optimizer (kept across
+    rounds, as gpc keeps its nnx.Optimizer), the task's knots and the logger."""
+    policy: Policy
+    optimizer: torch.optim.Optimizer
+    spline: KnotSpline
+    logger: RunLogger
+
+
+def set_up(cfg: Config, out: Path, logged: dict) -> Session:
+    """gpc's train() setup, seeded. logged: what to show in wandb besides cfg."""
+    torch.manual_seed(cfg.seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    policy = Policy(cfg.model).to(device)
+    print(f"training on {device}")
+    return Session(policy, make_optimizer(policy, cfg.fit.learning_rate),
+                   KnotSpline.from_task(cfg.mppi_task.name, repo_path(cfg.mppi_task.tasks_yaml)),
+                   RunLogger(cfg.wandb, {**asdict(cfg), **logged}, out))
+
+
+def finish(session: Session, cfg: Config, out: Path) -> None:
+    session.policy.save(out / "policy.pt")
+    export_onnx(session.policy, session.spline, out / "policy.onnx", cfg.mppi_task.name)
+    print(f"saved {out / 'policy.pt'} and {out / 'policy.onnx'}")
+    session.logger.finish()
+
+
+def train_command(cfg: Config, out: Path) -> None:
+    """gpc's train() (gpc/training.py:436-475). Each round collects
+    episodes_per_round mppi_sim episodes with the current policy's samples
+    next to MPPI's (round 0: the untrained network), fits the policy to that
+    round's data only, checkpoints by gpc's rule, and logs gpc's metrics plus
+    how many episodes fell or reached the goal and how many rows they logged.
+
+    <out>/round_NNN/ keeps the policy.onnx and tasks.yaml the round collected
+    with, and each episode's CSV, console log and (the first gifs_per_round)
+    GIF. The episodes' --dataset files are deleted once fitted.
+    """
+    if out.exists():
+        raise SystemExit(f"{out} exists: give a new --out, so runs don't mix")
+    loop, task = cfg.loop, cfg.mppi_task.name
+    session = set_up(cfg, out, {})
+    print(f"{loop.num_rounds} rounds of {loop.episodes_per_round} {task} episodes, "
+          f"{loop.parallel_episodes} at a time with {loop.threads_per_episode} threads each, "
+          f"{loop.policy_samples} policy samples per update next to MPPI's")
+
+    for i in range(loop.num_rounds):
+        round_dir = out / f"round_{i:03d}"
+        round_dir.mkdir()
+        policy_path = round_dir / "policy.onnx"
+        export_onnx(session.policy, session.spline, policy_path, task)
+        tasks_yaml = round_dir / "tasks.yaml"
+        write_task_yaml(tasks_yaml, task, repo_path(cfg.mppi_task.tasks_yaml),
+                        {"path": str(policy_path.resolve()), "num_samples": loop.policy_samples,
+                         "warm_start": loop.warm_start},
+                        loop.threads_per_episode)
+
+        # Collect (gpc: jit_simulate)
+        prefixes = [round_dir / f"episode_{j:03d}" for j in range(loop.episodes_per_round)]
+        start = time.time()
+        outcomes = run_episodes(task, tasks_yaml, prefixes, loop.parallel_episodes, loop.gifs_per_round)
+        sim_time = time.time() - start
+        costs = round_costs(prefixes)
+
+        # Fit to this round's data only (gpc: jit_fit)
+        obs, plans, _ = load_round(prefixes)
+        start = time.time()
+        losses = fit_round(session.policy, session.optimizer, obs, session.spline.from_plan(plans), cfg.fit)
+        fit_time = time.time() - start
+        delete_dataset_files(prefixes)
+
+        if checkpoint_due(i, cfg.checkpoint_every):
+            session.policy.save(out / f"policy_ckpt_{i}.pt")   # gpc: policy_ckpt_{i}.pkl
+
+        session.logger.log_round(i, {
+            "sim/policy_cost":      costs["policy_cost"],
+            "sim/mppi_cost":        costs["mppi_cost"],         # gpc: sim/spc_cost
+            "sim/policy_best_frac": costs["policy_best_frac"],
+            "sim/time":             sim_time,
+            "sim/fell":             outcomes.count(FELL),
+            "sim/reached_goal":     outcomes.count(GOAL),
+            "sim/rows":             len(obs),
+            "fit/loss":             losses[-1].item(),
+            "fit/time":             fit_time,
+        })
+
+    finish(session, cfg, out)
+
+
+def fit_command(cfg: Config, data: list[str], out: Path) -> None:
+    """One round, fitted to existing episodes (mppi_sim --dataset prefixes)."""
+    session = set_up(cfg, out, {"data": data})
+    obs, plans, skipped = load_round(data)
+    if skipped:
+        print(f"no data for (fell before logging): {skipped}")
+    print(f"round 0: {len(obs)} rows from {len(data) - len(skipped)} episode(s), "
+          f"{session.spline.horizon}-step plans as {session.spline.n_knots} knots")
+
+    start = time.time()
+    losses = fit_round(session.policy, session.optimizer, obs, session.spline.from_plan(plans), cfg.fit)
+    session.logger.log_round(0, {"fit/loss": losses[-1].item(), "fit/time": time.time() - start})
+    finish(session, cfg, out)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the flow-matching policy (learning/).")
-    parser.add_argument("--config", type=Path, default=DEFAULT_PATH, help="settings YAML")
-    parser.add_argument("--data", nargs="+", required=True,
-                        help="episode prefixes, as given to mppi_sim --dataset")
-    parser.add_argument("--out", type=Path, required=True,
-                        help="output folder for the policy and wandb's files")
+    commands = parser.add_subparsers(dest="command", required=True)
+    train = commands.add_parser("train", help="gpc's training loop: rounds of mppi_sim episodes, each fitted")
+    fit = commands.add_parser("fit", help="fit one round to existing episodes")
+    fit.add_argument("--data", nargs="+", required=True,
+                     help="episode prefixes, as given to mppi_sim --dataset")
+    for command in (train, fit):
+        command.add_argument("--config", type=Path, default=DEFAULT_PATH, help="settings YAML")
+        command.add_argument("--out", type=Path, required=True,
+                             help="output folder for the policy and wandb's files")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    torch.manual_seed(cfg.seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    spline = KnotSpline.from_task(cfg.mppi_task.name, repo_path(cfg.mppi_task.tasks_yaml))
-
-    policy = Policy(cfg.model).to(device)
-    optimizer = make_optimizer(policy, cfg.fit.learning_rate)
-    logger = RunLogger(cfg.wandb, {**asdict(cfg), "data": args.data}, args.out)
-
-    obs, plans, skipped = load_round(args.data)
-    if skipped:
-        print(f"no data for (fell before logging): {skipped}")
-    print(f"round 0: {len(obs)} rows from {len(args.data) - len(skipped)} episode(s), "
-          f"{spline.horizon}-step plans as {spline.n_knots} knots, on {device}")
-
-    start = time.time()
-    losses = fit_round(policy, optimizer, obs, spline.from_plan(plans), cfg.fit)
-    logger.log_round(0, {"fit/loss": losses[-1].item(), "fit/time": time.time() - start})
-
-    policy.save(args.out / "policy.pt")
-    export_onnx(policy, spline, args.out / "policy.onnx", cfg.mppi_task.name)
-    print(f"saved {args.out / 'policy.pt'} and {args.out / 'policy.onnx'}")
-    logger.finish()
+    if args.command == "train":
+        train_command(cfg, args.out)
+    else:
+        fit_command(cfg, args.data, args.out)
 
 
 if __name__ == "__main__":

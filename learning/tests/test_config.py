@@ -25,6 +25,10 @@ def test_repo_config_loads():
     assert cfg.fit.learning_rate == 1e-3 and isinstance(cfg.fit.learning_rate, float)
     assert cfg.fit.batch_size == 128 and cfg.fit.num_epochs == 10
     assert cfg.checkpoint_every == 1
+    assert cfg.loop.num_rounds == 50 and cfg.loop.episodes_per_round == 40
+    assert cfg.loop.parallel_episodes * cfg.loop.threads_per_episode == 12
+    assert cfg.loop.policy_samples == 30 and cfg.loop.gifs_per_round == 1
+    assert cfg.loop.warm_start == 0.0 and isinstance(cfg.loop.warm_start, float)
     assert cfg.wandb.project == "muscle-mppi-gpc"
 
 

@@ -1,7 +1,7 @@
 """Training on the stage-3 mppi_sim run (see test_dataset_run.py for how to make
 it): fitting one round with config.yaml's settings lowers the loss, and
-`python -m learning.training` runs end to end and saves a loadable policy and
-ONNX file.
+`python -m learning.training fit` runs end to end and saves a loadable policy
+and ONNX file.
 A smoke test of the pipeline on real data, not a claim about policy quality."""
 
 import subprocess
@@ -45,7 +45,7 @@ def test_train_command_saves_a_loadable_policy(tmp_path):
     config.write_text(yaml.safe_dump(node))
 
     out = tmp_path / "run"
-    result = subprocess.run([sys.executable, "-m", "learning.training", "--config", str(config),
+    result = subprocess.run([sys.executable, "-m", "learning.training", "fit", "--config", str(config),
                              "--data", str(RUN), "--out", str(out)],
                             capture_output=True, text=True, cwd=REPO)
     assert result.returncode == 0, result.stderr

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include <mujoco/mujoco.h>
@@ -113,17 +114,29 @@ inline void shift_trajectory(std::vector<double>& traj, int horizon, int action_
 }
 
 // Softmin sample weights over min-max normalised costs:
-//   w_s = exp(-(c_s - c_min) / (c_max - c_min) / lambda),  normalised to sum to 1.
-// All weights are equal when every cost is the same (range <= 1e-12).
+//   w_s = exp(-(c_s - c_min) / range / lambda),  normalised to sum to 1.
+// c_min is the lowest of all costs; range is c_max - c_min of the first
+// range_count costs (all by default), or of all costs when those span none.
+// The muscle controller passes its own samples' count, so the policy samples
+// after them can't stretch the range: a far worse one gets ~0 weight and
+// leaves MPPI's weights as they were, as hydrax's unnormalised softmax would
+// (gpc), while a better one still wins. All weights are equal when every cost
+// is the same (range <= 1e-12).
 // Fills weights (resized to costs.size()) and returns c_min, which callers
 // log as a diagnostic.
 inline double softmin_weights(const std::vector<double>& costs, double lambda,
-                              std::vector<double>& weights)
+                              std::vector<double>& weights,
+                              int range_count = std::numeric_limits<int>::max())
 {
     const int n = static_cast<int>(costs.size());
-    const double cmin   = *std::min_element(costs.begin(), costs.end());
-    const double cmax   = *std::max_element(costs.begin(), costs.end());
-    const double crange = cmax - cmin;
+    const double cmin = *std::min_element(costs.begin(), costs.end());
+
+    const auto range_of = [&costs](int count) {
+        const auto [lo, hi] = std::minmax_element(costs.begin(), costs.begin() + count);
+        return *hi - *lo;
+    };
+    double crange = range_of(std::clamp(range_count, 1, n));
+    if (crange <= 1e-12) crange = range_of(n);
 
     weights.resize(n);
     double wsum = 0.0;

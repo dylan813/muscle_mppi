@@ -398,9 +398,11 @@ void MPPILocomotion::update(const RobotState& state)
     for (int s = 0; s < n; ++s)
         costs_[s] = rollout(s, state);
 
-    // Softmin weights (normalised); cmin, ESS and the group minima are diagnostics only.
+    // Softmin weights (normalised), scaled by the range of MPPI's own samples
+    // so the policy's can't flatten them (see softmin_weights()); cmin, ESS and
+    // the group minima are diagnostics only.
     std::vector<double> weights;
-    const double cmin = softmin_weights(costs_, task_.lambda, weights);
+    const double cmin = softmin_weights(costs_, task_.lambda, weights, task_.n_samples);
 
     double w_sq = 0.0;
     for (double w : weights) w_sq += w * w;

@@ -5,13 +5,27 @@
 #include <stdexcept>
 #include <utility>
 
+#include <onnxruntime_session_options_config_keys.h>
+
 // The file's input and output names (learning/policy.py: export_onnx).
 static const char* const kInputNames[]  = {"y", "prev_plan", "noise", "warm_start"};
 static const char* const kOutputNames[] = {"plan"};
 
+// One thread, the caller's, without spinning: ONNX Runtime's default pool
+// keeps one thread per core spinning between calls, which competed with the
+// rollouts' OpenMP threads (solves 20× slower in the first training run).
+static Ort::SessionOptions single_thread_options()
+{
+    Ort::SessionOptions options;
+    options.SetIntraOpNumThreads(1);
+    options.SetInterOpNumThreads(1);
+    options.AddConfigEntry(kOrtSessionOptionsConfigAllowIntraOpSpinning, "0");
+    return options;
+}
+
 FlowPolicy::FlowPolicy(const std::string& path, int horizon, const std::vector<double>& knot_steps)
     : horizon_(horizon), n_knots_(static_cast<int>(knot_steps.size())),
-      session_(env_, path.c_str(), Ort::SessionOptions{}),
+      session_(env_, path.c_str(), single_thread_options()),
       memory_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault))
 {
     std::string steps;   // as export_onnx writes them: "0,13,26,39"

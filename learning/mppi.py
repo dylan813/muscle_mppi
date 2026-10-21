@@ -6,12 +6,19 @@ counterpart: its planner runs inside its own JAX program.
   KnotSpline           the knot steps and not_a_knot_cubic_spline() of
                        controllers/muscle/control/base_mppi.cpp
   load_round()         the files mppi_sim --dataset writes (controllers/muscle/mppi_sim.cpp)
+  episodes             running mppi_sim with a policy (gpc's simulate_episode), and
+                       what its runs report
 """
 
+import os
+import subprocess
+import sys
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import yaml
 
@@ -134,9 +141,11 @@ class KnotSpline:
         """A plan's knots: its values at the knot steps, as the controller defines
         a knot spline (and as RTWholeBodyMPPI's perturb_action takes them).
 
-        On the stage-3 run this keeps 85% of the plans' variation along the
-        horizon, and step 0 exactly. A least-squares fit keeps 93% but misses
-        step 0 by about 0.07; it may replace this later.
+        The controller samples cubics through the plan's knots (RTWholeBodyMPPI's
+        form, base_mppi.cpp: sample_actions_cubic()), so its plans are the
+        spline through these knots, apart from where clamped samples were
+        averaged: on the regenerated stage-3 run, within 5e-4 for the median
+        plan and muscle.
         """
         if plans.shape[1] != self.horizon:
             raise ValueError(f"plans have {plans.shape[1]} steps, the task's horizon is {self.horizon}")
@@ -182,3 +191,79 @@ def load_round(prefixes: Sequence[str | Path]) -> tuple[torch.Tensor, torch.Tens
     if not obs:
         raise ValueError(f"no episode data at any of {[str(p) for p in prefixes]}")
     return torch.from_numpy(np.concatenate(obs)), torch.from_numpy(np.concatenate(plans)), skipped
+
+
+# ── Episodes (mppi_sim runs; gpc's simulate_episode) ─────────────────────────
+
+MPPI_SIM = REPO_ROOT / "controllers/build/mppi_sim"
+
+# How an episode ended: mppi_sim stops when the robot falls, when the task's
+# final phase is reached and held, or at the task's sim_duration.
+FELL, GOAL, TIME = "fell", "goal", "time"
+
+# mppi_sim's console lines for the first two (common/harness.h: run_sim),
+# worded stably for run_trials.sh.
+FELL_LINE = "Robot fell at t="
+GOAL_LINE = "Task complete at t="
+
+
+def write_task_yaml(path: Path, task: str, tasks_yaml: Path, policy: dict, threads: int) -> None:
+    """A tasks YAML holding only `task`, as tasks_yaml defines it, with a
+    policy: block (PolicyParams, controllers/muscle/utils/tasks.h: path,
+    num_samples, warm_start) and `threads` OpenMP threads for its rollouts."""
+    node = yaml.safe_load(Path(tasks_yaml).read_text())[task]
+    node["policy"] = policy
+    node["num_threads"] = threads
+    Path(path).write_text(yaml.safe_dump({task: node}, sort_keys=False))
+
+
+def episode_outcome(console: str) -> str:
+    """FELL, GOAL or TIME, from an mppi_sim run's console output."""
+    if FELL_LINE in console:
+        return FELL
+    if GOAL_LINE in console:
+        return GOAL
+    return TIME
+
+
+def run_episodes(task: str, tasks_yaml: Path, prefixes: Sequence[Path], parallel: int,
+                 gifs: int) -> list[str]:
+    """Run mppi_sim once per prefix, `parallel` at a time, and return how each
+    episode ended. Each writes <prefix>.csv, <prefix>_qpos.csv, its --dataset
+    files and its console output to <prefix>.log; the first `gifs` also
+    render <prefix>.gif. GIFs render with this Python ($MUSCLE_MPPI_PYTHON)."""
+    env = {**os.environ, "MUSCLE_MPPI_PYTHON": sys.executable}
+
+    def run(index: int, prefix: Path) -> str:
+        cmd = [str(MPPI_SIM), task, str(tasks_yaml), f"{prefix}.csv", "--dataset", str(prefix)]
+        if index >= gifs:
+            cmd.append("--no-gif")
+        log = Path(f"{prefix}.log")
+        with log.open("w") as out:
+            code = subprocess.run(cmd, stdout=out, stderr=subprocess.STDOUT, env=env).returncode
+        if code != 0:
+            raise RuntimeError(f"mppi_sim exited with {code}; see {log}")
+        return episode_outcome(log.read_text())
+
+    with ThreadPoolExecutor(parallel) as pool:
+        return list(pool.map(run, range(len(prefixes)), prefixes))
+
+
+def round_costs(prefixes: Sequence[Path]) -> dict[str, float]:
+    """gpc's per-round costs (gpc/training.py:365-372), over every logged step of
+    every episode: the mean lowest cost among MPPI's samples and among the
+    policy's (mppi_sim's mppi_min, policy_min columns), and the share of steps
+    where the policy's is lower."""
+    steps = pd.concat([pd.read_csv(f"{prefix}.csv", usecols=["mppi_min", "policy_min"])
+                       for prefix in prefixes])
+    return {"mppi_cost":        steps["mppi_min"].mean(),
+            "policy_cost":      steps["policy_min"].mean(),
+            "policy_best_frac": (steps["policy_min"] < steps["mppi_min"]).mean()}
+
+
+def delete_dataset_files(prefixes: Sequence[Path]) -> None:
+    """Remove the episodes' --dataset files, once fitted (gpc keeps no data
+    between rounds). Their CSVs, logs and GIFs stay."""
+    for prefix in prefixes:
+        for suffix in (OBS_SUFFIX, PLAN_SUFFIX):
+            Path(f"{prefix}{suffix}").unlink(missing_ok=True)

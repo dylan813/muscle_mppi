@@ -20,6 +20,15 @@ fit:                           # gpc's fit_policy (gpc/training.py)
 
 checkpoint_every: 1            # rounds between policy checkpoints (humanoid example: 1)
 
+loop:                          # gpc's train() rounds: collect episodes with mppi_sim, then fit
+  num_rounds: 50               # gpc num_iters (humanoid: 50)
+  episodes_per_round: 40       # gpc num_envs is 128 × 400 steps ≈ 51k rows; ours run ≈ 1,300 steps each
+  parallel_episodes: 2         # mppi_sim processes at once
+  threads_per_episode: 6       # OpenMP threads each (the task's num_threads); 2 × 6 = 12 in all
+  policy_samples: 30           # gpc num_policy_samples: as many as MPPI's n_samples
+  warm_start: 0.0              # gpc trains at 0: policy samples flow from noise
+  gifs_per_round: 1            # episodes rendered to a GIF in the round's folder (gpc num_videos: 2)
+
 wandb:
   project: muscle-mppi-gpc
   run_name: null               # null: wandb picks one

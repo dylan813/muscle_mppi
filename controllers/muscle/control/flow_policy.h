@@ -5,7 +5,8 @@
 // plans from noise, all conditioned on one observation, as gpc's Policy.apply
 // does per sample (gpc/policy.py:56-106). No state is kept between calls: the
 // caller keeps each sample's previous plan and draws the noise, as gpc's
-// caller does.
+// caller does. Runs on the caller's thread alone, leaving the cores to the
+// rollouts.
 //
 // Layouts (H = horizon, K = number of knots, A = NUM_MUSCLES):
 //   y           OBS_DIM raw values (control/observation.h)
