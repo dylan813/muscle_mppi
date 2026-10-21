@@ -11,7 +11,7 @@ study's representative rollouts (select_representatives.py).
       a panel per motor bandwidth (inf to 1 Hz), muscle, pd_act and pd overlaid
   torque_bandwidth_zoh_FR_calf.png
       the same for the zero-order-hold sweep: a panel per motor update rate
-      (500 to 25 Hz)
+      (500 to 50 Hz)
 
 Joint: the knee is where the breakdown conditions differ most (range of
 condition-mean |tau| 4.0-4.3 N.m, against at most 1.7 for any thigh), and the

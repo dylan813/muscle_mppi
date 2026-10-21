@@ -13,8 +13,9 @@ Studies, each on an x axis split into headed sections:
                 with muscle, pd_act and pd in each section. Each heading
                 gives the cutoff f and the motor's time constant 1/(2*pi*f).
     bandwidth_zoh   run_bandwidth.sh --lag zero_order_hold: motor update rate
-                500 | 250 | 100 | 50 | 25 Hz, same controllers. Each heading
-                gives the rate f and how long each command is held, 1/f.
+                500 | 250 | 100 | 50 Hz, same controllers (the 25 Hz runs are
+                left out; see ZOH_RATES). Each heading gives the rate f and how
+                long each command is held, 1/f.
 
 Outcome comes from each trial's console.log through
 select_representatives.parse_outcome(): success, fall (including falls
@@ -90,8 +91,11 @@ def bandwidth_heading(band):
     return f"{cutoff} Hz ({1000.0 / (2 * math.pi * f):.3g} ms)"
 
 
-# Zero-order-hold variant of the bandwidth sweep: motor update rates, fastest first.
-ZOH_RATES = ["500Hz", "250Hz", "100Hz", "50Hz", "25Hz"]
+# Zero-order-hold variant of the bandwidth sweep: motor update rates, fastest
+# first. The sweep also ran 25 Hz (trials still under bandwidth_zoh/); it is left
+# out because every run falls within about a second and its torque swamps the
+# other rates' scales.
+ZOH_RATES = ["500Hz", "250Hz", "100Hz", "50Hz"]
 
 
 def hold_heading(rate):
