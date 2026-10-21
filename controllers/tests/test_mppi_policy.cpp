@@ -7,6 +7,7 @@
 //   u<u>_y.npy            observation(): the y the policy conditioned on
 //   u<u>_plan.npy         plan() after the update
 //   u<u>_costs.npy        sample_min, mppi_min, policy_min
+//   u<u>_weight.npy       policy_weight
 //
 //   test_mppi_policy <tasks_yaml> <out_dir> <updates>
 //
@@ -73,9 +74,11 @@ int main(int argc, char** argv)
             double y[OBS_DIM];
             mppi.observation(y);
             const double costs[] = {mppi.sample_min(), mppi.mppi_min(), mppi.policy_min()};
-            write_npy(prefix + "_y.npy",     {OBS_DIM},  y);
-            write_npy(prefix + "_plan.npy",  plan_shape, mppi.plan().data());
-            write_npy(prefix + "_costs.npy", {3},        costs);
+            const double weight  = mppi.policy_weight();
+            write_npy(prefix + "_y.npy",      {OBS_DIM},  y);
+            write_npy(prefix + "_plan.npy",   plan_shape, mppi.plan().data());
+            write_npy(prefix + "_costs.npy",  {3},        costs);
+            write_npy(prefix + "_weight.npy", {},         &weight);
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());

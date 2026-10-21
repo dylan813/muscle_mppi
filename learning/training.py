@@ -60,6 +60,7 @@ class LoopConfig:
     threads_per_episode: int
     policy_samples: int
     warm_start: float
+    policy_device: str
     gifs_per_round: int
 
 
@@ -265,7 +266,7 @@ def train_command(cfg: Config, out: Path) -> None:
         tasks_yaml = round_dir / "tasks.yaml"
         write_task_yaml(tasks_yaml, task, repo_path(cfg.mppi_task.tasks_yaml),
                         {"path": str(policy_path.resolve()), "num_samples": loop.policy_samples,
-                         "warm_start": loop.warm_start},
+                         "warm_start": loop.warm_start, "device": loop.policy_device},
                         loop.threads_per_episode)
 
         # Collect (gpc: jit_simulate)

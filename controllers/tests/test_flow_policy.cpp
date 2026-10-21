@@ -1,9 +1,10 @@
 // FlowPolicy (muscle/control/flow_policy.h) on a file learning/ exported, with
 // the walk task's plan sizes.
 //
-//   test_flow_policy <policy.onnx>            load only; exits 1 with the error if refused
-//   test_flow_policy <policy.onnx> <out_dir>  also samples each case below and writes its
-//                                             inputs and plans, <case>_<name>.npy, for np.load
+//   test_flow_policy <policy.onnx> <cpu|cuda>            load only; exits 1 with the error if refused
+//   test_flow_policy <policy.onnx> <cpu|cuda> <out_dir>  also samples each case below and writes
+//                                                        its inputs and plans, <case>_<name>.npy,
+//                                                        for np.load
 //
 // learning/tests/test_flow_policy.py runs this on files it exports, and checks
 // the plans against the Python policy.
@@ -72,17 +73,19 @@ static void sample_case(FlowPolicy& policy, const Case& c, const fs::path& dir)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <policy.onnx> [out_dir]\n", argv[0]);
+    const std::string device = argc > 2 ? argv[2] : "";
+    if (device != "cpu" && device != "cuda") {
+        std::fprintf(stderr, "usage: %s <policy.onnx> <cpu|cuda> [out_dir]\n", argv[0]);
         return 2;
     }
 
     try {
-        FlowPolicy policy(argv[1], kHorizon, kKnotSteps);
-        if (argc < 3) return 0;
+        FlowPolicy policy(argv[1], kHorizon, kKnotSteps,
+                          device == "cuda" ? PolicyDevice::Cuda : PolicyDevice::Cpu);
+        if (argc < 4) return 0;
 
-        fs::create_directories(argv[2]);
-        for (const Case& c : kCases) sample_case(policy, c, argv[2]);
+        fs::create_directories(argv[3]);
+        for (const Case& c : kCases) sample_case(policy, c, argv[3]);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
         return 1;

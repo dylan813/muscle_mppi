@@ -1,6 +1,7 @@
 """FlowPolicy (controllers/muscle/control/flow_policy.h), the C++ controller's
-runner of the exported policy: it computes what the Python policy does, and
-refuses a file whose labels don't fit the controller's plans.
+runner of the exported policy: it computes what the Python policy does, on the
+CPU and on the GPU, and refuses a file whose labels don't fit the controller's
+plans.
 
 Runs the C++ test binary on files exported here, so build it first (make in
 controllers/build).
@@ -26,6 +27,13 @@ SPLINE  = KnotSpline(HORIZON, 4)   # the walk task's knots, which the binary loa
 # kCases in controllers/tests/test_flow_policy.cpp.
 CASES = ["n1_warm0", "n1_warm0.7", "n30_warm0", "n30_warm0.7"]
 
+# Where the binary runs the policy (PolicyDevice); cuda needs a GPU. The GPU
+# sums in another order: on the trained pilot policy it differs from the CPU
+# by up to 1.6e-5.
+TOLERANCE = {"cpu": 1e-5, "cuda": 1e-4}
+DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(),
+                                                                reason="no CUDA GPU"))]
+
 pytestmark = pytest.mark.skipif(not BINARY.exists(),
                                 reason=f"{BINARY} not built (make in controllers/build)")
 
@@ -48,24 +56,26 @@ def exported(tmp_path_factory):
     return policy, path
 
 
-@pytest.fixture(scope="module")
-def cpp_run(exported, tmp_path_factory):
-    """The folder the binary wrote each case's inputs and plans to."""
+@pytest.fixture(scope="module", params=DEVICES)
+def cpp_run(exported, tmp_path_factory, request):
+    """The device and the folder the binary wrote each case's inputs and
+    plans to, running the policy there."""
     _, path = exported
     out = tmp_path_factory.mktemp("cpp")
-    result = run(path, out)
+    result = run(path, request.param, out)
     assert result.returncode == 0, result.stderr
-    return out
+    return request.param, out
 
 
 @pytest.mark.parametrize("case", CASES)
 def test_cpp_plans_match_python(exported, cpp_run, case):
     policy, _ = exported
-    y, prev, noise, warm_start, plan = (torch.from_numpy(np.load(cpp_run / f"{case}_{name}.npy"))
+    device, out = cpp_run
+    y, prev, noise, warm_start, plan = (torch.from_numpy(np.load(out / f"{case}_{name}.npy"))
                                         for name in ["y", "prev", "noise", "warm_start", "plan"])
 
     expected = PlanSampler(policy, SPLINE).eval()(y.expand(len(prev), -1), prev, noise, warm_start)
-    np.testing.assert_allclose(plan.numpy(), expected.numpy(), atol=1e-5)
+    np.testing.assert_allclose(plan.numpy(), expected.numpy(), atol=TOLERANCE[device])
 
 
 def relabeled(path: Path, out: Path, key: str, value: str | None) -> Path:
@@ -87,7 +97,7 @@ def relabeled(path: Path, out: Path, key: str, value: str | None) -> Path:
 
 def test_matching_file_loads(exported):
     _, path = exported
-    result = run(path)
+    result = run(path, "cpu")
     assert result.returncode == 0, result.stderr
 
 
@@ -97,7 +107,7 @@ def test_matching_file_loads(exported):
 def test_mislabeled_file_is_refused(exported, tmp_path, key, wrong, change):
     _, path = exported
     value = wrong if change == "wrong" else None
-    result = run(relabeled(path, tmp_path / "relabeled.onnx", key, value))
+    result = run(relabeled(path, tmp_path / "relabeled.onnx", key, value), "cpu")
 
     assert result.returncode == 1
     message = f"label {key} is {wrong}" if change == "wrong" else f"no {key} label"
@@ -107,5 +117,5 @@ def test_mislabeled_file_is_refused(exported, tmp_path, key, wrong, change):
 @pytest.mark.parametrize("value", ["walk_rough", None])
 def test_task_label_is_not_checked(exported, tmp_path, value):
     _, path = exported
-    result = run(relabeled(path, tmp_path / "relabeled.onnx", "task", value))
+    result = run(relabeled(path, tmp_path / "relabeled.onnx", "task", value), "cpu")
     assert result.returncode == 0, result.stderr

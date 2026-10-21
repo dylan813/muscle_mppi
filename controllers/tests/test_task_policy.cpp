@@ -47,6 +47,7 @@ static void add_policy(YAML::Node& walk)
     walk["policy"]["path"]        = "analysis/log/gpc/run/policy.onnx";
     walk["policy"]["num_samples"] = 30;
     walk["policy"]["warm_start"]  = 0.25;
+    walk["policy"]["device"]      = "cuda";
 }
 
 static void test_no_block_no_policy()
@@ -64,6 +65,10 @@ static void test_block_is_read()
     CHECK(fs::path(task.policy.path).is_absolute());
     CHECK(task.policy.num_samples == 30);
     CHECK_NEAR(task.policy.warm_start, 0.25, 0.0);
+    CHECK(task.policy.device == PolicyDevice::Cuda);
+
+    const TaskConfig cpu = load_walk([](YAML::Node& walk) { add_policy(walk); walk["policy"]["device"] = "cpu"; });
+    CHECK(cpu.policy.device == PolicyDevice::Cpu);
 
     const TaskConfig absolute = load_walk([](YAML::Node& walk) {
         add_policy(walk);
@@ -74,7 +79,7 @@ static void test_block_is_read()
 
 static void test_bad_block_refused()
 {
-    for (const char* key : {"path", "num_samples", "warm_start"})
+    for (const char* key : {"path", "num_samples", "warm_start", "device"})
         CHECK(refused([key](YAML::Node& walk) { add_policy(walk); walk["policy"].remove(key); },
                       std::string("policy needs '") + key + "'"));
 
@@ -82,6 +87,8 @@ static void test_bad_block_refused()
                   "unknown policy key 'warmstart'"));
     CHECK(refused([](YAML::Node& walk) { add_policy(walk); walk["policy"]["num_samples"] = 0; },
                   "policy.num_samples"));
+    CHECK(refused([](YAML::Node& walk) { add_policy(walk); walk["policy"]["device"] = "gpu"; },
+                  "policy.device"));
     for (double warm : {-0.1, 1.5})
         CHECK(refused([warm](YAML::Node& walk) { add_policy(walk); walk["policy"]["warm_start"] = warm; },
                       "policy.warm_start"));

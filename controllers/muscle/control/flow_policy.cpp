@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 
@@ -11,21 +12,36 @@
 static const char* const kInputNames[]  = {"y", "prev_plan", "noise", "warm_start"};
 static const char* const kOutputNames[] = {"plan"};
 
-// One thread, the caller's, without spinning: ONNX Runtime's default pool
+// One CPU thread, the caller's, without spinning: ONNX Runtime's default pool
 // keeps one thread per core spinning between calls, which competed with the
 // rollouts' OpenMP threads (solves 20× slower in the first training run).
-static Ort::SessionOptions single_thread_options()
+// With Cuda, the network runs on GPU 0 instead, in full float32: TF32, ONNX
+// Runtime's default, rounds its products to about 3 significant digits.
+static Ort::SessionOptions session_options(PolicyDevice device)
 {
     Ort::SessionOptions options;
     options.SetIntraOpNumThreads(1);
     options.SetInterOpNumThreads(1);
     options.AddConfigEntry(kOrtSessionOptionsConfigAllowIntraOpSpinning, "0");
+    if (device == PolicyDevice::Cpu) return options;
+
+    const OrtApi& api = Ort::GetApi();
+    OrtCUDAProviderOptionsV2* created = nullptr;
+    Ort::ThrowOnError(api.CreateCUDAProviderOptions(&created));
+    const std::unique_ptr<OrtCUDAProviderOptionsV2, decltype(api.ReleaseCUDAProviderOptions)>
+        cuda(created, api.ReleaseCUDAProviderOptions);
+
+    const char* keys[]   = {"device_id", "use_tf32"};
+    const char* values[] = {"0",         "0"};
+    Ort::ThrowOnError(api.UpdateCUDAProviderOptions(cuda.get(), keys, values, 2));
+    options.AppendExecutionProvider_CUDA_V2(*cuda);
     return options;
 }
 
-FlowPolicy::FlowPolicy(const std::string& path, int horizon, const std::vector<double>& knot_steps)
+FlowPolicy::FlowPolicy(const std::string& path, int horizon, const std::vector<double>& knot_steps,
+                       PolicyDevice device)
     : horizon_(horizon), n_knots_(static_cast<int>(knot_steps.size())),
-      session_(env_, path.c_str(), single_thread_options()),
+      session_(env_, path.c_str(), session_options(device)),
       memory_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault))
 {
     std::string steps;   // as export_onnx writes them: "0,13,26,39"

@@ -123,6 +123,9 @@ public:
     // J_policy, gpc/training.py:86-95); NaN when that group has no samples.
     double mppi_min()   const { return mppi_min_; }
     double policy_min() const { return policy_min_; }
+    // Share of the softmin weight on the policy's samples, in [0, 1]: how much
+    // of the plan comes from them. NaN without a policy.
+    double policy_weight() const { return policy_weight_; }
     // Hill factors at the state update() started from: the ones the first
     // physics step's torque came from.
     HillFactors muscle_factors() const {
@@ -141,11 +144,18 @@ public:
 private:
     double rollout(int s, const RobotState& state) override;
 
-    // The policy's samples, rows n_samples onward of actions_. Call after the
-    // shift: each is flowed from noise, conditioned on observation(), starting
-    // from the plan MPPI samples around (as gpc's BootstrappedPredictiveSampling
-    // passes its mean, gpc/sampling.py:74).
+    // The policy's samples, rows n_samples onward of actions_, made in two parts
+    // so update() can make them while MPPI's own samples roll out:
+    //   policy_inputs()  on update()'s thread, after the shift: observation()'s
+    //                    y, the plan MPPI samples around for every sample (as
+    //                    gpc's BootstrappedPredictiveSampling passes its mean,
+    //                    gpc/sampling.py:74), and noise from rng_
+    //   sample_policy()  the policy on those inputs, on its own thread
+    void policy_inputs();
     void sample_policy();
+
+    // costs_[s] = rollout(s, state) for s in [begin, end), on OpenMP's threads.
+    void roll_out(const RobotState& state, int begin, int end);
 
     // Advance d one control step under activation command act_cmd: per physics
     // step, activation dynamics and Hill torques from d's joint state, the
@@ -221,8 +231,13 @@ private:
     double ess_        = 0.0;
     double mppi_min_   = std::numeric_limits<double>::quiet_NaN();
     double policy_min_ = std::numeric_limits<double>::quiet_NaN();
+    double policy_weight_ = std::numeric_limits<double>::quiet_NaN();
 
     std::unique_ptr<FlowPolicy> policy_;   // task_.policy; null without one
+
+    // The policy's inputs for the update in progress (policy_inputs()).
+    double              policy_y_[OBS_DIM] = {};
+    std::vector<double> policy_prev_, policy_noise_;
 
     int    base_bid_ = 1;
 };

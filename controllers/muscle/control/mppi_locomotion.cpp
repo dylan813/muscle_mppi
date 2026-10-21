@@ -9,7 +9,9 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <future>
 #include <limits>
+#include <numeric>
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 
@@ -121,7 +123,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     }
 
     if (!task_.policy.path.empty())
-        policy_ = std::make_unique<FlowPolicy>(task_.policy.path, task_.horizon, knot_x_);
+        policy_ = std::make_unique<FlowPolicy>(task_.policy.path, task_.horizon, knot_x_, task_.policy.device);
 }
 
 MPPILocomotion::~MPPILocomotion() = default;
@@ -330,22 +332,35 @@ void MPPILocomotion::observation(double y[OBS_DIM])
 // Policy samples
 // ============================================================================
 
+void MPPILocomotion::policy_inputs()
+{
+    const int K      = task_.policy.num_samples;
+    const int stride = task_.horizon * NUM_MUSCLES;
+
+    observation(policy_y_);
+
+    policy_prev_.resize(K * stride);
+    for (int k = 0; k < K; ++k) std::copy(trajectory_.begin(), trajectory_.end(), policy_prev_.begin() + k * stride);
+    policy_noise_.resize(K * task_.n_knots * NUM_MUSCLES);
+    for (double& v : policy_noise_) v = normal_(rng_);
+}
+
 void MPPILocomotion::sample_policy()
 {
     const int K      = task_.policy.num_samples;
     const int stride = task_.horizon * NUM_MUSCLES;
 
-    double y[OBS_DIM];
-    observation(y);
-
-    std::vector<double> prev(K * stride), noise(K * task_.n_knots * NUM_MUSCLES);
-    for (int k = 0; k < K; ++k) std::copy(trajectory_.begin(), trajectory_.end(), prev.begin() + k * stride);
-    for (double& v : noise) v = normal_(rng_);
-
     // Clamped as every sample is (gpc: hydrax clips all samples, policy's included).
     double* plans = &actions_[task_.n_samples * stride];
-    policy_->sample(y, K, prev.data(), noise.data(), task_.policy.warm_start, plans);
+    policy_->sample(policy_y_, K, policy_prev_.data(), policy_noise_.data(), task_.policy.warm_start, plans);
     for (int i = 0; i < K * stride; ++i) plans[i] = std::clamp(plans[i], 0.0, 1.0);
+}
+
+void MPPILocomotion::roll_out(const RobotState& state, int begin, int end)
+{
+    #pragma omp parallel for schedule(dynamic)
+    for (int s = begin; s < end; ++s)
+        costs_[s] = rollout(s, state);
 }
 
 // Lowest of costs[begin, end); NaN for an empty range.
@@ -389,14 +404,22 @@ void MPPILocomotion::update(const RobotState& state)
     shift_trajectory(trajectory_, task_.horizon, NUM_MUSCLES);
 
     sample_actions();
-    if (policy_) sample_policy();
 
     // MPPI's and the policy's samples alike, as gpc's PolicyAugmentedController
-    // rolls out and weighs them together.
+    // rolls out and weighs them together. The policy makes its samples on its
+    // own thread (on the GPU, or one core) while MPPI's roll out; then its
+    // samples roll out.
     const int n = total_samples();
-    #pragma omp parallel for schedule(dynamic)
-    for (int s = 0; s < n; ++s)
-        costs_[s] = rollout(s, state);
+    std::future<void> policy_samples;
+    if (policy_) {
+        policy_inputs();
+        policy_samples = std::async(std::launch::async, &MPPILocomotion::sample_policy, this);
+    }
+    roll_out(state, 0, task_.n_samples);
+    if (policy_) {
+        policy_samples.get();   // rethrows the policy's errors
+        roll_out(state, task_.n_samples, n);
+    }
 
     // Softmin weights (normalised), scaled by the range of MPPI's own samples
     // so the policy's can't flatten them (see softmin_weights()); cmin, ESS and
@@ -410,6 +433,8 @@ void MPPILocomotion::update(const RobotState& state)
     ess_        = 1.0 / w_sq;
     mppi_min_   = lowest(costs_, 0, task_.n_samples);
     policy_min_ = lowest(costs_, task_.n_samples, n);
+    policy_weight_ = policy_ ? std::accumulate(weights.begin() + task_.n_samples, weights.end(), 0.0)
+                             : std::numeric_limits<double>::quiet_NaN();
 
     // Weighted average update. actions_ is already clamped (sample_actions(), sample_policy()).
     std::vector<double> new_traj(stride, 0.0);

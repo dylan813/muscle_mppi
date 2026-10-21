@@ -15,6 +15,7 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import mujoco
@@ -37,8 +38,12 @@ QPOS_LOG   = REPO / "analysis/data/mppi_sim/mppi_sim_qpos.csv"   # an existing m
 def test_env_is_active_and_isolated():
     assert Path(sys.prefix).name == "muscle", f"active env is {sys.prefix}"
     assert os.environ.get("PYTHONNOUSERSITE") == "1"
-    assert os.environ.get("LD_LIBRARY_PATH", None) == ""
     assert os.environ.get("PYTHONPATH", None) == ""
+
+    # LD_LIBRARY_PATH: only the env's own cuDNN, for the controller's GPU policy (environment.yml).
+    cudnn = Path(sysconfig.get_paths()["purelib"]) / "nvidia/cudnn/lib"
+    assert os.environ.get("LD_LIBRARY_PATH", None) == str(cudnn)
+    assert (cudnn / "libcudnn.so.9").exists()
 
     # Every import path is the env's, except the working and test directories
     # Python and pytest add (catches ~/.local and ROS's /opt/ros/... leaking in).

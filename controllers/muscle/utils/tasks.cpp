@@ -64,17 +64,22 @@ TaskConfig load_task(const std::string& task_name, const std::string& yaml_path)
     if (const YAML::Node& p = t["policy"]) {
         for (const auto& kv : p) {
             const std::string key = kv.first.as<std::string>();
-            if (key != "path" && key != "num_samples" && key != "warm_start")
+            if (key != "path" && key != "num_samples" && key != "warm_start" && key != "device")
                 throw std::runtime_error("Task '" + task_name + "': unknown policy key '" + key
-                                         + "' (expected path, num_samples, warm_start)");
+                                         + "' (expected path, num_samples, warm_start, device)");
         }
-        for (const char* key : {"path", "num_samples", "warm_start"})
+        for (const char* key : {"path", "num_samples", "warm_start", "device"})
             if (!p[key])
                 throw std::runtime_error("Task '" + task_name + "': policy needs '" + key + "'");
 
         cfg.policy.path        = repo_path(p["path"].as<std::string>());
         cfg.policy.num_samples = p["num_samples"].as<int>();
         cfg.policy.warm_start  = p["warm_start"].as<double>();
+
+        const std::string device = p["device"].as<std::string>();
+        if      (device == "cpu")  cfg.policy.device = PolicyDevice::Cpu;
+        else if (device == "cuda") cfg.policy.device = PolicyDevice::Cuda;
+        else throw std::runtime_error("Field 'policy.device': expected cpu or cuda, got '" + device + "'");
 
         if (cfg.policy.num_samples < 1)
             throw std::runtime_error("Field 'policy.num_samples': expected at least 1, got "

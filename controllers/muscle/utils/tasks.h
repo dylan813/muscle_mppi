@@ -42,13 +42,18 @@ struct MuscleParams {
     bool use_passive         = true;   // false: no passive parallel force
 };
 
+// Where the policy runs: on the CPU (one core), or on the GPU through ONNX
+// Runtime's CUDA provider, leaving the cores to the rollouts.
+enum class PolicyDevice { Cpu, Cuda };
+
 // Learned policy (learning/) whose plans join MPPI's samples every update(),
 // from the task's optional `policy:` block. Without the block, path is empty
 // and there is no policy.
 struct PolicyParams {
-    std::string path;               // ONNX file (learning/policy.py: export_onnx), absolute
-    int         num_samples = 0;    // policy samples per update, on top of n_samples
-    double      warm_start  = 0.0;  // in [0, 1]; 0 flows from noise alone, as gpc trains
+    std::string  path;                          // ONNX file (learning/policy.py: export_onnx), absolute
+    int          num_samples = 0;               // policy samples per update, on top of n_samples
+    double       warm_start  = 0.0;             // in [0, 1]; 0 flows from noise alone, as gpc trains
+    PolicyDevice device      = PolicyDevice::Cpu;
 };
 
 // Shared task fields (model_path, phases, sampling, …) come from TaskConfigBase

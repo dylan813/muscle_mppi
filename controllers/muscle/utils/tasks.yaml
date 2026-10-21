@@ -26,6 +26,7 @@
 #     path:        analysis/log/gpc/<run>/policy.onnx   # repo-relative or absolute
 #     num_samples: 30    # policy samples per update, on top of n_samples (gpc: as many as MPPI's)
 #     warm_start:  0.0   # in [0, 1]: flow from noise (0, as gpc trains) or from MPPI's plan (1)
+#     device:      cpu   # cpu | cuda: where the policy runs (cuda needs the muscle env's cuDNN, environment.yml)
 # n_samples: 0 then leaves the policy's samples alone. Without it, MPPI samples alone.
 
 # -----------------------------------------------------------------------

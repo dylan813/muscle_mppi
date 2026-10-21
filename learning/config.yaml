@@ -27,6 +27,7 @@ loop:                          # gpc's train() rounds: collect episodes with mpp
   threads_per_episode: 6       # OpenMP threads each (the task's num_threads); 2 × 6 = 12 in all
   policy_samples: 30           # gpc num_policy_samples: as many as MPPI's n_samples
   warm_start: 0.0              # gpc trains at 0: policy samples flow from noise
+  policy_device: cpu           # cpu | cuda: where mppi_sim runs the policy (the pilot run: cpu)
   gifs_per_round: 1            # episodes rendered to a GIF in the round's folder (gpc num_videos: 2)
 
 wandb:

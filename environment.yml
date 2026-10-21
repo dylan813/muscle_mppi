@@ -3,9 +3,16 @@
 #   PYTHONNOUSERSITE=1 conda env create -f environment.yml
 #   conda activate muscle
 #   pip install -e .        # learning/ as a package (pyproject.toml)
+#   conda env config vars set LD_LIBRARY_PATH="$CONDA_PREFIX/lib/python3.12/site-packages/nvidia/cudnn/lib"
+#   conda activate muscle   # again, to apply it
 #
 # PYTHONNOUSERSITE=1 on create keeps pip from counting packages in ~/.local as
 # installed, so every dependency lands in the env.
+#
+# LD_LIBRARY_PATH holds only torch's cuDNN (built for CUDA 12), which the C++
+# controller's ONNX Runtime needs to run the policy on the GPU: the system
+# cuDNN is built for CUDA 13. It's set after creating the env because the path
+# includes the env's own location.
 
 name: muscle
 channels:

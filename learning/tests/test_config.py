@@ -29,6 +29,7 @@ def test_repo_config_loads():
     assert cfg.loop.parallel_episodes * cfg.loop.threads_per_episode == 12
     assert cfg.loop.policy_samples == 30 and cfg.loop.gifs_per_round == 1
     assert cfg.loop.warm_start == 0.0 and isinstance(cfg.loop.warm_start, float)
+    assert cfg.loop.policy_device == "cpu"
     assert cfg.wandb.project == "muscle-mppi-gpc"
 
 

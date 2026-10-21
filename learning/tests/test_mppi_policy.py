@@ -1,7 +1,7 @@
 """Policy samples in MPPI (controllers/muscle/control/mppi_locomotion.h, with the
 task's policy: block): the policy's plans join MPPI's samples, clamped, and are
 rolled out and averaged with them. The policy is given observation()'s y, the
-shifted plan MPPI samples around, and the warm start.
+shifted plan MPPI samples around, and the warm start, on the CPU or the GPU.
 
 Most tests use probe policies: small ONNX files built here with the exported
 policy's inputs, output and labels (policy.export_onnx), computing something
@@ -30,6 +30,10 @@ TASKS   = REPO / "controllers/muscle/utils/tasks.yaml"
 HORIZON = 40
 SPLINE  = KnotSpline(HORIZON, 4)   # the walk task's knots
 
+# Where the controller runs the policy (the policy: block's device); cuda needs a GPU.
+DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(),
+                                                                reason="no CUDA GPU"))]
+
 pytestmark = pytest.mark.skipif(not BINARY.exists(),
                                 reason=f"{BINARY} not built (make in controllers/build)")
 
@@ -48,7 +52,7 @@ def run_controller(tmp_path: Path, n_samples: int, policy: dict | None = None,
     out = tmp_path / "out"
     result = subprocess.run([str(BINARY), str(path), str(out), str(updates)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    names = ["plan_before", "y", "plan", "costs"]
+    names = ["plan_before", "y", "plan", "costs", "weight"]
     return [{name: np.load(out / f"u{u}_{name}.npy")[0] for name in names} for u in range(updates)]
 
 
@@ -85,10 +89,11 @@ def probe(path: Path, nodes: list, constants: dict[str, np.ndarray]) -> Path:
 CONSTANT = np.linspace(-0.5, 1.5, HORIZON * NUM_MUSCLES, dtype=np.float32).reshape(1, HORIZON, NUM_MUSCLES)
 
 
-def constant_probe(path: Path) -> Path:
+def constant_probe(path: Path, plan: np.ndarray = CONSTANT) -> Path:
+    """plan [1, HORIZON, NUM_MUSCLES] for every sample."""
     return probe(path, [helper.make_node("Mul", ["prev_plan", "zero"], ["unused"]),
                         helper.make_node("Add", ["unused", "constant"], ["plan"])],
-                 {"zero": np.array(0.0, np.float32), "constant": CONSTANT})
+                 {"zero": np.array(0.0, np.float32), "constant": plan})
 
 
 # plan = warm_start · prev_plan + (1 - warm_start) · (y's activations + RAMP),
@@ -123,36 +128,59 @@ def test_without_policy_only_mppi_samples(tmp_path):
     sample_min, mppi_min, policy_min = update["costs"]
     assert np.isnan(policy_min)
     assert mppi_min == sample_min
+    assert np.isnan(update["weight"])
 
 
-def test_policy_plans_join_the_update_clamped(tmp_path):
+@pytest.mark.parametrize("device", DEVICES)
+def test_policy_plans_join_the_update_clamped(tmp_path, device):
     path = constant_probe(tmp_path / "constant.onnx")
     (update,) = run_controller(tmp_path, n_samples=0,
-                               policy={"path": str(path), "num_samples": 2, "warm_start": 0.0})
+                               policy={"path": str(path), "num_samples": 2, "warm_start": 0.0, "device": device})
 
     np.testing.assert_allclose(update["plan"], np.clip(CONSTANT[0], 0.0, 1.0), atol=1e-6)
     sample_min, mppi_min, policy_min = update["costs"]
     assert np.isnan(mppi_min)
     assert policy_min == sample_min
+    assert update["weight"] == pytest.approx(1.0)   # the policy's samples are all there are
 
 
+def test_far_worse_policy_gets_no_weight(tmp_path):
+    """Every agonist at full activation and every antagonist off throws the
+    robot (about 3× the cost of MPPI's samples around its standing plan).
+    Weighted by the range of MPPI's own samples (control_utils.h:
+    softmin_weights), the policy's samples get ~0 weight. A plan only a few
+    percent worse, such as no activation at all, still gets some."""
+    one_way = np.zeros((1, HORIZON, NUM_MUSCLES), np.float32)
+    one_way[..., 0::2] = 1.0   # agonists, the even muscles (observation.h's act[] layout)
+    path = constant_probe(tmp_path / "one_way.onnx", one_way)
+    (update,) = run_controller(tmp_path, n_samples=30,
+                               policy={"path": str(path), "num_samples": 30, "warm_start": 0.0, "device": "cpu"})
+
+    sample_min, mppi_min, policy_min = update["costs"]
+    assert policy_min > mppi_min
+    assert update["weight"] < 1e-3
+
+
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("warm_start", [0.0, 1.0])
-def test_policy_gets_y_and_warm_start(tmp_path, warm_start):
+def test_policy_gets_y_and_warm_start(tmp_path, warm_start, device):
     """warm_start 0: the plan is y's activations (+ RAMP), so the policy saw
     observation()'s y. 1: the plan is MPPI's plan, shifted."""
     path = mix_probe(tmp_path / "mix.onnx")
     (update,) = run_controller(tmp_path, n_samples=0,
-                               policy={"path": str(path), "num_samples": 2, "warm_start": warm_start})
+                               policy={"path": str(path), "num_samples": 2, "warm_start": warm_start,
+                                       "device": device})
     expected = mix_expected(update, warm_start, shifted(update["plan_before"]))
     np.testing.assert_allclose(update["plan"], expected, atol=1e-6)
 
 
-def test_policy_starts_from_the_shifted_plan(tmp_path):
+@pytest.mark.parametrize("device", DEVICES)
+def test_policy_starts_from_the_shifted_plan(tmp_path, device):
     """Second update, warm start 0.5: the plan before it varies over the
     horizon (the first update's RAMP), so the shift is visible."""
     path = mix_probe(tmp_path / "mix.onnx")
     _, second = run_controller(tmp_path, n_samples=0, updates=2,
-                               policy={"path": str(path), "num_samples": 2, "warm_start": 0.5})
+                               policy={"path": str(path), "num_samples": 2, "warm_start": 0.5, "device": device})
 
     np.testing.assert_allclose(second["plan"], mix_expected(second, 0.5, shifted(second["plan_before"])),
                                atol=1e-6)
@@ -160,7 +188,8 @@ def test_policy_starts_from_the_shifted_plan(tmp_path):
     assert np.abs(second["plan"] - unshifted).max() > 1e-3
 
 
-def test_exported_policy_with_mppi_samples(tmp_path):
+@pytest.mark.parametrize("device", DEVICES)
+def test_exported_policy_with_mppi_samples(tmp_path, device):
     """A real exported policy (untrained) next to MPPI's 30 samples, as gpc
     samples as many from the policy."""
     torch.manual_seed(0)
@@ -168,9 +197,10 @@ def test_exported_policy_with_mppi_samples(tmp_path):
     export_onnx(Policy(ModelConfig(feature_dims=[8], timestep_embedding_dim=4, kernel_size=3)),
                 SPLINE, path, "walk")
     (update,) = run_controller(tmp_path, n_samples=30,
-                               policy={"path": str(path), "num_samples": 30, "warm_start": 0.0})
+                               policy={"path": str(path), "num_samples": 30, "warm_start": 0.0, "device": device})
 
     sample_min, mppi_min, policy_min = update["costs"]
     assert np.isfinite(mppi_min) and np.isfinite(policy_min)
     assert sample_min == min(mppi_min, policy_min)
+    assert 0.0 <= update["weight"] <= 1.0
     assert update["plan"].min() >= 0.0 and update["plan"].max() <= 1.0
