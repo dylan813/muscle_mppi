@@ -16,8 +16,6 @@ default_pd_quad: &default_pd_quad
   # go1_mppi.xml: 1.0 for the hip/abduction joint, 2.0 for thigh/calf — go2.xml's
   # own default (0.1 for every joint) is much lighter and under-damps this
   # task's stiff kp=55 PD law, showing up as visible bouncing/jitter.
-  # NOTE: the muscle variant uses kd_sim [2.0, 3.5, 3.5] instead; the two must
-  # agree before any controlled muscle-vs-PD comparison.
   joint_damping: [1,2,2,  1,2,2,  1,2,2,  1,2,2]
 
 # RTWholeBodyMPPI's Q_diag[25:37] (joint-velocity gait tracking) and R_diag

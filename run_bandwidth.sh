@@ -22,7 +22,7 @@
 # The rest of each controller's original joint damping becomes motor driver
 # damping, so it passes through the motor's lag while the total stays the
 # original controller's:
-#   muscle  driver_kd = kd_sim − 0.1        = 1.9, 3.4, 3.4  (total 2, 3.5, 3.5)
+#   muscle  driver_kd = kd_sim − 0.1        = 0: kd_sim is already the physical 0.1
 #   PD      driver_kd = joint_damping − 0.1 = 0.9, 1.9, 1.9, plus PD's own kd = 3
 #           in the motor too                                  (total 4, 5, 5)
 # Trials use the controllers' usual nondeterministic seeding.
