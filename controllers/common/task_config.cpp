@@ -105,6 +105,44 @@ static void load_motor(const YAML::Node& node, double dt, MotorParams& motor)
                                  + std::to_string(motor.update_rate));
 }
 
+// Optional `push:` block (PushParams). Unknown keys throw, as for `motor:`.
+static std::optional<PushParams> load_push(const YAML::Node& node, double dt)
+{
+    if (!node) return std::nullopt;
+
+    for (const auto& kv : node) {
+        const std::string key = kv.first.as<std::string>();
+        if (key != "interval" && key != "max_vel_xy")
+            throw std::runtime_error("Field 'push': unknown key '" + key + "' (expected interval, max_vel_xy)");
+    }
+    if (!node["interval"] || !node["max_vel_xy"])
+        throw std::runtime_error("Field 'push': needs interval and max_vel_xy");
+
+    PushParams push;
+    push.interval = node["interval"].as<double>();
+    const double steps = push.interval / dt;
+    push.steps = static_cast<int>(std::lround(steps));
+    if (!(push.interval > 0.0) || push.steps < 1 || std::abs(steps - push.steps) > 1e-9)
+        throw std::runtime_error("Field 'push.interval': expected a whole number of control steps (dt), got "
+                                 + std::to_string(push.interval));
+
+    push.max_vel_xy = node["max_vel_xy"].as<double>();
+    if (!(push.max_vel_xy > 0.0))
+        throw std::runtime_error("Field 'push.max_vel_xy': expected > 0");
+
+    return push;
+}
+
+static TaskEnd load_end_on(const YAML::Node& node)
+{
+    if (!node) return TaskEnd::Success;
+
+    const std::string end_on = node.as<std::string>();
+    if (end_on == "success")  return TaskEnd::Success;
+    if (end_on == "duration") return TaskEnd::Duration;
+    throw std::runtime_error("Field 'end_on': expected success or duration, got '" + end_on + "'");
+}
+
 void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)
 {
     cfg.model_path    = repo_path(t["model_path"].as<std::string>());
@@ -116,6 +154,7 @@ void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)
     cfg.n_knots       = t["n_knots"]     ? t["n_knots"].as<int>()             : 4;
     cfg.num_threads   = t["num_threads"] ? t["num_threads"].as<int>()        : 0;
     cfg.sim_duration  = t["sim_duration"] ? t["sim_duration"].as<double>()   : 10.0;
+    cfg.end_on        = load_end_on(t["end_on"]);
     cfg.spawn_height_offset =
         t["spawn_height_offset"] ? t["spawn_height_offset"].as<double>()    : 0.0;
 
@@ -123,6 +162,7 @@ void load_task_base(const YAML::Node& t, TaskConfigBase& cfg)
         load_doubles(t["noise_sigma_act"], cfg.noise_sigma_act, NUM_JOINTS, "noise_sigma_act");
 
     load_motor(t["motor"], cfg.dt, cfg.motor);
+    cfg.push = load_push(t["push"], cfg.dt);
 
     if (t["phases"]) {
         const YAML::Node& phases = t["phases"];

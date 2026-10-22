@@ -28,6 +28,17 @@
 #     warm_start:  0.0   # in [0, 1]: flow from noise (0, as gpc trains) or from MPPI's plan (1)
 #     device:      cpu   # cpu | cuda: where the policy runs (cuda needs the muscle env's cuDNN, environment.yml)
 # n_samples: 0 then leaves the policy's samples alone. Without it, MPPI samples alone.
+#
+# Optional, any task (both variants, PushParams in common/task_config.h): a
+# `push:` block makes the sims kick the trunk at a fixed interval, replacing its
+# world-frame horizontal velocity. Both keys required.
+#   push:
+#     interval:   4.0    # s between pushes; the first at t = interval; dt * whole number
+#     max_vel_xy: 1.5    # m/s; vx, vy each drawn uniformly from [-max_vel_xy, max_vel_xy]
+#
+# Optional, any task: `end_on:` sets when a sim run the robot hasn't fallen in ends.
+#   end_on: success    # success (default): once the final phase is reached and held
+#                      # duration: only once sim_duration elapses
 
 # -----------------------------------------------------------------------
 # Quadruped muscle parameters (12 joints: (hip/thigh/calf)x(FR/FL/RR/RL))
@@ -320,6 +331,54 @@ guinea_fowl:
     #   desired_gait: "in_place"
     #   goal_thresh:  0.2
     #   waiting_time: 50
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  muscle: *default_muscle_quad
+
+# -----------------------------------------------------------------------
+# push_recovery: step in place on flat ground while the sim kicks the trunk
+# every push.interval seconds. Runs until sim_duration unless the robot falls
+# (end_on: duration), so success = no fall. Same MPPI settings and cost weights
+# as `walk` (RTWholeBodyMPPI's `stand` task also reuses its walk config),
+# except pos_x/pos_y = 0: the robot only has to stay upright, not return to
+# its spawn point.
+push_recovery:
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         0.0
+    pos_y:         0.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+
+  sim_duration: 20.0
+  end_on:       duration
+
+  # SATA's push settings (legged_gym go2_torque_config.py: push_interval_s,
+  # max_push_vel_xy), without its growth scale.
+  push:
+    interval:   4.0
+    max_vel_xy: 1.0
+
+  phases:
+    - goal_pos:     [0.0, 0.0, 0.34]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 0
 
   noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
 

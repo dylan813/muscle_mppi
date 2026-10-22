@@ -21,6 +21,7 @@
 #include <fstream>
 #include <functional>
 #include <ostream>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -80,7 +81,7 @@ inline void standup_targets(double t, double& kp, double q_des[NUM_JOINTS])
 
 // MuJoCo "real world" harness pieces shared by the standalone sims
 // (muscle/mppi_sim.cpp, pd/pd_mppi_sim.cpp): model setup, spawn placement,
-// running the stand-up and state readout.
+// running the stand-up, state readout and pushes.
 
 // Fall, as Isaac Lab ends a Go2 velocity-task episode (base_contact:
 // mdp.illegal_contact on body "base", 1 N; isaaclab_tasks
@@ -156,6 +157,17 @@ inline RobotState read_state(const mjData* d, const int qa[NUM_JOINTS], const in
     }
     s.valid = true;
     return s;
+}
+
+// One random push (PushParams): replace the trunk's world-frame horizontal
+// velocity (free-joint qvel[0:2]) with a uniform draw per axis, also written to v_xy.
+inline void apply_push(mjData* d, const PushParams& push, std::mt19937& rng, double v_xy[2])
+{
+    std::uniform_real_distribution<double> draw(-push.max_vel_xy, push.max_vel_xy);
+    for (int k = 0; k < 2; ++k) {
+        v_xy[k]    = draw(rng);
+        d->qvel[k] = v_xy[k];
+    }
 }
 
 // Reset to the stand-down pose and drop the robot so its lowest foot sits at
@@ -238,7 +250,7 @@ inline StandingEquilibrium settle_standing(mjModel* m, double spawn_height_offse
 // ============================================================================
 
 // What a standalone sim customises about run_sim(). Controller must provide
-// task_ref() (with model_path, dt, motor, sim_duration, spawn_height_offset),
+// task_ref() (with model_path, dt, motor, sim_duration, end_on, push, spawn_height_offset),
 // advance_phase(), update(), actuate(), motor_damping() and task_success().
 template <class Controller>
 struct SimSpec {
@@ -274,7 +286,9 @@ struct SimSpec {
 //
 // Stands the robot up, runs kConvergenceSolves solves, then logs one CSV row
 // (and one qpos row) per control step until sim_duration elapses, the robot
-// falls, or the task's final phase is reached and held. Afterwards it deletes
+// falls, or (end_on: success, the default) the task's final phase is reached
+// and held. A task's push: block kicks the trunk every push.interval seconds,
+// logged as push_vx/push_vy (0 between pushes) at the end of each row. Afterwards it deletes
 // any existing <output>.gif and, unless --no-gif is given, renders the logged
 // rollout to a fresh one; with --save the GIF is copied into the trial too. The
 // console lines are parsed by run_trials.sh, so keep their wording stable.
@@ -364,6 +378,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     if (!open_output(csv_path, csv)) return 1;
     write_csv_header_base(csv);
     spec.extra_header(csv);
+    if (task.push) csv << ",push_vx,push_vy";
     csv << "\n";
 
     const std::string qpos_path = qpos_path_for(csv_path);
@@ -392,6 +407,13 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
                motor.substeps, 1000.0 * motor.physics_dt,
                motor.damping == MotorDamping::Implicit ? "implicit" : "explicit");
 
+    if (task.push)
+        printf("Push: every %.6g s, vx and vy each uniform in [-%.6g, %.6g] m/s\n",
+               task.push->interval, task.push->max_vel_xy, task.push->max_vel_xy);
+
+    // Unseeded, as the MPPI samplers are, so each run gets its own pushes.
+    std::mt19937 push_rng(std::random_device{}());
+
     // ── MPPI loop ─────────────────────────────────────────────────────────────
     printf("Running MPPI for %d convergence solves then logging...\n",
            kConvergenceSolves);
@@ -404,6 +426,14 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     int logged_rows = 0;
 
     while (sim_t < sim_duration) {
+        // --- push: before every push.steps-th control step's solve (solve_count
+        //     is the control steps taken), so update() starts from the pushed state ---
+        double push_v[2] = {};
+        if (task.push && solve_count > 0 && solve_count % task.push->steps == 0) {
+            apply_push(d, *task.push, push_rng, push_v);
+            printf("Push at t=%.2f s: v_xy = (%.3f, %.3f) m/s\n", sim_t, push_v[0], push_v[1]);
+        }
+
         // --- MPPI solve ---
         RobotState state = read_state(d, qa, qv);
 
@@ -440,6 +470,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
             write_csv_row_base(csv, sim_t, spec.log_position(m, d, base_bid),
                                m, d, qv, feet, ms);
             spec.extra_row(csv, mppi, read_state(d, qa, qv));
+            if (task.push) csv << "," << push_v[0] << "," << push_v[1];
             csv << "\n";
 
             // save full qpos for GIF rendering
@@ -453,10 +484,10 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
             break;
         }
 
-        // --- stop once the task's final phase has been reached and held ---
+        // --- end_on: success: stop once the task's final phase has been reached and held ---
         // Both variants stop here, so every run of either controller records
         // the same span of the task (success, not the sim_duration clock).
-        if (converged && mppi.task_success()) {
+        if (task.end_on == TaskEnd::Success && converged && mppi.task_success()) {
             printf("Task complete at t=%.2f s — stopping.\n", sim_t);
             break;
         }

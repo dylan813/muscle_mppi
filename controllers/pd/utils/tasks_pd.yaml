@@ -66,6 +66,17 @@ default_control_effort_weights: &default_control_effort_weights
 #     physics_dt: 0.002      # physics/actuator step (s); dt / whole number; default dt
 #     damping:    explicit   # explicit | implicit: how the motor's kd is integrated (zero_order_hold: explicit)
 # Without it the joints are driven directly.
+#
+# Optional, any task (both variants, PushParams in common/task_config.h): a
+# `push:` block makes the sims kick the trunk at a fixed interval, replacing its
+# world-frame horizontal velocity. Both keys required.
+#   push:
+#     interval:   4.0    # s between pushes; the first at t = interval; dt * whole number
+#     max_vel_xy: 1.5    # m/s; vx, vy each drawn uniformly from [-max_vel_xy, max_vel_xy]
+#
+# Optional, any task: `end_on:` sets when a sim run the robot hasn't fallen in ends.
+#   end_on: success    # success (default): once the final phase is reached and held
+#                      # duration: only once sim_duration elapses
 walk:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   n_samples:     30
@@ -259,6 +270,63 @@ guinea_fowl:
     #   desired_gait: "in_place"
     #   goal_thresh:  0.2
     #   waiting_time: 50
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  pd: *default_pd_quad
+
+# -----------------------------------------------------------------------
+# push_recovery: step in place on flat ground while the sim kicks the trunk
+# every push.interval seconds, as the muscle push_recovery task does
+# (../../muscle/utils/tasks.yaml). Runs until sim_duration unless the robot
+# falls (end_on: duration), so success = no fall. Same settings as `walk`
+# except pos_x/pos_y = 0: the robot only has to stay upright.
+#
+# The goal-facing orientation target (goal_facing_quat, common/control_utils.h)
+# turns off for good once the robot settles within goal_thresh of goal_pos
+# (PhaseSequencer dwelling, common/gait.h). The trunk starts there after stand-up
+# (z 0.343 vs 0.27), so this happens in the first control ticks, before any
+# push, and pushes don't make the robot turn toward its spawn point.
+push_recovery:
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         0.0
+    pos_y:         0.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    joint_vel_weights: *default_joint_vel_weights
+    control_effort_weights: *default_control_effort_weights
+
+  sim_duration: 20.0
+  end_on:       duration
+
+  # SATA's push settings (legged_gym go2_torque_config.py: push_interval_s,
+  # max_push_vel_xy), without its growth scale.
+  push:
+    interval:   4.0
+    max_vel_xy: 1.5
+
+  phases:
+    - goal_pos:     [0.0, 0.0, 0.27]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 0
 
   nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
 

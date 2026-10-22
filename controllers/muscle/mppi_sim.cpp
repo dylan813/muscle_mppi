@@ -36,6 +36,7 @@
 //   tau_j0..tau_j{NUM_JOINTS-1}, tau_applied_j0..tau_applied_j{NUM_JOINTS-1},
 //   cost_{pos,orient,vel,ang_vel,gait}, plan_{pos,orient,vel,ang_vel,gait},
 //   sample_min, ess
+//   and, last, push_vx, push_vy for a task with a push: block (run_sim() in common/harness.h).
 //   tau is the motor command (Hill torque minus driver damping) of the row's
 //   last physics step, before the torque limit and the motor's lag;
 //   tau_applied the torque the motor applied over that step (common/motor.h).

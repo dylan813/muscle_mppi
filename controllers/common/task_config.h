@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -119,6 +120,23 @@ struct MotorParams {
     MotorDamping damping     = MotorDamping::Explicit;
 };
 
+// When the standalone sims end a run the robot hasn't fallen in (run_sim(),
+// common/harness.h), from a task's `end_on:` key.
+//   Success   once the final phase is reached and held (task_success()).
+//   Duration  only once sim_duration elapses.
+enum class TaskEnd { Success, Duration };
+
+// Random horizontal pushes the standalone sims give the trunk, from a task's
+// optional `push:` block. Each push replaces the trunk's world-frame horizontal
+// velocity with (vx, vy), each drawn uniformly from [-max_vel_xy, max_vel_xy],
+// as SATA's _push_robots() does (legged_gym go2_torque.py), without its growth
+// scale. Vertical and angular velocity are left as they are.
+struct PushParams {
+    double interval   = 0.0;   // s between pushes; the first comes at t = interval
+    int    steps      = 0;     // control steps between pushes: interval / dt
+    double max_vel_xy = 0.0;   // m/s
+};
+
 // Task fields common to both variants, parsed by load_task_base()
 // (below). Each variant's TaskConfig derives from this and adds
 // its own actuator parameters.
@@ -137,6 +155,9 @@ struct TaskConfigBase {
     // and writes the CSV/qpos log. Bump this for tasks whose phases need more
     // time to complete (e.g. a longer walk distance) than the 10s default covers.
     double       sim_duration = 10.0;
+
+    // When a run the robot hasn't fallen in ends (TaskEnd): `end_on: success | duration`.
+    TaskEnd      end_on       = TaskEnd::Success;
 
     // World-frame z of the ground under the robot's spawn point. mppi_sim's
     // stand-up placement assumes flat ground at z=0 and drops the robot so its
@@ -164,6 +185,9 @@ struct TaskConfigBase {
     double noise_sigma_act[NUM_JOINTS]   = {};
 
     MotorParams  motor;
+
+    // Random pushes during a sim run (PushParams); empty without a `push:` block.
+    std::optional<PushParams> push;
 };
 
 // ============================================================================

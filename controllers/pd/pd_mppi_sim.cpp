@@ -29,6 +29,7 @@
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, qdes_j0..qdes_j{NUM_JOINTS-1},
 //   qdes_filt_j0..qdes_filt_j{NUM_JOINTS-1}, tau_j0..tau_j{NUM_JOINTS-1},
 //   tau_applied_j0..tau_applied_j{NUM_JOINTS-1}
+//   and, last, push_vx, push_vy for a task with a push: block (run_sim() in common/harness.h).
 //   tau_j* is the motor command (the PD torque) of the row's last physics step,
 //   before the torque limit and the motor's lag; tau_applied_j* the torque the
 //   motor applied over that step (common/motor.h) — the same convention and
