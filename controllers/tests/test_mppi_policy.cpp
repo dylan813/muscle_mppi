@@ -8,11 +8,14 @@
 //   u<u>_plan.npy         plan() after the update
 //   u<u>_costs.npy        sample_min, mppi_min, policy_min
 //   u<u>_weight.npy       policy_weight
+//   u<u>_terms.npy        mppi_best_terms, policy_best_terms: rows of pos, orient, vel, ang_vel, gait
+//   u<u>_ref_dev.npy      ref_dev_plan, ref_dev_mppi_best, ref_dev_policy_best
 //
 //   test_mppi_policy <tasks_yaml> <out_dir> <updates>
 //
 // learning/tests/test_mppi_policy.py runs this with the YAMLs and policy files it writes.
 
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -75,10 +78,19 @@ int main(int argc, char** argv)
             mppi.observation(y);
             const double costs[] = {mppi.sample_min(), mppi.mppi_min(), mppi.policy_min()};
             const double weight  = mppi.policy_weight();
-            write_npy(prefix + "_y.npy",      {OBS_DIM},  y);
-            write_npy(prefix + "_plan.npy",   plan_shape, mppi.plan().data());
-            write_npy(prefix + "_costs.npy",  {3},        costs);
-            write_npy(prefix + "_weight.npy", {},         &weight);
+            double terms[2][5];
+            for (int g = 0; g < 2; ++g) {
+                const CostTerms& c = g == 0 ? mppi.mppi_best_terms() : mppi.policy_best_terms();
+                const double row[] = {c.pos, c.orient, c.vel, c.ang_vel, c.gait};
+                std::copy(row, row + 5, terms[g]);
+            }
+            const double ref_dev[] = {mppi.ref_dev_plan(), mppi.ref_dev_mppi_best(), mppi.ref_dev_policy_best()};
+            write_npy(prefix + "_y.npy",       {OBS_DIM},  y);
+            write_npy(prefix + "_plan.npy",    plan_shape, mppi.plan().data());
+            write_npy(prefix + "_costs.npy",   {3},        costs);
+            write_npy(prefix + "_weight.npy",  {},         &weight);
+            write_npy(prefix + "_terms.npy",   {2, 5},     terms[0]);
+            write_npy(prefix + "_ref_dev.npy", {3},        ref_dev);
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());

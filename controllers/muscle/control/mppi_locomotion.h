@@ -126,6 +126,18 @@ public:
     // Share of the softmin weight on the policy's samples, in [0, 1]: how much
     // of the plan comes from them. NaN without a policy.
     double policy_weight() const { return policy_weight_; }
+    // Cost terms of the lowest-cost sample among MPPI's and among the policy's,
+    // each summed over the horizon as plan_cost() is; NaN when that group has
+    // no samples. Shows which terms make one group's best sample cheaper.
+    const CostTerms& mppi_best_terms()   const { return mppi_best_terms_; }
+    const CostTerms& policy_best_terms() const { return policy_best_terms_; }
+    // How far a plan's activation commands are from the gait reference: mean
+    // |activation - reference| over the horizon and muscles. For the plan
+    // update() chose, MPPI's best sample, and the policy's best sample (NaN
+    // when that group has no samples).
+    double ref_dev_plan()        const { return ref_dev_plan_; }
+    double ref_dev_mppi_best()   const { return ref_dev_mppi_best_; }
+    double ref_dev_policy_best() const { return ref_dev_policy_best_; }
     // Hill factors at the state update() started from: the ones the first
     // physics step's torque came from.
     HillFactors muscle_factors() const {
@@ -156,6 +168,9 @@ private:
 
     // costs_[s] = rollout(s, state) for s in [begin, end), on OpenMP's threads.
     void roll_out(const RobotState& state, int begin, int end);
+
+    // Mean |plan - solve_gait_ref_| over the horizon and muscles (ref_dev_*()).
+    double ref_deviation(const double* plan) const;
 
     // Advance d one control step under activation command act_cmd: per physics
     // step, activation dynamics and Hill torques from d's joint state, the
@@ -232,6 +247,14 @@ private:
     double mppi_min_   = std::numeric_limits<double>::quiet_NaN();
     double policy_min_ = std::numeric_limits<double>::quiet_NaN();
     double policy_weight_ = std::numeric_limits<double>::quiet_NaN();
+
+    // Each rollout's cost terms, summed over the horizon ([total_samples()]),
+    // and what the analysis getters above report from them.
+    std::vector<CostTerms> sample_terms_;
+    CostTerms mppi_best_terms_, policy_best_terms_;
+    double ref_dev_plan_        = std::numeric_limits<double>::quiet_NaN();
+    double ref_dev_mppi_best_   = std::numeric_limits<double>::quiet_NaN();
+    double ref_dev_policy_best_ = std::numeric_limits<double>::quiet_NaN();
 
     std::unique_ptr<FlowPolicy> policy_;   // task_.policy; null without one
 

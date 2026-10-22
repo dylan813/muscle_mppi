@@ -159,6 +159,10 @@ int main(int argc, char** argv)
             for (const char* term : {"pos", "orient", "vel", "ang_vel", "gait"})
                 csv << "," << prefix << term;
         csv << ",sample_min,ess,mppi_min,policy_min,policy_weight";
+        for (const char* prefix : {"mppi_best_", "policy_best_"})
+            for (const char* term : {"pos", "orient", "vel", "ang_vel", "gait"})
+                csv << "," << prefix << term;
+        csv << ",ref_dev_plan,ref_dev_mppi_best,ref_dev_policy_best";
     };
     spec.extra_row = [&dataset, &dataset_prefix](std::ostream& csv, MPPILocomotion& mppi,
                                                  const RobotState& state) {
@@ -179,6 +183,9 @@ int main(int argc, char** argv)
             csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;
         csv << "," << mppi.sample_min() << "," << mppi.ess() << "," << mppi.mppi_min() << "," << mppi.policy_min()
             << "," << mppi.policy_weight();
+        for (const CostTerms& c : {mppi.mppi_best_terms(), mppi.policy_best_terms()})
+            csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;
+        csv << "," << mppi.ref_dev_plan() << "," << mppi.ref_dev_mppi_best() << "," << mppi.ref_dev_policy_best();
 
         if (dataset_prefix.empty()) return;
         if (!dataset) {

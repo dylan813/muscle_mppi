@@ -51,6 +51,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 {
     muscle_ = task_.muscle;
     solve_gait_ref_.assign(task_.horizon * NUM_MUSCLES, 0.0);
+    sample_terms_.resize(total_samples());
 
     // BaseMPPI already initializes trajectory_, actions_, costs_ to the correct
     // sizes (horizon × NUM_MUSCLES). Activations are clamped to [0, 1] in
@@ -155,15 +156,19 @@ double MPPILocomotion::rollout(int s, const RobotState& state)
 
     const int stride  = task_.horizon * NUM_MUSCLES;
     double total_cost = 0.0;
+    CostTerms terms;
 
     for (int t = 0; t < task_.horizon; ++t) {
         step_model(d, &actions_[s * stride + t * NUM_MUSCLES], activation, motor);
 
         double gait_ref[NUM_MUSCLES] = {};
         if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref);
-        total_cost += step_cost(d, gait_ref).total();
+        const CostTerms c = step_cost(d, gait_ref);
+        total_cost += c.total();
+        terms      += c;
     }
 
+    sample_terms_[s] = terms;
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
@@ -363,11 +368,19 @@ void MPPILocomotion::roll_out(const RobotState& state, int begin, int end)
         costs_[s] = rollout(s, state);
 }
 
-// Lowest of costs[begin, end); NaN for an empty range.
-static double lowest(const std::vector<double>& costs, int begin, int end)
+// Index of the lowest of costs[begin, end), or -1 for an empty range.
+static int best_sample(const std::vector<double>& costs, int begin, int end)
 {
-    if (begin == end) return std::numeric_limits<double>::quiet_NaN();
-    return *std::min_element(costs.begin() + begin, costs.begin() + end);
+    if (begin == end) return -1;
+    return static_cast<int>(std::min_element(costs.begin() + begin, costs.begin() + end) - costs.begin());
+}
+
+double MPPILocomotion::ref_deviation(const double* plan) const
+{
+    const int size = task_.horizon * NUM_MUSCLES;
+    double sum = 0.0;
+    for (int i = 0; i < size; ++i) sum += std::abs(plan[i] - solve_gait_ref_[i]);
+    return sum / size;
 }
 
 // ============================================================================
@@ -431,10 +444,20 @@ void MPPILocomotion::update(const RobotState& state)
     for (double w : weights) w_sq += w * w;
     sample_min_ = cmin;
     ess_        = 1.0 / w_sq;
-    mppi_min_   = lowest(costs_, 0, task_.n_samples);
-    policy_min_ = lowest(costs_, task_.n_samples, n);
     policy_weight_ = policy_ ? std::accumulate(weights.begin() + task_.n_samples, weights.end(), 0.0)
                              : std::numeric_limits<double>::quiet_NaN();
+
+    // Each group's best sample: its cost, cost terms, and distance from the gait reference.
+    const double    nan = std::numeric_limits<double>::quiet_NaN();
+    const CostTerms no_terms{nan, nan, nan, nan, nan};
+    const int mppi_best   = best_sample(costs_, 0, task_.n_samples);
+    const int policy_best = best_sample(costs_, task_.n_samples, n);
+    mppi_min_            = mppi_best   < 0 ? nan      : costs_[mppi_best];
+    policy_min_          = policy_best < 0 ? nan      : costs_[policy_best];
+    mppi_best_terms_     = mppi_best   < 0 ? no_terms : sample_terms_[mppi_best];
+    policy_best_terms_   = policy_best < 0 ? no_terms : sample_terms_[policy_best];
+    ref_dev_mppi_best_   = mppi_best   < 0 ? nan      : ref_deviation(&actions_[mppi_best * stride]);
+    ref_dev_policy_best_ = policy_best < 0 ? nan      : ref_deviation(&actions_[policy_best * stride]);
 
     // Weighted average update. actions_ is already clamped (sample_actions(), sample_policy()).
     std::vector<double> new_traj(stride, 0.0);
@@ -445,6 +468,7 @@ void MPPILocomotion::update(const RobotState& state)
     }
     for (auto& v : new_traj) v = std::clamp(v, 0.0, 1.0);
     trajectory_ = std::move(new_traj);
+    ref_dev_plan_ = ref_deviation(trajectory_.data());
 
     // Cost breakdown logging — every 50 updates (0.5 s of sim time at dt = 0.01).
     static constexpr int LOG_INTERVAL = 50;

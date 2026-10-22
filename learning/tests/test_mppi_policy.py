@@ -52,7 +52,7 @@ def run_controller(tmp_path: Path, n_samples: int, policy: dict | None = None,
     out = tmp_path / "out"
     result = subprocess.run([str(BINARY), str(path), str(out), str(updates)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    names = ["plan_before", "y", "plan", "costs", "weight"]
+    names = ["plan_before", "y", "plan", "costs", "weight", "terms", "ref_dev"]
     return [{name: np.load(out / f"u{u}_{name}.npy")[0] for name in names} for u in range(updates)]
 
 
@@ -130,6 +130,13 @@ def test_without_policy_only_mppi_samples(tmp_path):
     assert mppi_min == sample_min
     assert np.isnan(update["weight"])
 
+    # The best samples' terms add up to their costs; the policy has none.
+    mppi_terms, policy_terms = update["terms"]
+    assert mppi_terms.sum() == pytest.approx(mppi_min, rel=1e-5)
+    assert np.isnan(policy_terms).all()
+    plan_dev, mppi_dev, policy_dev = update["ref_dev"]
+    assert np.isfinite([plan_dev, mppi_dev]).all() and np.isnan(policy_dev)
+
 
 @pytest.mark.parametrize("device", DEVICES)
 def test_policy_plans_join_the_update_clamped(tmp_path, device):
@@ -142,6 +149,14 @@ def test_policy_plans_join_the_update_clamped(tmp_path, device):
     assert np.isnan(mppi_min)
     assert policy_min == sample_min
     assert update["weight"] == pytest.approx(1.0)   # the policy's samples are all there are
+
+    # MPPI has no samples, and the plan is the policy's sample, as far from the gait reference.
+    mppi_terms, policy_terms = update["terms"]
+    assert np.isnan(mppi_terms).all()
+    assert policy_terms.sum() == pytest.approx(policy_min, rel=1e-5)
+    plan_dev, mppi_dev, policy_dev = update["ref_dev"]
+    assert np.isnan(mppi_dev)
+    assert plan_dev == pytest.approx(policy_dev, abs=1e-6)
 
 
 def test_far_worse_policy_gets_no_weight(tmp_path):
@@ -203,4 +218,8 @@ def test_exported_policy_with_mppi_samples(tmp_path, device):
     assert np.isfinite(mppi_min) and np.isfinite(policy_min)
     assert sample_min == min(mppi_min, policy_min)
     assert 0.0 <= update["weight"] <= 1.0
+    mppi_terms, policy_terms = update["terms"]
+    assert mppi_terms.sum() == pytest.approx(mppi_min, rel=1e-5)
+    assert policy_terms.sum() == pytest.approx(policy_min, rel=1e-5)
+    assert np.isfinite(update["ref_dev"]).all() and (update["ref_dev"] >= 0).all()
     assert update["plan"].min() >= 0.0 and update["plan"].max() <= 1.0
