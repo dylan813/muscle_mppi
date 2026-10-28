@@ -2,7 +2,7 @@
 // the standing state mppi_sim hands over from (as test_mppi_labels.cpp):
 //   score_plans() from solve_context() reproduces plan_cost() for the chosen
 //     plan, on any thread, and leaves the controller as it was
-//   a context written by ContextWriter and read back scores exactly the same
+//   a context written by ContextWriter and read back by ContextReader scores exactly the same
 //   plan_from_knots() passes through the knots: knots_from_plan() gives them
 //     back, clamped to [0, 1]
 // Builds the real controller and stands the robot up, so it takes a second or two.
@@ -70,7 +70,7 @@ int main()
     CHECK(mppi.plan() == chosen);
     CHECK_NEAR(mppi.plan_cost().total(), expected, 0.0);
 
-    // ContextWriter, then read_context(): the second row back scores exactly as the original.
+    // ContextWriter, then ContextReader: the second row back scores exactly as the original.
     const fs::path dir = fs::temp_directory_path() / ("test_landscape_" + std::to_string(getpid()));
     fs::create_directories(dir);
     const std::string prefix = (dir / "run").string();
@@ -79,8 +79,10 @@ int main()
         writer.append(context, chosen);
         writer.append(context, chosen);
     }
+    const ContextReader reader(prefix, task.horizon);
+    CHECK(reader.rows() == 2);
     std::vector<double> plan_back;
-    const RolloutContext back = read_context(prefix, 1, task.horizon, plan_back);
+    const RolloutContext back = reader.read(1, plan_back);
     CHECK(plan_back == chosen);
     double cost_back = 0.0;
     mppi.score_plans(back, plan_back.data(), 1, &cost_back);
@@ -88,7 +90,7 @@ int main()
 
     bool threw = false;
     try {
-        read_context(prefix, 2, task.horizon, plan_back);
+        reader.read(2, plan_back);
     } catch (const std::runtime_error&) {
         threw = true;
     }

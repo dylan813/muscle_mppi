@@ -2,8 +2,8 @@
 
 // What one solve planned from (RolloutContext, mppi_locomotion.h) and the plan
 // it chose, one row per solve, as float64 .npy files: mppi_sim --contexts
-// writes them, landscape_scorer reads a row back and rolls plans out from it
-// exactly as that solve's update() did.
+// writes them (ContextWriter), landscape_scorer reads rows back (ContextReader)
+// and rolls plans out from them exactly as those solves' update() did.
 //
 //   <prefix>_state.npy       (N, 37)                    RobotState: pos 3, quat 4, vel 3, gyro 3, q 12, dq 12
 //   <prefix>_activation.npy  (N, NUM_MUSCLES)           filtered activations
@@ -74,31 +74,61 @@ private:
     NpyWriter state_, activation_, motor_, gait_ref_, goal_, plan_;
 };
 
-// Row `row` of the files at prefix: the context it planned from, and in plan
-// the plan it chose. Throws if a file is missing, the row doesn't exist, or a
-// file's shape doesn't match horizon.
-inline RolloutContext read_context(const std::string& prefix, int row, int horizon, std::vector<double>& plan)
-{
-    // The row's values from one file, after checking its shape.
-    auto row_of = [&](const std::string& suffix, const std::vector<int>& row_shape) {
-        const NpyArray a = read_npy(prefix + suffix);
+// The files at prefix, loaded once; read() gives any row's context and the
+// plan it chose. The constructor throws if a file is missing, or its shape
+// doesn't match horizon or the other files' row count.
+class ContextReader {
+public:
+    ContextReader(const std::string& prefix, int horizon)
+        : state_(load(prefix, "_state.npy", {kContextStateSize})),
+          activation_(load(prefix, "_activation.npy", {NUM_MUSCLES})),
+          motor_(load(prefix, "_motor.npy", {kContextMotorSize})),
+          gait_ref_(load(prefix, "_gait_ref.npy", {horizon, NUM_MUSCLES})),
+          goal_(load(prefix, "_goal.npy", {kContextGoalSize})),
+          plan_(load(prefix, "_plan.npy", {horizon, NUM_MUSCLES}))
+    {
+        for (const NpyArray* a : {&activation_, &motor_, &gait_ref_, &goal_, &plan_})
+            if (a->shape[0] != rows())
+                throw std::runtime_error("ContextReader: the files at " + prefix + " hold different row counts");
+    }
+
+    int rows() const { return state_.shape[0]; }
+
+    // Row `row`'s context, and in plan the plan it chose. Throws if there's no such row.
+    RolloutContext read(int row, std::vector<double>& plan) const;
+
+private:
+    // The file at prefix + suffix, after checking its rows are row_shape.
+    static NpyArray load(const std::string& prefix, const std::string& suffix, const std::vector<int>& row_shape)
+    {
+        NpyArray a = read_npy(prefix + suffix);
         std::vector<int> expected = {a.shape.empty() ? 0 : a.shape[0]};
         expected.insert(expected.end(), row_shape.begin(), row_shape.end());
         if (a.shape != expected)
-            throw std::runtime_error("read_context: unexpected shape in " + prefix + suffix);
-        if (row < 0 || row >= a.shape[0])
-            throw std::runtime_error("read_context: no row " + std::to_string(row) + " in " + prefix + suffix
-                                     + " (" + std::to_string(a.shape[0]) + " rows)");
-        size_t size = 1;
-        for (int d : row_shape) size *= static_cast<size_t>(d);
-        const auto first = a.values.begin() + static_cast<long>(row * size);
-        return std::vector<double>(first, first + static_cast<long>(size));
-    };
+            throw std::runtime_error("ContextReader: unexpected shape in " + prefix + suffix);
+        return a;
+    }
+
+    // Values in one row of file a, and where row `row` starts (load() checked
+    // every row has the shape the layout above says).
+    static size_t row_size(const NpyArray& a) { return a.values.size() / static_cast<size_t>(a.shape[0]); }
+    static const double* row_start(const NpyArray& a, int row)
+    {
+        return a.values.data() + static_cast<size_t>(row) * row_size(a);
+    }
+
+    NpyArray state_, activation_, motor_, gait_ref_, goal_, plan_;
+};
+
+inline RolloutContext ContextReader::read(int row, std::vector<double>& plan) const
+{
+    if (row < 0 || row >= rows())
+        throw std::runtime_error("ContextReader: no row " + std::to_string(row) + " (" + std::to_string(rows())
+                                 + " rows)");
 
     RolloutContext c;
 
-    const std::vector<double> state = row_of("_state.npy", {kContextStateSize});
-    const double* next = state.data();
+    const double* next = row_start(state_, row);
     auto take = [&next](double* values, int n) { std::copy(next, next + n, values); next += n; };
     take(c.state.pos, 3);
     take(c.state.quat, 4);
@@ -108,21 +138,23 @@ inline RolloutContext read_context(const std::string& prefix, int row, int horiz
     take(c.state.dq, NUM_JOINTS);
     c.state.valid = true;
 
-    const std::vector<double> activation = row_of("_activation.npy", {NUM_MUSCLES});
-    std::copy(activation.begin(), activation.end(), c.activation);
+    const double* activation = row_start(activation_, row);
+    std::copy(activation, activation + NUM_MUSCLES, c.activation);
 
-    const std::vector<double> motor = row_of("_motor.npy", {kContextMotorSize});
-    std::copy(motor.begin(), motor.begin() + NUM_JOINTS, c.motor.tau);
+    const double* motor = row_start(motor_, row);
+    std::copy(motor, motor + NUM_JOINTS, c.motor.tau);
     c.motor.step = static_cast<int>(motor[NUM_JOINTS]);
 
-    c.gait_ref = row_of("_gait_ref.npy", {horizon, NUM_MUSCLES});
+    const double* gait_ref = row_start(gait_ref_, row);
+    c.gait_ref.assign(gait_ref, gait_ref + row_size(gait_ref_));
 
-    const std::vector<double> goal = row_of("_goal.npy", {kContextGoalSize});
-    std::copy(goal.begin(), goal.begin() + 4, c.goal_quat);
-    std::copy(goal.begin() + 4, goal.begin() + 7, c.command.goal_pos);
+    const double* goal = row_start(goal_, row);
+    std::copy(goal, goal + 4, c.goal_quat);
+    std::copy(goal + 4, goal + 7, c.command.goal_pos);
     c.command.vx = goal[7];
     c.command.vy = goal[8];
 
-    plan = row_of("_plan.npy", {horizon, NUM_MUSCLES});
+    const double* chosen = row_start(plan_, row);
+    plan.assign(chosen, chosen + row_size(plan_));
     return c;
 }
