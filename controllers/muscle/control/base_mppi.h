@@ -11,8 +11,21 @@ public:
     explicit BaseMPPI(const TaskConfig& task);
     virtual ~BaseMPPI();
 
+    // Cubic sampling's plans (sample_type "cubic") are set by their values at
+    // the knot steps (knot_x_). Layouts: knots [n_knots × NUM_MUSCLES] as
+    // [k * NUM_MUSCLES + m]; plan [horizon × NUM_MUSCLES] as [t * NUM_MUSCLES + m].
+    //   plan_from_knots()  per muscle, the not-a-knot cubic through the knot
+    //                      values, clamped to [0, 1]: how sample_actions_cubic()
+    //                      builds each sample from its noisy knots
+    //   knots_from_plan()  the plan's values at the knot steps
+    // Both throw for any other sample_type.
+    void plan_from_knots(const double* knots, double* plan) const;
+    void knots_from_plan(const double* plan, double* knots) const;
+
 protected:
-    virtual double rollout(int s, const RobotState& state) = 0;
+    // MPPI's cost of sample s (row s of actions_), rolled out from what the
+    // update in progress plans from, which the subclass holds.
+    virtual double rollout(int s) = 0;
 
     // Fills actions_[s][t][m], s < n_samples, with this iteration's sampled
     // activation sequences, already clamped to [0, 1], for both the rollouts

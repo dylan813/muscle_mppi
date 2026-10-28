@@ -5,6 +5,7 @@
 //
 // Run from any directory (e.g. controllers/build/):
 //   ./mppi_sim [task] [yaml] [output.csv] [--name <run>] [--save <name>] [--no-gif] [--dataset <prefix>]
+//              [--contexts <prefix>]
 //   ./mppi_sim walk_rough --name rough_test1   # -> analysis/data/mppi_sim/rough_test1.csv/_qpos.csv/.gif
 // Defaults read controllers/muscle/utils/tasks.yaml and write to
 // analysis/data/mppi_sim/mppi_sim.csv (created on first run if missing), both
@@ -28,6 +29,11 @@
 // GIF, the prefix's old files are deleted first, at startup, so a run that
 // falls before logging starts leaves none rather than another run's.
 // <prefix> is relative to the current directory, like [output.csv].
+//
+// --contexts <prefix> also writes, one row per CSV row, what that row's update()
+// planned from and the plan it chose, in float64 (control/context_files.h), so
+// landscape_scorer can roll plans out from a row exactly as that update() did.
+// Created and cleared like the --dataset files.
 //
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
@@ -75,6 +81,7 @@
 #include <system_error>
 #include <vector>
 
+#include "control/context_files.h"
 #include "control/mppi_locomotion.h"
 #include "../common/harness.h"
 #include "../common/npy_writer.h"
@@ -99,41 +106,60 @@ struct Dataset {
     }
 };
 
-// Moves argv into rest, except `--dataset <prefix>` (or `--dataset=<prefix>`),
-// which goes to prefix, so run_sim() (shared with the PD sim) never sees it.
+// Moves argv into rest, except `<flag> <prefix>` (or `<flag>=<prefix>`), which
+// goes to prefix, so run_sim() (shared with the PD sim) never sees it.
 // Returns false if the prefix is missing.
-static bool take_dataset_arg(int argc, char** argv, std::vector<char*>& rest, std::string& prefix)
+static bool take_prefix_arg(int argc, char** argv, const std::string& flag, std::vector<char*>& rest,
+                            std::string& prefix)
 {
     for (int i = 0; i < argc; ++i) {
         const std::string arg = argv[i];
-        const bool spaced = i > 0 && arg == "--dataset";
-        const bool joined = i > 0 && arg.rfind("--dataset=", 0) == 0;
+        const bool spaced = i > 0 && arg == flag;
+        const bool joined = i > 0 && arg.rfind(flag + "=", 0) == 0;
         if (!spaced && !joined) {
             rest.push_back(argv[i]);
             continue;
         }
 
-        prefix = joined ? arg.substr(10) : (i + 1 < argc ? argv[++i] : "");
+        prefix = joined ? arg.substr(flag.size() + 1) : (i + 1 < argc ? argv[++i] : "");
         if (prefix.empty()) {
-            fprintf(stderr, "--dataset needs a file prefix\n");
+            fprintf(stderr, "%s needs a file prefix\n", flag.c_str());
             return false;
         }
     }
     return true;
 }
 
+// Delete files a previous run left at prefix + each suffix.
+static void remove_files(const std::string& prefix, const std::vector<std::string>& suffixes)
+{
+    for (const std::string& suffix : suffixes) {
+        std::error_code ec;
+        std::filesystem::remove(prefix + suffix, ec);
+    }
+}
+
+// Create prefix's missing folders, as run_sim() does for the CSV.
+static void create_folders(const std::string& prefix)
+{
+    const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
+    std::error_code ec;
+    if (!dir.empty()) std::filesystem::create_directories(dir, ec);
+}
+
 int main(int argc, char** argv)
 {
-    std::vector<char*> args;
-    std::string dataset_prefix;
-    if (!take_dataset_arg(argc, argv, args, dataset_prefix)) return 1;
-    std::unique_ptr<Dataset> dataset;
+    std::vector<char*> without_dataset, args;
+    std::string dataset_prefix, contexts_prefix;
+    if (!take_prefix_arg(argc, argv, "--dataset", without_dataset, dataset_prefix)) return 1;
+    if (!take_prefix_arg(static_cast<int>(without_dataset.size()), without_dataset.data(), "--contexts",
+                         args, contexts_prefix))
+        return 1;
+    std::unique_ptr<Dataset>       dataset;
+    std::unique_ptr<ContextWriter> contexts;
 
-    if (!dataset_prefix.empty())
-        for (const char* suffix : {Dataset::kObsSuffix, Dataset::kPlanSuffix}) {
-            std::error_code ec;
-            std::filesystem::remove(dataset_prefix + suffix, ec);
-        }
+    if (!dataset_prefix.empty())  remove_files(dataset_prefix, {Dataset::kObsSuffix, Dataset::kPlanSuffix});
+    if (!contexts_prefix.empty()) remove_files(contexts_prefix, context_file_suffixes());
 
     SimSpec<MPPILocomotion> spec;
     spec.default_yaml = kDefaultTasksYaml;
@@ -165,8 +191,8 @@ int main(int argc, char** argv)
                 csv << "," << prefix << term;
         csv << ",ref_dev_plan,ref_dev_mppi_best,ref_dev_policy_best";
     };
-    spec.extra_row = [&dataset, &dataset_prefix](std::ostream& csv, MPPILocomotion& mppi,
-                                                 const RobotState& state) {
+    spec.extra_row = [&dataset, &dataset_prefix, &contexts, &contexts_prefix](
+                         std::ostream& csv, MPPILocomotion& mppi, const RobotState& state) {
         const double* act = mppi.activation();
         for (int j = 0; j < NUM_MUSCLES; ++j) csv << "," << act[j];
         const double* cmd = mppi.act_cmd();
@@ -188,16 +214,22 @@ int main(int argc, char** argv)
             csv << "," << c.pos << "," << c.orient << "," << c.vel << "," << c.ang_vel << "," << c.gait;
         csv << "," << mppi.ref_dev_plan() << "," << mppi.ref_dev_mppi_best() << "," << mppi.ref_dev_policy_best();
 
-        if (dataset_prefix.empty()) return;
-        if (!dataset) {
-            // Opened with the first row: the horizon comes from the controller
-            // run_sim() builds. Missing folders are created, as for the CSV.
-            const std::filesystem::path dir = std::filesystem::path(dataset_prefix).parent_path();
-            std::error_code ec;
-            if (!dir.empty()) std::filesystem::create_directories(dir, ec);
-            dataset = std::make_unique<Dataset>(dataset_prefix, mppi.task_ref().horizon);
+        // Both sets of files open with the first row: the horizon comes from the
+        // controller run_sim() builds.
+        if (!dataset_prefix.empty()) {
+            if (!dataset) {
+                create_folders(dataset_prefix);
+                dataset = std::make_unique<Dataset>(dataset_prefix, mppi.task_ref().horizon);
+            }
+            dataset->append(mppi);
         }
-        dataset->append(mppi);
+        if (!contexts_prefix.empty()) {
+            if (!contexts) {
+                create_folders(contexts_prefix);
+                contexts = std::make_unique<ContextWriter>(contexts_prefix, mppi.task_ref().horizon);
+            }
+            contexts->append(mppi.solve_context(), mppi.plan());
+        }
     };
 
     return run_sim(static_cast<int>(args.size()), args.data(), spec);

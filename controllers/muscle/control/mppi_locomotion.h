@@ -16,7 +16,7 @@ struct CostWeights {
     double pos_z       = 0.0;  // L1 z-position error (height)
     double orientation = 0.0;  // (1 - |q · q_ref|)^2 distance from the goal-facing quaternion
                                 // (dynamic yaw+pitch toward the current goal, zero roll — see
-                                // MPPILocomotion::update()'s goal_quat_ computation). Still
+                                // RolloutContext::goal_quat). Still
                                 // penalizes roll/pitch deviation exactly as strictly as a fixed
                                 // identity target would; only the yaw target becomes dynamic.
     double vel_x       = 0.0;  // body-frame x-velocity tracking (forward)
@@ -41,6 +41,23 @@ struct CostTerms {
         pos += o.pos; orient += o.orient; vel += o.vel; ang_vel += o.ang_vel; gait += o.gait;
         return *this;
     }
+};
+
+// Everything a rollout reads besides the plan it scores: the state and
+// actuator state it starts from, and what step_cost() compares against.
+// update() fills one per solve and rolls every sample out from it
+// (solve_context()); score_plans() rolls plans out from any.
+struct RolloutContext {
+    RobotState          state;
+    double              activation[NUM_MUSCLES] = {};   // filtered activations (real_act_ at the solve)
+    MotorState          motor;                          // the motor's state (real_motor_ at the solve)
+    std::vector<double> gait_ref;                       // horizon × NUM_MUSCLES; zeros without an active gait
+
+    // Goal-facing orientation target: identity when close to the goal or
+    // dwelling, otherwise R_z(yaw)*R_y(pitch) built from the direction to
+    // command.goal_pos (mirrors RTWholeBodyMPPI's calculate_orientation_quaternion).
+    double              goal_quat[4] = {1.0, 0.0, 0.0, 0.0};
+    MotionCommand       command;                        // goal_pos, vx, vy
 };
 
 // MPPI locomotion with direct per-muscle activation (co-contraction capable),
@@ -142,9 +159,15 @@ public:
     // physics step's torque came from.
     HillFactors muscle_factors() const {
         HillFactors f;
-        hill_factors(solve_state_.q, solve_state_.dq, muscle_, f);
+        hill_factors(solve_.state.q, solve_.state.dq, muscle_, f);
         return f;
     }
+    // What the most recent update() rolled every sample out from.
+    const RolloutContext& solve_context() const { return solve_; }
+    // MPPI's cost of each of n plans (n × horizon × NUM_MUSCLES, laid out as
+    // plan()), rolled out from c as update() rolls out its samples, on OpenMP's
+    // threads. Leaves the controller as it was (landscape_scorer).
+    void score_plans(const RolloutContext& c, const double* plans, int n, double* costs);
 
     // Training data for the learned policy (learning/), from the most recent update():
     //   observation()  y at the state it planned from (control/observation.h)
@@ -154,7 +177,12 @@ public:
     const std::vector<double>& plan() const { return trajectory_; }
 
 private:
-    double rollout(int s, const RobotState& state) override;
+    double rollout(int s) override;   // sample s, from solve_
+
+    // Roll plan (horizon × NUM_MUSCLES) out on d from c. Returns MPPI's cost of
+    // it, summed over the horizon (1e6 if that isn't finite); terms gets the
+    // same sum split by term.
+    double rollout_plan(mjData* d, const double* plan, const RolloutContext& c, CostTerms& terms);
 
     // The policy's samples, rows n_samples onward of actions_, made in two parts
     // so update() can make them while MPPI's own samples roll out:
@@ -166,10 +194,10 @@ private:
     void policy_inputs();
     void sample_policy();
 
-    // costs_[s] = rollout(s, state) for s in [begin, end), on OpenMP's threads.
-    void roll_out(const RobotState& state, int begin, int end);
+    // costs_[s] = rollout(s) for s in [begin, end), on OpenMP's threads.
+    void roll_out(int begin, int end);
 
-    // Mean |plan - solve_gait_ref_| over the horizon and muscles (ref_dev_*()).
+    // Mean |plan - solve_.gait_ref| over the horizon and muscles (ref_dev_*()).
     double ref_deviation(const double* plan) const;
 
     // Advance d one control step under activation command act_cmd: per physics
@@ -181,8 +209,9 @@ private:
     // Finish the motor's pending step with the velocity it ended at (state.dq).
     void settle_motor(const RobotState& state);
 
-    // Cost of d's state. Call after mj_step() or set_mj_state().
-    CostTerms step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]) const;
+    // Cost of d's state against c's goal and command, and gait_ref (one step of
+    // c.gait_ref). Call after mj_step() or set_mj_state().
+    CostTerms step_cost(mjData* d, const double gait_ref[NUM_MUSCLES], const RolloutContext& c) const;
 
     // Recompute what step_cost() reads for d's qpos/qvel (see definition).
     void refresh_derived(mjData* d) const;
@@ -206,13 +235,6 @@ private:
     // whatever a previous phase left behind.
     double base_noise_sigma_act_[NUM_JOINTS] = {};
 
-    // Per-tick goal-facing orientation target used by step_cost(): identity
-    // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built
-    // from the direction to command().goal_pos (mirrors RTWholeBodyMPPI's
-    // calculate_orientation_quaternion). Computed once per update() call,
-    // held fixed across that tick's whole rollout batch.
-    double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
-
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;
 
@@ -235,12 +257,10 @@ private:
     // toward (logged by mppi_sim alongside the resulting activation).
     double last_act_cmd_[NUM_MUSCLES] = {};
 
-    // What the most recent update() planned from, so executed_cost() and
-    // plan_cost() score against it after update() returns.
-    RobotState          solve_state_;
-    double              solve_act_[NUM_MUSCLES] = {};
-    MotorState          solve_motor_;
-    std::vector<double> solve_gait_ref_;   // horizon × NUM_MUSCLES; zeros without an active gait
+    // What the most recent update() planned from: every rollout of that solve
+    // started here (the goal-facing target held fixed across the batch), and
+    // executed_cost() and plan_cost() score against it after update() returns.
+    RolloutContext solve_;
 
     double sample_min_ = 0.0;
     double ess_        = 0.0;

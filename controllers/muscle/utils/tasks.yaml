@@ -81,7 +81,7 @@ default_muscle_quad: &default_muscle_quad
 
   # MuJoCo joint damping (N·m·s/rad) written directly to simulation DOFs at startup.
   # Using the go2.xml default of 0.1. Might want to increase for real experiments
-  kd_sim:      [0.1, 0.1, 0.1,  0.1, 0.1, 0.1,  0.1, 0.1, 0.1,  0.1, 0.1, 0.1]
+  kd_sim:      [2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5,  2.0, 3.5, 3.5]
 
   # Co-contraction level in [0, 1]: where on each joint's torque-balance line
   # (all activation pairs producing the needed torque) activations are chosen.

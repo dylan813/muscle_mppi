@@ -12,6 +12,7 @@
 #include <future>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 
@@ -50,7 +51,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     : BaseMPPI(load_task(task_name, yaml_path))
 {
     muscle_ = task_.muscle;
-    solve_gait_ref_.assign(task_.horizon * NUM_MUSCLES, 0.0);
+    solve_.gait_ref.assign(task_.horizon * NUM_MUSCLES, 0.0);
     sample_terms_.resize(total_samples());
 
     // BaseMPPI already initializes trajectory_, actions_, costs_ to the correct
@@ -145,30 +146,31 @@ void MPPILocomotion::apply_phase_noise()
 // Rollout
 // ============================================================================
 
-double MPPILocomotion::rollout(int s, const RobotState& state)
+double MPPILocomotion::rollout(int s)
 {
-    mjData* d = data_[s];
-    set_mj_state(d, state);
+    const int stride = task_.horizon * NUM_MUSCLES;
+    return rollout_plan(data_[s], &actions_[s * stride], solve_, sample_terms_[s]);
+}
+
+double MPPILocomotion::rollout_plan(mjData* d, const double* plan, const RolloutContext& c, CostTerms& terms)
+{
+    set_mj_state(d, c.state);
 
     double activation[NUM_MUSCLES];
-    std::memcpy(activation, real_act_, NUM_MUSCLES * sizeof(double));
-    MotorState motor = real_motor_;
+    std::memcpy(activation, c.activation, NUM_MUSCLES * sizeof(double));
+    MotorState motor = c.motor;
 
-    const int stride  = task_.horizon * NUM_MUSCLES;
     double total_cost = 0.0;
-    CostTerms terms;
+    terms = CostTerms{};
 
     for (int t = 0; t < task_.horizon; ++t) {
-        step_model(d, &actions_[s * stride + t * NUM_MUSCLES], activation, motor);
+        step_model(d, &plan[t * NUM_MUSCLES], activation, motor);
 
-        double gait_ref[NUM_MUSCLES] = {};
-        if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref);
-        const CostTerms c = step_cost(d, gait_ref);
-        total_cost += c.total();
-        terms      += c;
+        const CostTerms step = step_cost(d, &c.gait_ref[t * NUM_MUSCLES], c);
+        total_cost += step.total();
+        terms      += step;
     }
 
-    sample_terms_[s] = terms;
     return std::isfinite(total_cost) ? total_cost : 1e6;
 }
 
@@ -253,7 +255,7 @@ void MPPILocomotion::base_com_state(const mjData* d, double com_pos[3], double c
     world_to_body(d->xmat + base_bid_ * 9, d->subtree_linvel + base_bid_ * 3, com_vel_body);
 }
 
-CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES]) const
+CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES], const RolloutContext& c) const
 {
     const CostWeights& w = cost_;
     CostTerms cost;
@@ -263,18 +265,18 @@ CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES
     double pos[3], vel_body[3];
     base_com_state(d, pos, vel_body);
 
-    cost.pos = w.pos_x * std::abs(pos[0] - command().goal_pos[0])
-             + w.pos_y * std::abs(pos[1] - command().goal_pos[1])
-             + w.pos_z * std::abs(pos[2] - command().goal_pos[2]);
+    cost.pos = w.pos_x * std::abs(pos[0] - c.command.goal_pos[0])
+             + w.pos_y * std::abs(pos[1] - c.command.goal_pos[1])
+             + w.pos_z * std::abs(pos[2] - c.command.goal_pos[2]);
 
-    const double q_dot  = d->qpos[3]*goal_quat_[0] + d->qpos[4]*goal_quat_[1]
-                         + d->qpos[5]*goal_quat_[2] + d->qpos[6]*goal_quat_[3];
+    const double q_dot  = d->qpos[3]*c.goal_quat[0] + d->qpos[4]*c.goal_quat[1]
+                         + d->qpos[5]*c.goal_quat[2] + d->qpos[6]*c.goal_quat[3];
     const double q_dist = 1.0 - std::abs(q_dot);
     cost.orient = w.orientation * q_dist * q_dist;
 
     if (w.vel_x > 0.0 || w.vel_y > 0.0 || w.vel_z > 0.0) {
-        const double ex = vel_body[0] - command().vx;
-        const double ey = vel_body[1] - command().vy;
+        const double ex = vel_body[0] - c.command.vx;
+        const double ey = vel_body[1] - c.command.vy;
         cost.vel = w.vel_x * ex*ex + w.vel_y * ey*ey + w.vel_z * vel_body[2]*vel_body[2];
     }
 
@@ -302,35 +304,44 @@ CostTerms MPPILocomotion::executed_cost(const RobotState& state)
 {
     mjData* d = data_[total_samples()];
     set_mj_state(d, state);
-    return step_cost(d, solve_gait_ref_.data());
+    return step_cost(d, solve_.gait_ref.data(), solve_);
 }
 
 CostTerms MPPILocomotion::plan_cost()
 {
-    mjData* d = data_[total_samples()];
-    set_mj_state(d, solve_state_);
+    CostTerms terms;
+    rollout_plan(data_[total_samples()], trajectory_.data(), solve_, terms);
+    return terms;
+}
 
-    double activation[NUM_MUSCLES];
-    std::memcpy(activation, solve_act_, NUM_MUSCLES * sizeof(double));
-    MotorState motor = solve_motor_;
+void MPPILocomotion::score_plans(const RolloutContext& c, const double* plans, int n, double* costs)
+{
+    const int stride = task_.horizon * NUM_MUSCLES;
+    if (c.gait_ref.size() != static_cast<size_t>(stride))
+        throw std::runtime_error("score_plans: the context's gait_ref is not horizon x NUM_MUSCLES");
 
-    CostTerms sum;
-    for (int t = 0; t < task_.horizon; ++t) {
-        step_model(d, &trajectory_[t * NUM_MUSCLES], activation, motor);
-        sum += step_cost(d, &solve_gait_ref_[t * NUM_MUSCLES]);
+    // Each thread rolls out on its own mjData, so data_ stays as update() left it.
+    #pragma omp parallel
+    {
+        mjData* d = mj_makeData(model_);
+        #pragma omp for schedule(dynamic)
+        for (int i = 0; i < n; ++i) {
+            CostTerms terms;
+            costs[i] = rollout_plan(d, plans + i * stride, c, terms);
+        }
+        mj_deleteData(d);
     }
-    return sum;
 }
 
 void MPPILocomotion::observation(double y[OBS_DIM])
 {
     mjData* d = data_[total_samples()];
-    set_mj_state(d, solve_state_);
+    set_mj_state(d, solve_.state);
     refresh_derived(d);
 
     double com[3], com_vel_body[3];
     base_com_state(d, com, com_vel_body);
-    build_observation(solve_state_, com, solve_act_, command().goal_pos, y);
+    build_observation(solve_.state, com, solve_.activation, command().goal_pos, y);
 }
 
 // ============================================================================
@@ -361,11 +372,11 @@ void MPPILocomotion::sample_policy()
     for (int i = 0; i < K * stride; ++i) plans[i] = std::clamp(plans[i], 0.0, 1.0);
 }
 
-void MPPILocomotion::roll_out(const RobotState& state, int begin, int end)
+void MPPILocomotion::roll_out(int begin, int end)
 {
     #pragma omp parallel for schedule(dynamic)
     for (int s = begin; s < end; ++s)
-        costs_[s] = rollout(s, state);
+        costs_[s] = rollout(s);
 }
 
 // Index of the lowest of costs[begin, end), or -1 for an empty range.
@@ -379,7 +390,7 @@ double MPPILocomotion::ref_deviation(const double* plan) const
 {
     const int size = task_.horizon * NUM_MUSCLES;
     double sum = 0.0;
-    for (int i = 0; i < size; ++i) sum += std::abs(plan[i] - solve_gait_ref_[i]);
+    for (int i = 0; i < size; ++i) sum += std::abs(plan[i] - solve_.gait_ref[i]);
     return sum / size;
 }
 
@@ -398,19 +409,19 @@ void MPPILocomotion::update(const RobotState& state)
         return;
     }
 
-    // Goal-facing orientation target for this tick's cost, held fixed across
-    // the whole rollout batch below (see common/control_utils.h).
-    goal_facing_quat(command().goal_pos, state.pos, phases_.dwelling(), goal_quat_);
-
-    // What this solve plans from, for executed_cost() and plan_cost().
-    solve_state_ = state;
-    std::memcpy(solve_act_, real_act_, NUM_MUSCLES * sizeof(double));
-    solve_motor_ = real_motor_;
+    // What this solve plans from: every rollout below starts here, with the
+    // goal-facing orientation target held fixed across the whole batch (see
+    // common/control_utils.h).
+    solve_.state = state;
+    std::memcpy(solve_.activation, real_act_, NUM_MUSCLES * sizeof(double));
+    solve_.motor = real_motor_;
     for (int t = 0; t < task_.horizon; ++t) {
-        double* ref = &solve_gait_ref_[t * NUM_MUSCLES];
+        double* ref = &solve_.gait_ref[t * NUM_MUSCLES];
         std::fill(ref, ref + NUM_MUSCLES, 0.0);
         if (phases_.active_gait()) phases_.active_gait()->get_phase(t, ref);
     }
+    goal_facing_quat(command().goal_pos, state.pos, phases_.dwelling(), solve_.goal_quat);
+    solve_.command = command();
 
     // Warm-start: shift trajectory_ forward by 1 step (see common/control_utils.h).
     const int stride = task_.horizon * NUM_MUSCLES;
@@ -428,10 +439,10 @@ void MPPILocomotion::update(const RobotState& state)
         policy_inputs();
         policy_samples = std::async(std::launch::async, &MPPILocomotion::sample_policy, this);
     }
-    roll_out(state, 0, task_.n_samples);
+    roll_out(0, task_.n_samples);
     if (policy_) {
         policy_samples.get();   // rethrows the policy's errors
-        roll_out(state, task_.n_samples, n);
+        roll_out(task_.n_samples, n);
     }
 
     // Softmin weights (normalised), scaled by the range of MPPI's own samples

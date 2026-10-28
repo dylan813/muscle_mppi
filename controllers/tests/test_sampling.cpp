@@ -22,7 +22,7 @@ public:
     const std::vector<double>& knots()   const { return knot_x_; }
 
 private:
-    double rollout(int, const RobotState&) override { return 0.0; }
+    double rollout(int) override { return 0.0; }
 };
 
 // A plan that isn't a cubic: a 17-step-period sine, phase per muscle, in [0.35, 0.65].

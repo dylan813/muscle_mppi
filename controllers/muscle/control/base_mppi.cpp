@@ -218,6 +218,33 @@ void BaseMPPI::sample_actions_cubic() {
     }
 }
 
+void BaseMPPI::plan_from_knots(const double* knots, double* plan) const
+{
+    if (knot_x_.empty()) throw std::runtime_error("plan_from_knots: the task's sample_type is not \"cubic\"");
+
+    const int H = task_.horizon;
+    const int K = static_cast<int>(knot_x_.size());
+
+    std::vector<double> knot_y(K);
+    std::vector<double> yt(H);
+
+    for (int m = 0; m < NUM_MUSCLES; ++m) {
+        for (int k = 0; k < K; ++k) knot_y[k] = knots[k * NUM_MUSCLES + m];
+        not_a_knot_cubic_spline(knot_x_, knot_y, yt.data(), H);
+        for (int t = 0; t < H; ++t) plan[t * NUM_MUSCLES + m] = std::clamp(yt[t], 0.0, 1.0);
+    }
+}
+
+void BaseMPPI::knots_from_plan(const double* plan, double* knots) const
+{
+    if (knot_x_.empty()) throw std::runtime_error("knots_from_plan: the task's sample_type is not \"cubic\"");
+
+    for (size_t k = 0; k < knot_x_.size(); ++k) {
+        const int t = static_cast<int>(knot_x_[k]);
+        for (int m = 0; m < NUM_MUSCLES; ++m) knots[k * NUM_MUSCLES + m] = plan[t * NUM_MUSCLES + m];
+    }
+}
+
 void BaseMPPI::set_mj_state(mjData* d, const RobotState& state) {
     mj_resetData(model_, d);
 

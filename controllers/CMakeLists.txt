@@ -50,6 +50,18 @@ add_executable(mppi_sim
 )
 target_link_libraries(mppi_sim ${COMMON_LIBS} onnxruntime::onnxruntime)
 
+# --- MPPI's cost at one saved solve, for the landscape toolbox (reads mppi_sim --contexts) ---
+add_executable(landscape_scorer
+    muscle/landscape_scorer.cpp
+    muscle/control/base_mppi.cpp
+    muscle/control/mppi_locomotion.cpp
+    muscle/control/flow_policy.cpp
+    muscle/control/activation_gait.cpp
+    muscle/utils/tasks.cpp
+    common/task_config.cpp
+)
+target_link_libraries(landscape_scorer mujoco yaml-cpp pthread OpenMP::OpenMP_CXX onnxruntime::onnxruntime)
+
 # --- PD-actuated standalone MuJoCo simulation test (mirrors mppi_sim, but ---
 # --- with direct joint-space PD control instead of the muscle model)     ---
 add_executable(pd_mppi_sim
@@ -74,6 +86,21 @@ add_test(NAME observation COMMAND test_observation)
 
 add_executable(test_npy_writer tests/test_npy_writer.cpp)
 add_test(NAME npy_writer COMMAND test_npy_writer)
+
+add_executable(test_npy_reader tests/test_npy_reader.cpp)
+add_test(NAME npy_reader COMMAND test_npy_reader)
+
+add_executable(test_landscape
+    tests/test_landscape.cpp
+    muscle/control/base_mppi.cpp
+    muscle/control/mppi_locomotion.cpp
+    muscle/control/flow_policy.cpp
+    muscle/control/activation_gait.cpp
+    muscle/utils/tasks.cpp
+    common/task_config.cpp
+)
+target_link_libraries(test_landscape mujoco yaml-cpp pthread OpenMP::OpenMP_CXX onnxruntime::onnxruntime)
+add_test(NAME landscape COMMAND test_landscape)
 
 add_executable(test_mppi_labels
     tests/test_mppi_labels.cpp
