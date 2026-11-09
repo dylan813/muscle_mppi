@@ -126,15 +126,28 @@ struct MotorParams {
 //   Duration  only once sim_duration elapses.
 enum class TaskEnd { Success, Duration };
 
-// Random horizontal pushes the standalone sims give the trunk, from a task's
-// optional `push:` block. Each push replaces the trunk's world-frame horizontal
-// velocity with (vx, vy), each drawn uniformly from [-max_vel_xy, max_vel_xy],
-// as SATA's _push_robots() does (legged_gym go2_torque.py), without its growth
-// scale. Vertical and angular velocity are left as they are.
+// How each push from a task's `push:` block (PushParams) acts on the trunk.
+//   HorizontalKick  replace its world-frame horizontal velocity with (vx, vy),
+//                   each uniform in [-max_vel_xy, max_vel_xy], as SATA's
+//                   _push_robots() does (legged_gym go2_torque.py), without its
+//                   growth scale. Vertical and angular velocity are left as they are.
+//   DownForce       press it straight down with a force uniform in [0, max_force],
+//                   held for `duration`, at a point uniform in a disk of `radius`
+//                   around the whole-robot CoM (xy). An off-center point also
+//                   pitches and rolls the trunk.
+enum class PushType { HorizontalKick, DownForce };
+
+// Random pushes the standalone sims give the trunk, from a task's optional
+// `push:` block: one every `interval` seconds, the first at t = interval.
 struct PushParams {
-    double interval   = 0.0;   // s between pushes; the first comes at t = interval
-    int    steps      = 0;     // control steps between pushes: interval / dt
-    double max_vel_xy = 0.0;   // m/s
+    PushType type       = PushType::HorizontalKick;
+    double   interval   = 0.0;   // s between pushes
+    int      steps      = 0;     // control steps between pushes: interval / dt
+    double   max_vel_xy = 0.0;   // HorizontalKick: m/s
+    double   max_force  = 0.0;   // DownForce: N
+    double   duration   = 0.0;   // DownForce: s each push is held
+    int      hold_steps = 0;     // DownForce: control steps each push is held: duration / dt
+    double   radius     = 0.0;   // DownForce: m
 };
 
 // Task fields common to both variants, parsed by load_task_base()

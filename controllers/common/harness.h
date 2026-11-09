@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <ostream>
 #include <random>
 #include <string>
@@ -159,16 +160,107 @@ inline RobotState read_state(const mjData* d, const int qa[NUM_JOINTS], const in
     return s;
 }
 
-// One random push (PushParams): replace the trunk's world-frame horizontal
-// velocity (free-joint qvel[0:2]) with a uniform draw per axis, also written to v_xy.
-inline void apply_push(mjData* d, const PushParams& push, std::mt19937& rng, double v_xy[2])
-{
-    std::uniform_real_distribution<double> draw(-push.max_vel_xy, push.max_vel_xy);
-    for (int k = 0; k < 2; ++k) {
-        v_xy[k]    = draw(rng);
-        d->qvel[k] = v_xy[k];
+// Gives the trunk a task's random pushes (PushParams, PushType). Unseeded, as
+// the MPPI samplers are, so each run gets its own pushes.
+//
+// CSV columns, for the push acting during each logged control step (0 when none):
+//   HorizontalKick  push_vx, push_vy   velocity the kick set (m/s, world frame)
+//   DownForce       push_fz            force on the trunk (N, world z; negative = down)
+//                   push_dx, push_dy   push point minus the whole-robot CoM at push start (m)
+class Pusher {
+public:
+    Pusher(const PushParams& push, int base_bid)
+        : push_(push), base_bid_(base_bid), rng_(std::random_device{}()) {}
+
+    void print_settings() const
+    {
+        if (push_.type == PushType::HorizontalKick)
+            printf("Push: horizontal kick every %.6g s, vx and vy each uniform in [-%.6g, %.6g] m/s\n",
+                   push_.interval, push_.max_vel_xy, push_.max_vel_xy);
+        else
+            printf("Push: down force every %.6g s, uniform in [0, %.6g] N, held %.6g s, within %.6g m of the CoM\n",
+                   push_.interval, push_.max_force, push_.duration, push_.radius);
     }
-}
+
+    void header(std::ostream& csv) const
+    {
+        csv << (push_.type == PushType::HorizontalKick ? ",push_vx,push_vy" : ",push_fz,push_dx,push_dy");
+    }
+
+    void row(std::ostream& csv) const
+    {
+        if (push_.type == PushType::HorizontalKick) csv << "," << v_xy_[0] << "," << v_xy_[1];
+        else                                        csv << "," << fz_ << "," << dx_ << "," << dy_;
+    }
+
+    // Call at the start of each control step, before its solve, so update()
+    // starts from the pushed state. steps_taken: control steps run so far.
+    void step(const mjModel* m, mjData* d, int steps_taken, double t)
+    {
+        v_xy_[0] = v_xy_[1] = 0.0;   // a kick lasts its own control step
+        if (held_ > 0 && --held_ == 0) release(d);
+
+        if (steps_taken == 0 || steps_taken % push_.steps != 0) return;
+        if (push_.type == PushType::HorizontalKick) kick(d, t);
+        else                                        press(m, d, t);
+    }
+
+private:
+    // Replace the trunk's world-frame horizontal velocity (free-joint qvel[0:2]).
+    void kick(mjData* d, double t)
+    {
+        std::uniform_real_distribution<double> draw(-push_.max_vel_xy, push_.max_vel_xy);
+        for (int k = 0; k < 2; ++k) {
+            v_xy_[k]   = draw(rng_);
+            d->qvel[k] = v_xy_[k];
+        }
+        printf("Push at t=%.2f s: v_xy = (%.3f, %.3f) m/s\n", t, v_xy_[0], v_xy_[1]);
+    }
+
+    // Start a downward force on the trunk, held for hold_steps control steps.
+    // xfrc_applied acts at the trunk's CoM, so the force at the push point is
+    // that force plus its moment lever × (0, 0, fz); the lever is fixed at push
+    // start, in world axes.
+    void press(const mjModel* m, mjData* d, double t)
+    {
+        // Whole-robot CoM (base body's subtree_com) for the current state.
+        mj_kinematics(m, d);
+        mj_comPos(m, d);
+        const double* com   = d->subtree_com + 3 * base_bid_;
+        const double* trunk = d->xipos + 3 * base_bid_;
+
+        std::uniform_real_distribution<double> unit(0.0, 1.0);
+        const double r     = push_.radius * std::sqrt(unit(rng_));   // sqrt: uniform over the disk's area
+        const double angle = 2.0 * M_PI * unit(rng_);
+        dx_ = r * std::cos(angle);
+        dy_ = r * std::sin(angle);
+        fz_ = -push_.max_force * unit(rng_);
+
+        const double lever_x = com[0] + dx_ - trunk[0];
+        const double lever_y = com[1] + dy_ - trunk[1];
+        double* f = d->xfrc_applied + 6 * base_bid_;
+        f[0] = 0.0;  f[1] = 0.0;  f[2] = fz_;
+        f[3] = lever_y * fz_;  f[4] = -lever_x * fz_;  f[5] = 0.0;
+        held_ = push_.hold_steps;
+
+        printf("Push at t=%.2f s: fz = %.1f N for %.3g s at (%.3f, %.3f) m from the CoM\n",
+               t, fz_, push_.duration, dx_, dy_);
+    }
+
+    void release(mjData* d)
+    {
+        mju_zero(d->xfrc_applied + 6 * base_bid_, 6);
+        fz_ = dx_ = dy_ = 0.0;
+    }
+
+    PushParams   push_;
+    int          base_bid_;
+    std::mt19937 rng_;
+
+    double v_xy_[2] = {};                     // HorizontalKick: this control step's kick
+    double fz_ = 0.0, dx_ = 0.0, dy_ = 0.0;   // DownForce: the force being held
+    int    held_ = 0;                         // DownForce: control steps left to hold it
+};
 
 // Reset to the stand-down pose and drop the robot so its lowest foot sits at
 // z = spawn_height_offset (the terrain height under the spawn point).
@@ -287,8 +379,8 @@ struct SimSpec {
 // Stands the robot up, runs kConvergenceSolves solves, then logs one CSV row
 // (and one qpos row) per control step until sim_duration elapses, the robot
 // falls, or (end_on: success, the default) the task's final phase is reached
-// and held. A task's push: block kicks the trunk every push.interval seconds,
-// logged as push_vx/push_vy (0 between pushes) at the end of each row. Afterwards it deletes
+// and held. A task's push: block pushes the trunk every push.interval seconds
+// (Pusher), logged in the last columns of each row. Afterwards it deletes
 // any existing <output>.gif and, unless --no-gif is given, renders the logged
 // rollout to a fresh one; with --save the GIF is copied into the trial too. The
 // console lines are parsed by run_trials.sh, so keep their wording stable.
@@ -378,7 +470,9 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     if (!open_output(csv_path, csv)) return 1;
     write_csv_header_base(csv);
     spec.extra_header(csv);
-    if (task.push) csv << ",push_vx,push_vy";
+    std::optional<Pusher> pusher;
+    if (task.push) pusher.emplace(*task.push, base_bid);
+    if (pusher) pusher->header(csv);
     csv << "\n";
 
     const std::string qpos_path = qpos_path_for(csv_path);
@@ -407,12 +501,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
                motor.substeps, 1000.0 * motor.physics_dt,
                motor.damping == MotorDamping::Implicit ? "implicit" : "explicit");
 
-    if (task.push)
-        printf("Push: every %.6g s, vx and vy each uniform in [-%.6g, %.6g] m/s\n",
-               task.push->interval, task.push->max_vel_xy, task.push->max_vel_xy);
-
-    // Unseeded, as the MPPI samplers are, so each run gets its own pushes.
-    std::mt19937 push_rng(std::random_device{}());
+    if (pusher) pusher->print_settings();
 
     // ── MPPI loop ─────────────────────────────────────────────────────────────
     printf("Running MPPI for %d convergence solves then logging...\n",
@@ -426,13 +515,8 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     int logged_rows = 0;
 
     while (sim_t < sim_duration) {
-        // --- push: before every push.steps-th control step's solve (solve_count
-        //     is the control steps taken), so update() starts from the pushed state ---
-        double push_v[2] = {};
-        if (task.push && solve_count > 0 && solve_count % task.push->steps == 0) {
-            apply_push(d, *task.push, push_rng, push_v);
-            printf("Push at t=%.2f s: v_xy = (%.3f, %.3f) m/s\n", sim_t, push_v[0], push_v[1]);
-        }
+        // --- push (solve_count is the control steps taken) ---
+        if (pusher) pusher->step(m, d, solve_count, sim_t);
 
         // --- MPPI solve ---
         RobotState state = read_state(d, qa, qv);
@@ -470,7 +554,7 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
             write_csv_row_base(csv, sim_t, spec.log_position(m, d, base_bid),
                                m, d, qv, feet, ms);
             spec.extra_row(csv, mppi, read_state(d, qa, qv));
-            if (task.push) csv << "," << push_v[0] << "," << push_v[1];
+            if (pusher) pusher->row(csv);
             csv << "\n";
 
             // save full qpos for GIF rendering

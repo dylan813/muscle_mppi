@@ -68,11 +68,17 @@ default_control_effort_weights: &default_control_effort_weights
 # Without it the joints are driven directly.
 #
 # Optional, any task (both variants, PushParams in common/task_config.h): a
-# `push:` block makes the sims kick the trunk at a fixed interval, replacing its
-# world-frame horizontal velocity. Both keys required.
+# `push:` block makes the sims push the trunk at a fixed interval. Each type
+# takes only its own keys, all required.
 #   push:
+#     type:       horizontal_kick   # horizontal_kick | down_force
 #     interval:   4.0    # s between pushes; the first at t = interval; dt * whole number
+#     # horizontal_kick: replace the trunk's world-frame horizontal velocity
 #     max_vel_xy: 1.5    # m/s; vx, vy each drawn uniformly from [-max_vel_xy, max_vel_xy]
+#     # down_force: press the trunk straight down near the CoM
+#     max_force:  75.0   # N; drawn uniformly from [0, max_force]
+#     duration:   0.2    # s each push is held; dt * whole number, shorter than interval
+#     radius:     0.1    # m; point uniform in a disk of this radius around the whole-robot CoM (xy)
 #
 # Optional, any task: `end_on:` sets when a sim run the robot hasn't fallen in ends.
 #   end_on: success    # success (default): once the final phase is reached and held
@@ -318,8 +324,62 @@ push_recovery:
   # SATA's push settings (legged_gym go2_torque_config.py: push_interval_s,
   # max_push_vel_xy), without its growth scale.
   push:
+    type:       horizontal_kick
     interval:   4.0
     max_vel_xy: 1.5
+
+  phases:
+    - goal_pos:     [0.0, 0.0, 0.27]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  nominal_pose: [0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763,  0.00571868, 0.608813, -1.21763,  -0.00571868, 0.608813, -1.21763]
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  pd: *default_pd_quad
+
+# -----------------------------------------------------------------------
+# push_down_recovery: push_recovery with every push pressing the trunk straight
+# down near the CoM (push.type: down_force) instead of kicking it sideways, as
+# the muscle push_down_recovery task does. push_recovery's goal-facing note
+# applies here too.
+push_down_recovery:
+  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  cost:
+    pos_x:         0.0
+    pos_y:         0.0
+    pos_z:         500.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+    joint_vel_weights: *default_joint_vel_weights
+    control_effort_weights: *default_control_effort_weights
+
+  sim_duration: 20.0
+  end_on:       duration
+
+  # Values chosen for this task, no reference source: up to the robot's weight
+  # (15.2 kg -> 149 N) for 0.2 s, at the push_recovery interval.
+  push:
+    type:      down_force
+    interval:  4.0
+    max_force: 150.0
+    duration:  0.2
+    radius:    0.1
 
   phases:
     - goal_pos:     [0.0, 0.0, 0.27]

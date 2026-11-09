@@ -2,6 +2,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -105,30 +106,65 @@ static void load_motor(const YAML::Node& node, double dt, MotorParams& motor)
                                  + std::to_string(motor.update_rate));
 }
 
-// Optional `push:` block (PushParams). Unknown keys throw, as for `motor:`.
+// `seconds` as a whole number of control steps of dt; throws naming `field` otherwise.
+static int control_steps(double seconds, double dt, const std::string& field)
+{
+    const double ratio = seconds / dt;
+    const int    steps = static_cast<int>(std::lround(ratio));
+    if (!(seconds > 0.0) || steps < 1 || std::abs(ratio - steps) > 1e-9)
+        throw std::runtime_error("Field '" + field + "': expected a whole number of control steps (dt), got "
+                                 + std::to_string(seconds));
+    return steps;
+}
+
+// Optional `push:` block (PushParams). Each type takes its own keys, all
+// required; unknown keys and the other type's keys throw, as for `motor:`.
 static std::optional<PushParams> load_push(const YAML::Node& node, double dt)
 {
     if (!node) return std::nullopt;
 
+    PushParams push;
+    const std::string type = node["type"] ? node["type"].as<std::string>() : "";
+    if      (type == "horizontal_kick") push.type = PushType::HorizontalKick;
+    else if (type == "down_force")      push.type = PushType::DownForce;
+    else throw std::runtime_error("Field 'push.type': expected horizontal_kick or down_force, got '" + type + "'");
+
+    const std::vector<std::string> keys = push.type == PushType::HorizontalKick
+        ? std::vector<std::string>{"type", "interval", "max_vel_xy"}
+        : std::vector<std::string>{"type", "interval", "max_force", "duration", "radius"};
+    std::string expected;
+    for (const std::string& key : keys) expected += (expected.empty() ? "" : ", ") + key;
+
     for (const auto& kv : node) {
         const std::string key = kv.first.as<std::string>();
-        if (key != "interval" && key != "max_vel_xy")
-            throw std::runtime_error("Field 'push': unknown key '" + key + "' (expected interval, max_vel_xy)");
+        if (std::find(keys.begin(), keys.end(), key) == keys.end())
+            throw std::runtime_error("Field 'push': unknown key '" + key + "' for " + type + " (expected " + expected + ")");
     }
-    if (!node["interval"] || !node["max_vel_xy"])
-        throw std::runtime_error("Field 'push': needs interval and max_vel_xy");
+    for (const std::string& key : keys)
+        if (!node[key]) throw std::runtime_error("Field 'push." + key + "': required for " + type);
 
-    PushParams push;
     push.interval = node["interval"].as<double>();
-    const double steps = push.interval / dt;
-    push.steps = static_cast<int>(std::lround(steps));
-    if (!(push.interval > 0.0) || push.steps < 1 || std::abs(steps - push.steps) > 1e-9)
-        throw std::runtime_error("Field 'push.interval': expected a whole number of control steps (dt), got "
-                                 + std::to_string(push.interval));
+    push.steps    = control_steps(push.interval, dt, "push.interval");
 
-    push.max_vel_xy = node["max_vel_xy"].as<double>();
-    if (!(push.max_vel_xy > 0.0))
-        throw std::runtime_error("Field 'push.max_vel_xy': expected > 0");
+    if (push.type == PushType::HorizontalKick) {
+        push.max_vel_xy = node["max_vel_xy"].as<double>();
+        if (!(push.max_vel_xy > 0.0))
+            throw std::runtime_error("Field 'push.max_vel_xy': expected > 0");
+        return push;
+    }
+
+    push.max_force = node["max_force"].as<double>();
+    if (!(push.max_force > 0.0))
+        throw std::runtime_error("Field 'push.max_force': expected > 0");
+
+    push.duration   = node["duration"].as<double>();
+    push.hold_steps = control_steps(push.duration, dt, "push.duration");
+    if (push.hold_steps >= push.steps)
+        throw std::runtime_error("Field 'push.duration': expected shorter than push.interval");
+
+    push.radius = node["radius"].as<double>();
+    if (!(push.radius >= 0.0))
+        throw std::runtime_error("Field 'push.radius': expected >= 0");
 
     return push;
 }
