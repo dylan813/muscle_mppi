@@ -2,8 +2,8 @@
 Render force-length and force-velocity curve plots for a 12D CMA-ES
 candidate x, for wandb logging during cmaes_walk.py runs.
 
-FL curve logic is recycled directly from objective.py's closed-form
-active/passive functions (the same ones curve_area_mean() integrates).
+FL curve logic is recycled directly from gait_generator.py's active/passive
+functions (the same ones gait generation uses).
 FV curve logic is recycled from analysis/plot/plot_force_velocity.py's
 force_vel(), reimplemented here since that script hardcodes tasks.yaml as
 its parameter source instead of taking x.
@@ -19,13 +19,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from objective import _active_fl, _passive_force_length, _joint_curve_area
+from gait_generator import _active_fl, _passive_fl
 
 JOINT_NAMES = ["hip", "thigh", "calf"]
 
 # Wide enough to show the full curve regardless of where lce_min/lce_max/
-# pFLmax land within cmaes_walk.py's LO/HI bounds (same domain as
-# objective._AREA_DOMAIN).
+# pFLmax land within cmaes_walk.py's LO/HI bounds.
 _FL_DOMAIN = np.linspace(0.3, 1.9, 400)
 _FV_DOMAIN = np.linspace(-1.5, 2.0, 400)
 
@@ -50,26 +49,21 @@ def plot_fl_curves(x, title_suffix=""):
     for j in range(3):
         ax = axes[j]
         lmin, lmax, fpm = lce_min[j], lce_max[j], pFLmax[j]
-        b = 0.5 * (lmax + 1.0)
 
         active   = np.array([_active_fl(l, lmin, lmax) for l in _FL_DOMAIN])
-        passive  = np.array([_passive_force_length(l, fpm, b) for l in _FL_DOMAIN])
+        passive  = np.array([_passive_fl(l, lmax, fpm) for l in _FL_DOMAIN])
         combined = active + passive
-        area     = _joint_curve_area(lmin, lmax, fpm)
 
         ax.plot(_FL_DOMAIN, active,   label="Active",   color="#2196F3", linewidth=2)
         ax.plot(_FL_DOMAIN, passive,  label="Passive",  color="#FF9800", linewidth=2, linestyle="--")
         ax.plot(_FL_DOMAIN, combined, label="Combined", color="#4CAF50", linewidth=2, linestyle=":")
-        # Highlight the region being maximized: where active exceeds passive.
-        ax.fill_between(_FL_DOMAIN, passive, active, where=active > passive,
-                         color="#4CAF50", alpha=0.15, interpolate=True)
 
         ax.axvline(lmin, color="gray", linewidth=0.8, linestyle="--", alpha=0.6)
         ax.axvline(1.0,  color="gray", linewidth=0.8, linestyle="-",  alpha=0.6)
         ax.axvline(lmax, color="gray", linewidth=0.8, linestyle="-.", alpha=0.6)
 
         ax.set_title(f"{JOINT_NAMES[j]}\nlce=[{lmin:.3f}, {lmax:.3f}]  "
-                     f"pFLmax={fpm:.3f}  area={area:.3f}", fontsize=11)
+                     f"pFLmax={fpm:.3f}", fontsize=11)
         ax.grid(True, alpha=0.3)
         ax.set_xlabel("$l_{ce} / l_{opt}$", fontsize=11)
         if j == 0:
