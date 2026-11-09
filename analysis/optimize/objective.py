@@ -6,17 +6,16 @@ Each call to evaluate(x):
      arrays (hip/thigh/calf values shared across all 4 legs).
   2. Generates the activation gait(s) the walk task's phases use into a temp
      dir (gait_generator.py) and checks them for infeasible phases
-  3. Writes a temp tasks.yaml with the candidate's muscle params, pointing each
-     walk phase's gait_path at its generated gait
+  3. Writes a temp tasks.yaml with the candidate's muscle params and the
+     CMA-ES task settings (GOAL_POS, SIM_DURATION), pointing each walk
+     phase's gait_path at its generated gait
   4. Runs mppi_sim as a subprocess (it computes the warm start from these
      muscle params at startup)
-  5. Parses the output CSV and computes the mean per-step cost from tasks.yaml weights
+  5. Parses the output CSV and computes the mean per-step cost (FITNESS_TERMS)
 
-The cost formula mirrors mppi_locomotion.cpp::step_cost() for terms computable
-from the logged CSV (pos_x/y/z, orientation, vel_x/y/z — px/py/pz are the
-whole-robot subtree CoM and vx/vy/vz are body-frame velocity, both computed
-in mppi_sim.cpp to match step_cost() exactly). ang_vel and gait_ref
-terms are omitted as those quantities are not logged.
+The cost is the controller's own: mppi_sim logs each executed step's
+step_cost() terms (cost_* columns, mppi_locomotion.cpp), so the fitness
+scores exactly what MPPI optimizes, not a reimplementation of it.
 """
 
 import os
@@ -43,7 +42,6 @@ import copy
 import io
 import subprocess
 import tempfile
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -71,6 +69,18 @@ MAX_INFEASIBLE_PENALTY = INFEASIBLE_PENALTY_PER_PHASE * N_PHASES
 
 # Discard this many seconds of transient at the start of the log
 TRANSIENT_SECS = 2.0
+
+# step_cost() terms scored, as mppi_sim's CSV columns (weights already applied).
+# Left out: cost_ang_vel and cost_gait.
+FITNESS_TERMS = ["cost_pos", "cost_orient", "cost_vel"]
+
+# Task settings of the July 2026 FVmax-sweep runs and the Aug 4 2026 run that
+# produced tasks.yaml's muscle values (commits 7e977c6, b0c904a), applied to
+# walk in each candidate's YAML so tasks.yaml's walk keeps its own. The goal is
+# out of reach at walk's 0.2 m/s within the run, so every run lasts
+# SIM_DURATION unless the robot falls.
+GOAL_POS     = [5.0, 0.0, 0.34]
+SIM_DURATION = 10.0   # s
 
 
 # Joint order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), ...
@@ -108,6 +118,7 @@ def _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir):
     - walk.phases[i].gait_path set to phase_gait_paths[i] (absolute), so
       mppi_sim uses the candidate's gaits instead of generating its own into
       the shared controllers/muscle/gaits/
+    - walk run with GOAL_POS and SIM_DURATION, ending early only on a fall
     Returns the path to the written yaml.
     """
     cfg = copy.deepcopy(base_cfg)
@@ -121,6 +132,12 @@ def _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir):
     cfg["walk"]["model_path"] = MODEL_PATH
     for phase, gait_path in zip(cfg["walk"]["phases"], phase_gait_paths):
         phase["gait_path"] = gait_path
+
+    walk = cfg["walk"]
+    (phase,) = walk["phases"]   # raises unless walk has exactly one phase
+    phase["goal_pos"]    = GOAL_POS
+    walk["sim_duration"] = SIM_DURATION
+    walk["end_on"]       = "duration"
 
     yaml_path = os.path.join(tmp_dir, "tasks.yaml")
     with open(yaml_path, "w") as f:
@@ -157,10 +174,9 @@ def _prepare_candidate(x, tmp_dir):
     return base_cfg, muscle_params, phase_gait_paths, n_inf
 
 
-def _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel):
+def _compute_fitness(csv_path):
     """
-    Parse mppi_sim CSV and compute mean per-step cost using the same weights
-    as mppi_locomotion.cpp::step_cost() (for terms available in the CSV).
+    Parse mppi_sim CSV and compute the mean per-step sum of FITNESS_TERMS.
     """
     try:
         df = pd.read_csv(csv_path)
@@ -175,21 +191,7 @@ def _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel):
     if df.empty:
         return MAX_INFEASIBLE_PENALTY
 
-    w   = cost_weights
-    gx, gy, gz = goal_pos
-    cvx, cvy   = cmd_vel
-
-    cost = (
-        w["pos_x"]      * np.abs(df["px"] - gx)
-      + w["pos_y"]      * np.abs(df["py"] - gy)
-      + w["pos_z"]      * np.abs(df["pz"] - gz)
-      + w["orientation"] * (1.0 - np.abs(df["qw"])) ** 2
-      + w["vel_x"]      * (df["vx"] - cvx) ** 2
-      + w["vel_y"]      * (df["vy"] - cvy) ** 2
-      + w["vel_z"]      * df["vz"] ** 2
-    )
-
-    return float(cost.mean())
+    return float(df[FITNESS_TERMS].sum(axis=1).mean())
 
 
 def evaluate(x, worker_id=0, verbose=False):
@@ -214,7 +216,6 @@ def evaluate(x, worker_id=0, verbose=False):
             return penalty
 
         # Write temp yaml
-        walk_cfg  = base_cfg["walk"]
         yaml_path = _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir)
         csv_path  = os.path.join(tmp_dir, "sim.csv")
 
@@ -231,12 +232,7 @@ def evaluate(x, worker_id=0, verbose=False):
                 print(f"  [w{worker_id}] mppi_sim timed out")
             return MAX_INFEASIBLE_PENALTY
 
-        # Parse fitness
-        cost_weights = walk_cfg["cost"]
-        goal_pos     = walk_cfg["phases"][0]["goal_pos"]
-        cmd_vel      = walk_cfg["phases"][0]["cmd_vel"]
-
-        cost = _compute_fitness(csv_path, cost_weights, goal_pos, cmd_vel)
+        cost = _compute_fitness(csv_path)
 
     if verbose:
         hip, thigh, calf = (

@@ -1,9 +1,9 @@
 """
 CMA-ES optimizer for Hill muscle parameters of the walk task.
 
-Optimizes x = [lce_min, lce_max, pFLmax, FVmax] (scalar per param, broadcast
-to all 12 joints) to minimize the mean per-step locomotion cost from
-tasks.yaml.
+Optimizes x = [lce_min, lce_max, pFLmax, FVmax] (one value per joint type,
+shared by all 4 legs) to minimize the mean per-step locomotion cost of the
+walk task, run with the task settings in objective.py.
 
 Usage:
   python cmaes_walk.py               # run full optimization
@@ -32,7 +32,9 @@ from objective import evaluate, render_rollout
 from curve_plots import plot_fl_curves, plot_fv_curves
 
 # ── search space (12D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax) ────────
-# All 4 legs share the same value per joint type.
+# All 4 legs share the same value per joint type. X0, SIGMA0, LO and HI are
+# those of the Aug 4 2026 run that produced tasks.yaml's muscle values
+# (run name area_0, commit b0c904a).
 PARAM_NAMES = [
     "lce_min_hip",  "lce_min_thigh",  "lce_min_calf",
     "lce_max_hip",  "lce_max_thigh",  "lce_max_calf",
@@ -109,7 +111,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test",    action="store_true",
                         help="Evaluate initial point only (smoke test)")
-    parser.add_argument("--maxiter", type=int,   default=10)
+    parser.add_argument("--maxiter", type=int,   default=15)
     parser.add_argument("--workers", type=int,   default=8)
     parser.add_argument("--sigma",   type=float, default=None,
                         help="Override initial sigma (scalar); default: per-param")
