@@ -28,7 +28,7 @@ import wandb
 sys.path.insert(0, os.path.dirname(__file__))
 
 import cma
-from objective import evaluate, render_rollout, RENDER_FPS
+from objective import evaluate, render_rollout
 from curve_plots import plot_fl_curves, plot_fv_curves
 
 # ── search space (12D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax) ────────
@@ -255,9 +255,9 @@ def main():
         # every generation (rather than only on new-best) lets you watch
         # gait behavior evolve generation-by-generation in wandb, not just
         # at improvement points.
-        frames = render_rollout(gen_best_x)
-        if frames is not None:
-            log["gen_best_rollout"] = wandb.Video(frames, fps=RENDER_FPS, format="gif")
+        gif = render_rollout(gen_best_x)
+        if gif is not None:
+            log["gen_best_rollout"] = wandb.Video(gif, format="gif")
         else:
             print("  (rollout render failed, skipping gif)")
 

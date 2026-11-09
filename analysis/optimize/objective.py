@@ -20,11 +20,13 @@ terms are omitted as those quantities are not logged.
 """
 
 import os
+import sys
 
-# Headless (no X11 DISPLAY) EGL rendering — must be set before mujoco is
-# imported, since the GL backend is selected at import time. Only defaults
-# it; an existing MUJOCO_GL (e.g. a real DISPLAY, or osmesa) is left alone.
-os.environ.setdefault("MUJOCO_GL", "egl")
+# mppi_sim renders its rollout GIF by running analysis/render_gif.py with the
+# MUSCLE_MPPI_PYTHON interpreter (controllers/common/log.h; python3 if unset).
+# Default it to the Python running this script, which has render_gif.py's
+# packages (muscle env).
+os.environ.setdefault("MUSCLE_MPPI_PYTHON", sys.executable)
 
 # mppi_sim parallelizes its rollout sampling internally via OpenMP
 # (#pragma omp parallel for in base_mppi.cpp / mppi_locomotion.cpp), which by
@@ -38,9 +40,9 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import copy
+import io
 import subprocess
 import tempfile
-import mujoco
 import numpy as np
 import pandas as pd
 import yaml
@@ -69,10 +71,6 @@ MAX_INFEASIBLE_PENALTY = INFEASIBLE_PENALTY_PER_PHASE * N_PHASES
 
 # Discard this many seconds of transient at the start of the log
 TRANSIENT_SECS = 2.0
-
-# ── rollout rendering (for gif logging) ──────────────────────────────────────
-RENDER_HEIGHT, RENDER_WIDTH = 480, 640
-RENDER_FPS = 25
 
 
 # Joint order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), ...
@@ -252,11 +250,11 @@ def evaluate(x, worker_id=0, verbose=False):
     return cost
 
 
-def render_rollout(x, fps=RENDER_FPS):
+def render_rollout(x):
     """
-    Re-run the sim for candidate x and render its rollout to frames.
-    Returns a (T, C, H, W) uint8 numpy array (wandb.Video layout), or None
-    if the candidate is infeasible / the sim fails.
+    Re-run the sim for candidate x and return the rollout GIF mppi_sim renders
+    (analysis/render_gif.py), or None if the candidate is infeasible / the sim
+    or render fails. Returned in memory, since tmp_dir is deleted on return.
     """
     with tempfile.TemporaryDirectory(prefix="cmaes_render_") as tmp_dir:
         try:
@@ -266,46 +264,17 @@ def render_rollout(x, fps=RENDER_FPS):
         if n_inf > 0:
             return None
 
-        walk_cfg  = base_cfg["walk"]
         yaml_path = _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir)
         csv_path  = os.path.join(tmp_dir, "sim.csv")
-        qpos_path = os.path.join(tmp_dir, "sim_qpos.csv")
+        gif_path  = os.path.join(tmp_dir, "sim.gif")
 
         try:
-            result = subprocess.run([MPPI_SIM, "walk", yaml_path, csv_path, "--no-gif"],
+            result = subprocess.run([MPPI_SIM, "walk", yaml_path, csv_path],
                                     capture_output=True, text=True, timeout=SIM_TIMEOUT)
         except subprocess.TimeoutExpired:
             return None
-        if result.returncode != 0 or not os.path.exists(qpos_path):
+        if result.returncode != 0 or not os.path.exists(gif_path):
             return None
 
-        qpos_log = np.loadtxt(qpos_path, delimiter=",")
-        if qpos_log.ndim == 1:
-            qpos_log = qpos_log.reshape(1, -1)
-        if len(qpos_log) == 0:
-            return None
-
-        sim_hz = round(1.0 / walk_cfg["dt"])
-        skip   = max(1, round(sim_hz / fps))
-
-        model = mujoco.MjModel.from_xml_path(MODEL_PATH)
-        data  = mujoco.MjData(model)
-
-        cam           = mujoco.MjvCamera()
-        cam.type      = mujoco.mjtCamera.mjCAMERA_FREE
-        cam.distance  = 2.5
-        cam.elevation = -15.0
-        cam.azimuth   = 90.0
-
-        frames = []
-        with mujoco.Renderer(model, height=RENDER_HEIGHT, width=RENDER_WIDTH) as renderer:
-            for qpos in qpos_log[::skip]:
-                data.qpos[:len(qpos)] = qpos
-                mujoco.mj_forward(model, data)
-                cam.lookat[0] = data.qpos[0]
-                cam.lookat[1] = data.qpos[1]
-                cam.lookat[2] = 0.3
-                renderer.update_scene(data, camera=cam)
-                frames.append(renderer.render().copy())
-
-    return np.stack(frames).transpose(0, 3, 1, 2)  # (T, H, W, C) -> (T, C, H, W)
+        with open(gif_path, "rb") as f:
+            return io.BytesIO(f.read())
