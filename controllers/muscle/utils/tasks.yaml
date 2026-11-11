@@ -70,11 +70,11 @@ default_muscle_quad: &default_muscle_quad
 
   # Fiber length range normalized by optimal isometric length (l_opt).
   # Both muscles in the antagonistic pair span [lce_min, lce_max] as the joint sweeps phi_min→phi_max.
-  lce_min:     [0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667,  0.7118, 0.8777, 0.8667]
-  lce_max:     [1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446,  1.1104, 1.0504, 1.1446]
+  lce_min:     [0.5646, 0.8972, 0.8138,  0.5646, 0.8972, 0.8138,  0.5646, 0.8972, 0.8138,  0.5646, 0.8972, 0.8138]
+  lce_max:     [1.2147, 1.0591, 1.2142,  1.2147, 1.0591, 1.2142,  1.2147, 1.0591, 1.2142,  1.2147, 1.0591, 1.2142]
 
   # Passive parallel elasticity scale. Force at maximum extension relative to peak_force.
-  pFLmax:      [0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589,  0.3260, 1.3035, 0.3589]
+  pFLmax:      [0.1019, 1.1075, 0.2055,  0.1019, 1.1075, 0.2055,  0.1019, 1.1075, 0.2055,  0.1019, 1.1075, 0.2055]
 
   # Maximum fiber contraction velocity (fiber lengths / s). FV curve → 0 at lce_dot = -vmax.
   # Determined by: vmax = r * dq_max
@@ -83,7 +83,7 @@ default_muscle_quad: &default_muscle_quad
   vmax:        [4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80,  4.77, 1.86, 2.80]
 
   # Eccentric force amplification plateau. FV saturates at FVmax when the muscle is lengthening.
-  FVmax:       [1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597,  1.1459, 1.2520, 1.0597]
+  FVmax:       [1.1055, 1.3117, 1.0720,  1.1055, 1.3117, 1.0720,  1.1055, 1.3117, 1.0720,  1.1055, 1.3117, 1.0720]
 
   # MuJoCo joint damping (N·m·s/rad) written directly to simulation DOFs at startup.
   # Using the go2.xml default of 0.1. Might want to increase for real experiments
@@ -95,7 +95,7 @@ default_muscle_quad: &default_muscle_quad
   # start (holding the standing pose, computed at startup), the gait-tracking
   # cost, and generating the activation gaits in controllers/muscle/gaits/,
   # which are regenerated automatically when this or the muscle parameters above change.
-  stiffness:   0.75
+  stiffness:   0.5199
 
 # -----------------------------------------------------------------------
 # Locomotion task
