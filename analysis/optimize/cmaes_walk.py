@@ -10,11 +10,14 @@ Usage:
   python cmaes_walk.py               # run full optimization
   python cmaes_walk.py --test        # single eval at initial point (smoke test)
   python cmaes_walk.py --maxiter 20 --workers 6
+  python cmaes_walk.py --resume --results-dir results/X --maxiter 30
+                                     # continue run X to 30 generations
 """
 
 import argparse
 import json
 import os
+import pickle
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -75,6 +78,10 @@ HI = [0.90, 0.90, 0.90,  1.50, 1.50, 1.25,  1.80, 1.80, 1.80,  1.80, 1.80, 1.80,
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+# Everything --resume needs to continue a run, written in its results dir
+# after every generation.
+STATE_FILE = "cmaes_state.pkl"
+
 
 def _eval_worker(args):
     """Top-level function required for ProcessPoolExecutor pickling."""
@@ -103,6 +110,37 @@ def _write_best_result(results_dir, best_cost, best_generation, best_x, cli_args
     return path
 
 
+def _save_state(results_dir, es, best_cost, best_generation, best_x, wandb_id):
+    """Write the CMA-ES object (mean, step size, covariance, evolution paths,
+    random number generator) and the best so far to results_dir/STATE_FILE.
+    Written to a temporary file first, so an interrupted write never leaves
+    a broken state behind."""
+    state = {
+        "es": es.pickle_dumps(),
+        "best_cost": best_cost,
+        "best_generation": best_generation,
+        "best_x": best_x,
+        "wandb_id": wandb_id,
+    }
+    path = os.path.join(results_dir, STATE_FILE)
+    with open(path + ".tmp", "wb") as f:
+        pickle.dump(state, f)
+    os.replace(path + ".tmp", path)
+
+
+def _load_state(results_dir):
+    """The state _save_state() wrote in results_dir, with the CMA-ES object
+    restored."""
+    path = os.path.join(results_dir, STATE_FILE)
+    if not os.path.exists(path):
+        sys.exit(f"Cannot resume: no {STATE_FILE} in {results_dir} "
+                 f"(runs started before --resume existed did not save one).")
+    with open(path, "rb") as f:
+        state = pickle.load(f)
+    state["es"] = pickle.loads(state["es"])
+    return state
+
+
 def run_parallel(solutions, n_workers):
     """Evaluate a list of candidate solutions in parallel."""
     args = [(x, i) for i, x in enumerate(solutions)]
@@ -123,7 +161,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test",    action="store_true",
                         help="Evaluate initial point only (smoke test)")
-    parser.add_argument("--maxiter", type=int,   default=15)
+    parser.add_argument("--maxiter", type=int,   default=15,
+                        help="Generations in total, counting those of a "
+                             "resumed run")
+    parser.add_argument("--resume",  action="store_true",
+                        help="Continue the run saved in --results-dir up to "
+                             "--maxiter generations, in the same logs and "
+                             "wandb run. --sigma, --popsize and --seed are "
+                             "the saved run's.")
     parser.add_argument("--workers", type=int,   default=8)
     parser.add_argument("--sigma",   type=float, default=None,
                         help="Override initial sigma (scalar); default: per-param")
@@ -158,49 +203,68 @@ def main():
         print(f"\nCost = {cost:.4f}  ({time.time()-t0:.1f} s)")
         return
 
-    # CMA-ES uses a single scalar sigma; we scale x0 to unit-sigma space
-    # by dividing by SIGMA0 elementwise, then CMA-ES searches in that space.
-    # Alternatively, use CMA's built-in scaling via 'CMA_stds'.
-    sigma0 = args.sigma if args.sigma is not None else 1.0
+    if args.resume:
+        state = _load_state(results_dir)
+        es = state["es"]
+        es.opts.set("maxiter", args.maxiter)
+        # pycma re-checks its stop conditions once per generation unless told
+        # to: without this, the saved run's own maxiter stop still holds.
+        if es.stop(check_in_same_iteration=True):
+            sys.exit(f"Nothing to resume: the run stops at generation "
+                     f"{es.countiter} ({dict(es.stop())}).")
+        print(f"Resuming at generation {es.countiter + 1} of {args.maxiter}")
 
-    opts = {
-        "bounds":   [LO, HI],
-        "maxiter":  args.maxiter,
-        "tolx":     1e-3,
-        "tolfun":   1e-3,
-        "verbose":  3,
-        "CMA_stds": SIGMA0,   # per-parameter step size scaling
-    }
-    if args.popsize:
-        opts["popsize"] = args.popsize
-    if args.seed is not None:
-        opts["seed"] = args.seed
+        wandb.init(project=args.wandb_project, id=state["wandb_id"], resume="must")
+        wandb.config.update({"maxiter": args.maxiter, "workers": args.workers},
+                            allow_val_change=True)
+    else:
+        state = {"best_cost": float("inf"), "best_generation": 0, "best_x": list(X0)}
 
-    es = cma.CMAEvolutionStrategy(X0, sigma0, opts)
+        # CMA-ES uses a single scalar sigma; we scale x0 to unit-sigma space
+        # by dividing by SIGMA0 elementwise, then CMA-ES searches in that space.
+        # Alternatively, use CMA's built-in scaling via 'CMA_stds'.
+        sigma0 = args.sigma if args.sigma is not None else 1.0
+
+        opts = {
+            "bounds":   [LO, HI],
+            "maxiter":  args.maxiter,
+            "tolx":     1e-3,
+            "tolfun":   1e-3,
+            "verbose":  3,
+            "CMA_stds": SIGMA0,   # per-parameter step size scaling
+        }
+        if args.popsize:
+            opts["popsize"] = args.popsize
+        if args.seed is not None:
+            opts["seed"] = args.seed
+
+        es = cma.CMAEvolutionStrategy(X0, sigma0, opts)
+
+        wandb.init(
+            project=args.wandb_project,
+            name=args.run_name,
+            config={
+                "x0": dict(zip(PARAM_NAMES, X0)),
+                "sigma0": dict(zip(PARAM_NAMES, SIGMA0)),
+                "lo": dict(zip(PARAM_NAMES, LO)),
+                "hi": dict(zip(PARAM_NAMES, HI)),
+                "maxiter": args.maxiter,
+                "workers": args.workers,
+                "sigma": sigma0,
+                "popsize": args.popsize,
+                "seed": es.opts.get("seed"),  # resolved seed, even if unspecified
+            },
+        )
+
     print(f"  seed:    {es.opts.get('seed')}")
     cma_log_dir = os.path.join(results_dir, "cmaes_log")
     os.makedirs(cma_log_dir, exist_ok=True)
-    logger = cma.CMADataLogger(os.path.join(cma_log_dir, "run")).register(es)
+    logger = cma.CMADataLogger(os.path.join(cma_log_dir, "run"), append=args.resume).register(es)
 
-    wandb.init(
-        project=args.wandb_project,
-        name=args.run_name,
-        config={
-            "x0": dict(zip(PARAM_NAMES, X0)),
-            "sigma0": dict(zip(PARAM_NAMES, SIGMA0)),
-            "lo": dict(zip(PARAM_NAMES, LO)),
-            "hi": dict(zip(PARAM_NAMES, HI)),
-            "maxiter": args.maxiter,
-            "workers": args.workers,
-            "sigma": sigma0,
-            "popsize": args.popsize,
-            "seed": es.opts.get("seed"),  # resolved seed, even if unspecified
-        },
-    )
-
-    best_cost = float("inf")
-    best_x    = list(X0)
-    generation = 0
+    best_cost       = state["best_cost"]
+    best_generation = state["best_generation"]
+    best_x          = state["best_x"]
+    generation      = es.countiter
 
     print(f"Starting CMA-ES: popsize={es.popsize}, workers={args.workers}")
     print("─" * 60)
@@ -220,14 +284,20 @@ def main():
         gen_best_cost = costs[gen_best_idx]
 
         if gen_best_cost < best_cost:
-            best_cost = gen_best_cost
-            best_x    = [float(v) for v in solutions[gen_best_idx]]
+            best_cost       = gen_best_cost
+            best_generation = generation
+            best_x          = [float(v) for v in solutions[gen_best_idx]]
             print(f"  ★ new best: {best_cost:.4f}")
-            _write_best_result(results_dir, best_cost, generation, best_x, args)
+            _write_best_result(results_dir, best_cost, best_generation, best_x, args)
             wandb.run.summary["best_cost"] = best_cost
-            wandb.run.summary["best_generation"] = generation
+            wandb.run.summary["best_generation"] = best_generation
             for name, val in zip(PARAM_NAMES, best_x):
                 wandb.run.summary[f"best/{name}"] = val
+
+        # Saved before this generation's slow wandb logging (its rollout is a
+        # simulation): a resume after a crash there continues with the next
+        # generation instead of repeating this one in the logs.
+        _save_state(results_dir, es, best_cost, best_generation, best_x, wandb.run.id)
 
         # Mean/std over feasible candidates only, so infeasible-penalty
         # outliers don't swamp them.
@@ -280,7 +350,7 @@ def main():
         print(f"  overall best cost: {best_cost:.4f}")
         print("─" * 60)
 
-    best_path = _write_best_result(results_dir, best_cost, generation, best_x, args, done=True)
+    best_path = _write_best_result(results_dir, best_cost, best_generation, best_x, args, done=True)
     print("\n═══ Optimization complete ═══")
     print(f"Best cost    : {best_cost:.4f}")
     print(f"Best params  : {dict(zip(PARAM_NAMES, best_x))}")
