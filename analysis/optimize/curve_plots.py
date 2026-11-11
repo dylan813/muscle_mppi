@@ -1,5 +1,5 @@
 """
-Render force-length and force-velocity curve plots for a 12D CMA-ES
+Render force-length and force-velocity curve plots for a 13D CMA-ES
 candidate x, for wandb logging during cmaes_walk.py runs.
 
 FL curve logic is recycled directly from gait_generator.py's active/passive

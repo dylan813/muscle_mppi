@@ -2,13 +2,14 @@
 Objective function for CMA-ES optimization of Hill muscle parameters.
 
 Each call to evaluate(x):
-  1. Expands 12D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3] to 12-element
-     arrays (hip/thigh/calf values shared across all 4 legs).
+  1. Expands 13D x=[lce_min×3, lce_max×3, pFLmax×3, FVmax×3, stiffness] to
+     12-element arrays (hip/thigh/calf values shared across all 4 legs) and
+     the co-contraction level stiffness.
   2. Generates the activation gait(s) the walk task's phases use into a temp
      dir (gait_generator.py) and checks them for infeasible phases
   3. Writes a temp tasks.yaml with the candidate's muscle params and the
-     CMA-ES task settings (GOAL_POS, SIM_DURATION), pointing each walk
-     phase's gait_path at its generated gait
+     CMA-ES task settings (GOAL_POS, CMD_VEL, SIM_DURATION), pointing each
+     walk phase's gait_path at its generated gait
   4. Runs mppi_sim as a subprocess (it computes the warm start from these
      muscle params at startup)
   5. Parses the output CSV and computes the mean per-step cost (FITNESS_TERMS)
@@ -74,13 +75,21 @@ TRANSIENT_SECS = 2.0
 # Left out: cost_ang_vel and cost_gait.
 FITNESS_TERMS = ["cost_pos", "cost_orient", "cost_vel"]
 
-# Task settings of the July 2026 FVmax-sweep runs and the Aug 4 2026 run that
-# produced tasks.yaml's muscle values (commits 7e977c6, b0c904a), applied to
-# walk in each candidate's YAML so tasks.yaml's walk keeps its own. The goal is
-# out of reach at walk's 0.2 m/s within the run, so every run lasts
-# SIM_DURATION unless the robot falls.
-GOAL_POS     = [5.0, 0.0, 0.34]
+# Task settings applied to walk in each candidate's YAML, so tasks.yaml's walk
+# keeps its own. Goal x and SIM_DURATION are those of the July 2026 FVmax-sweep
+# runs and the Aug 4 2026 run that produced tasks.yaml's muscle values (commits
+# 7e977c6, b0c904a); runs end on duration, not on reaching the goal, so every
+# run lasts SIM_DURATION unless the robot falls. Goal height 0.27 m is
+# RTWholeBodyMPPI's walking height (utils/tasks.py), within 3 mm of the whole-
+# robot CoM height walk_fast's joint angles imply on Go2 (0.273 m).
+GOAL_POS     = [5.0, 0.0, 0.27]
 SIM_DURATION = 10.0   # s
+
+# Commanded body-frame velocity [vx, vy] (m/s): RTWholeBodyMPPI's walking command
+# with walk_fast (legged_mppi/whole_body_mppi/utils/tasks.py: walk_straight,
+# walk_octagon), copied so results compare directly against it. walk_fast's
+# own stride is built for about 0.1 m/s.
+CMD_VEL = [0.2, 0.0]
 
 
 # Joint order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), ...
@@ -98,15 +107,18 @@ def _build_muscle_params(x, base_quad):
     x = [lce_min_hip, lce_min_thigh, lce_min_calf,
          lce_max_hip, lce_max_thigh, lce_max_calf,
          pFLmax_hip,  pFLmax_thigh,  pFLmax_calf,
-         FVmax_hip,   FVmax_thigh,   FVmax_calf]
-    All 4 legs share the same value per joint type.
-    Fixed params (vmax, phi_min, phi_max, peak_force) taken from base_quad.
+         FVmax_hip,   FVmax_thigh,   FVmax_calf,
+         stiffness]
+    All 4 legs share the same value per joint type; stiffness is one value
+    for all joints. Fixed params (vmax, phi_min, phi_max, peak_force) taken
+    from base_quad.
     """
     p = copy.deepcopy(base_quad)
-    p["lce_min"] = _broadcast_per_type(x[0:3])
-    p["lce_max"] = _broadcast_per_type(x[3:6])
-    p["pFLmax"]  = _broadcast_per_type(x[6:9])
-    p["FVmax"]   = _broadcast_per_type(x[9:12])
+    p["lce_min"]   = _broadcast_per_type(x[0:3])
+    p["lce_max"]   = _broadcast_per_type(x[3:6])
+    p["pFLmax"]    = _broadcast_per_type(x[6:9])
+    p["FVmax"]     = _broadcast_per_type(x[9:12])
+    p["stiffness"] = float(x[12])
     return p
 
 
@@ -118,13 +130,15 @@ def _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir):
     - walk.phases[i].gait_path set to phase_gait_paths[i] (absolute), so
       mppi_sim uses the candidate's gaits instead of generating its own into
       the shared controllers/muscle/gaits/
-    - walk run with GOAL_POS and SIM_DURATION, ending early only on a fall
+    - walk run with GOAL_POS, CMD_VEL and SIM_DURATION, ending early only on a fall
     Returns the path to the written yaml.
     """
     cfg = copy.deepcopy(base_cfg)
 
-    # Update muscle params in both the anchor block and the resolved walk.muscle dict
-    for key in ("lce_min", "lce_max", "FVmax", "pFLmax"):
+    # Update muscle params in both the anchor block and the resolved walk.muscle
+    # dict. stiffness too: the controller's gait-tracking cost and warm start
+    # must use the same value the candidate's gait was generated with.
+    for key in ("lce_min", "lce_max", "FVmax", "pFLmax", "stiffness"):
         cfg["default_muscle_quad"][key] = muscle_params[key]
         cfg["walk"]["muscle"][key]      = muscle_params[key]
 
@@ -136,6 +150,7 @@ def _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir):
     walk = cfg["walk"]
     (phase,) = walk["phases"]   # raises unless walk has exactly one phase
     phase["goal_pos"]    = GOAL_POS
+    phase["cmd_vel"]     = CMD_VEL
     walk["sim_duration"] = SIM_DURATION
     walk["end_on"]       = "duration"
 
@@ -196,8 +211,8 @@ def _compute_fitness(csv_path):
 
 def evaluate(x, worker_id=0, verbose=False):
     """
-    Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax] (12D) by
-    running mppi_sim. Returns scalar locomotion cost (lower is better).
+    Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax, stiffness]
+    (13D) by running mppi_sim. Returns scalar locomotion cost (lower is better).
     """
     with tempfile.TemporaryDirectory(prefix=f"cmaes_w{worker_id}_") as tmp_dir:
         # Generate the walk task's gait file(s)
@@ -240,7 +255,7 @@ def evaluate(x, worker_id=0, verbose=False):
             f"lce=[{x[1]:.3f},{x[4]:.3f}] pFL={x[7]:.3f} FV={x[10]:.3f}",
             f"lce=[{x[2]:.3f},{x[5]:.3f}] pFL={x[8]:.3f} FV={x[11]:.3f}",
         )
-        print(f"  [w{worker_id}] hip:{hip}  thigh:{thigh}  calf:{calf}"
+        print(f"  [w{worker_id}] hip:{hip}  thigh:{thigh}  calf:{calf}  stiffness={x[12]:.3f}"
               f"  → cost={cost:.1f}  inf_phases={n_inf}")
 
     return cost

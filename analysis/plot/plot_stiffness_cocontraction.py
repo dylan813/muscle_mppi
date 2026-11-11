@@ -129,7 +129,7 @@ _qa_adr  = [model.jnt_qposadr[j] for j in _jid]   # qpos index per actuator
 _dof_adr = [model.jnt_dofadr[j]  for j in _jid]   # qvel/qfrc index per actuator
 
 # Same stand-up target as the controllers (kStandUpPose, controllers/common/harness.h).
-_stand_target  = [0.0, 0.67, -1.3] * 4
+_stand_target  = [0.0, 0.8849, -1.7698] * 4
 stand_up_pos   = list(_stand_target)
 stand_down_pos = [ 0.0473455,  1.22187, -2.44375,
                   -0.0473455,  1.22187, -2.44375,

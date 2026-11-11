@@ -2,8 +2,9 @@
 CMA-ES optimizer for Hill muscle parameters of the walk task.
 
 Optimizes x = [lce_min, lce_max, pFLmax, FVmax] (one value per joint type,
-shared by all 4 legs) to minimize the mean per-step locomotion cost of the
-walk task, run with the task settings in objective.py.
+shared by all 4 legs) and the co-contraction level stiffness (one value for
+all joints) to minimize the mean per-step locomotion cost of the walk task,
+run with the task settings in objective.py.
 
 Usage:
   python cmaes_walk.py               # run full optimization
@@ -31,15 +32,17 @@ import cma
 from objective import evaluate, render_rollout
 from curve_plots import plot_fl_curves, plot_fv_curves
 
-# ── search space (12D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax) ────────
+# ── search space (13D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax, stiffness) ─
 # All 4 legs share the same value per joint type. X0, SIGMA0, LO and HI are
 # those of the Aug 4 2026 run that produced tasks.yaml's muscle values
-# (run name area_0, commit b0c904a).
+# (run name area_0, commit b0c904a), except the calf lce bounds and the
+# stiffness entries below.
 PARAM_NAMES = [
     "lce_min_hip",  "lce_min_thigh",  "lce_min_calf",
     "lce_max_hip",  "lce_max_thigh",  "lce_max_calf",
     "pFLmax_hip",   "pFLmax_thigh",   "pFLmax_calf",
     "FVmax_hip",    "FVmax_thigh",    "FVmax_calf",
+    "stiffness",
 ]
 
 X0 = [
@@ -47,18 +50,27 @@ X0 = [
     1.09, 1.06, 1.19,   # lce_max
     0.54, 0.94, 0.21,   # pFLmax
     1.2, 1.3, 1.1,   # FVmax
+    0.75,               # stiffness (tasks.yaml's value)
 ]
 # ~15% of each param's (HI - LO) range, recomputed for the current bounds.
 SIGMA0 = [
-    0.07, 0.07, 0.07,   # lce_min
-    0.07, 0.07, 0.07,   # lce_max
+    0.07, 0.07, 0.05,   # lce_min
+    0.07, 0.07, 0.03,   # lce_max
     0.25, 0.25, 0.25,   # pFLmax
     0.11, 0.11, 0.11,   # FVmax
+    0.04,               # stiffness
 ]
 # FVmax lower bound is kept strictly above 1.0: gait_generator._force_vel
 # divides by (FVmax - 1.0), so a candidate at or below 1.0 is a singularity.
-LO = [0.50, 0.50, 0.50,  1.05, 1.05, 1.05,  0.10, 0.10, 0.10,  1.05, 1.05, 1.05]
-HI = [0.95, 0.95, 0.95,  1.50, 1.50, 1.50,  1.80, 1.80, 1.80,  1.80, 1.80, 1.80]
+# Calf lce_min >= 0.60 and lce_max <= 1.25: outside them walk_fast is almost
+# never feasible (4000 uniform samples of the earlier 0.50-0.95 / 1.05-1.50
+# calf bounds: 1% feasible with lce_min < 0.59, 0% with lce_max > 1.32).
+# Stiffness 0.50-0.775: where both activations of a joint stay at least
+# 2 * noise_sigma_act from 0 and 1 for >= 85% of walk_fast, for 96% (at 0.50)
+# to 100% (0.60-0.775) of 400 feasible parameter sets sampled within these
+# bounds; at 0.80 for 0.2%, as one activation nears 1 - 2 * 0.1.
+LO = [0.50, 0.50, 0.60,  1.05, 1.05, 1.05,  0.10, 0.10, 0.10,  1.05, 1.05, 1.05,  0.50]
+HI = [0.90, 0.90, 0.90,  1.50, 1.50, 1.25,  1.80, 1.80, 1.80,  1.80, 1.80, 1.80,  0.775]
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -142,8 +154,8 @@ def main():
     if args.test:
         print("── SMOKE TEST (initial point) ──")
         t0 = time.time()
-        fitness = evaluate(X0, worker_id=0, verbose=True)
-        print(f"\nFitness = {fitness:.4f}  ({time.time()-t0:.1f} s)")
+        cost = evaluate(X0, worker_id=0, verbose=True)
+        print(f"\nCost = {cost:.4f}  ({time.time()-t0:.1f} s)")
         return
 
     # CMA-ES uses a single scalar sigma; we scale x0 to unit-sigma space
@@ -209,7 +221,7 @@ def main():
 
         if gen_best_cost < best_cost:
             best_cost = gen_best_cost
-            best_x    = list(solutions[gen_best_idx])
+            best_x    = [float(v) for v in solutions[gen_best_idx]]
             print(f"  ★ new best: {best_cost:.4f}")
             _write_best_result(results_dir, best_cost, generation, best_x, args)
             wandb.run.summary["best_cost"] = best_cost
@@ -226,15 +238,12 @@ def main():
 
         log = {
             "generation": generation,
-            "gen_best_fitness": gen_best_cost,
-            "overall_best_fitness": best_cost,
+            "gen_best_cost": gen_best_cost,
+            "overall_best_cost": best_cost,
             "mean_cost": mean_cost,
             "std_cost": std_cost,
             "n_feasible": n_feasible,
             "elapsed_s": elapsed,
-            # kept for backward compatibility with existing dashboards
-            "gen_best_cost": gen_best_cost,
-            "overall_best_cost": best_cost,
         }
         for name, val in zip(PARAM_NAMES, solutions[gen_best_idx]):
             log[f"params/{name}"] = val
@@ -268,12 +277,12 @@ def main():
         print(f"\nGen {generation:3d} | best={gen_best_cost:.2f} "
               f"| feasible={n_feasible}/{len(costs)} | {elapsed:.0f}s")
         print(f"  best x: {dict(zip(PARAM_NAMES, best_x))}")
-        print(f"  overall best fitness: {best_cost:.4f}")
+        print(f"  overall best cost: {best_cost:.4f}")
         print("─" * 60)
 
     best_path = _write_best_result(results_dir, best_cost, generation, best_x, args, done=True)
     print("\n═══ Optimization complete ═══")
-    print(f"Best fitness : {best_cost:.4f}")
+    print(f"Best cost    : {best_cost:.4f}")
     print(f"Best params  : {dict(zip(PARAM_NAMES, best_x))}")
     print(f"Best params saved to {best_path}")
     print(f"Results saved to {results_dir}")

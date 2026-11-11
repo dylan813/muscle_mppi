@@ -41,9 +41,10 @@
 
 // Stand-up procedure shared by the DDS controller (muscle/mppi_controller.cpp)
 // and both standalone sims: a tanh-ramped PD blend from the crouched
-// stand-down pose to the standing pose, mirroring unitree_mujoco's stand_go2.cpp.
+// stand-down pose to the standing pose, following unitree_mujoco's stand_go2.cpp
+// (its stand-down pose, ramp and gains; the standing pose is the gaits' own).
 
-// Crouched pose the robot starts from.
+// Crouched pose the robot starts from (stand_go2.cpp).
 static constexpr double kStandDownPose[NUM_JOINTS] = {
      0.0473455,  1.22187, -2.44375,   // FR
     -0.0473455,  1.22187, -2.44375,   // FL
@@ -51,12 +52,16 @@ static constexpr double kStandDownPose[NUM_JOINTS] = {
     -0.0473455,  1.22187, -2.44375,   // RL
 };
 
-// Standing pose the ramp converges to.
+// Standing pose the ramp converges to: the in_place gait's posture with all
+// four feet down (controllers/pd/gaits/FAST/gait_FAST_0_0_10cm.tsv, mean over
+// its 36 such columns, which differ by at most 0.01 rad). On flat ground with
+// a level trunk it puts the CoM at 0.272 m, the height the gaits are built
+// for; the stand-up's kp 50 hold sags it to about 0.244 m.
 static constexpr double kStandUpPose[NUM_JOINTS] = {
-    0.0, 0.67, -1.3,   // FR
-    0.0, 0.67, -1.3,   // FL
-    0.0, 0.67, -1.3,   // RR
-    0.0, 0.67, -1.3,   // RL
+    0.0, 0.8849, -1.7698,   // FR
+    0.0, 0.8849, -1.7698,   // FL
+    0.0, 0.8849, -1.7698,   // RR
+    0.0, 0.8849, -1.7698,   // RL
 };
 
 static constexpr double kStandupSecs = 3.0;   // tanh ramp

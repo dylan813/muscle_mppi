@@ -91,7 +91,7 @@ default_muscle_quad: &default_muscle_quad
 
   # Co-contraction level in [0, 1]: where on each joint's torque-balance line
   # (all activation pairs producing the needed torque) activations are chosen.
-  # 0.5 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the warm
+  # 0.0 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the warm
   # start (holding the standing pose, computed at startup), the gait-tracking
   # cost, and generating the activation gaits in controllers/muscle/gaits/,
   # which are regenerated automatically when this or the muscle parameters above change.
@@ -145,7 +145,7 @@ walk:
 
   # Single phase — same target/gait/cmd_vel this task used before the phases: migration.
   phases:
-    - goal_pos:     [2.0, 0.0, 0.34]
+    - goal_pos:     [2.0, 0.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
@@ -189,7 +189,7 @@ walk_rough:
 
   sim_duration: 45.0
   phases:
-    - goal_pos:     [3.2, 0.0, 0.34]
+    - goal_pos:     [3.2, 0.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
@@ -229,52 +229,52 @@ walk_octagon:
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.34]
+    - goal_pos:     [0.0, 0.0, 0.27]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.0, 0.0, 0.34]
+    - goal_pos:     [1.0, 0.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.0, 1.0, 0.34]
+    - goal_pos:     [2.0, 1.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.0, 2.0, 0.34]
+    - goal_pos:     [2.0, 2.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.0, 3.0, 0.34]
+    - goal_pos:     [1.0, 3.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 3.0, 0.34]
+    - goal_pos:     [0.0, 3.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [-1.0, 2.0, 0.34]
+    - goal_pos:     [-1.0, 2.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [-1.0, 1.0, 0.34]
+    - goal_pos:     [-1.0, 1.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 0.0, 0.34]
+    - goal_pos:     [0.0, 0.0, 0.27]
       cmd_vel:      [0.2, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 0.0, 0.34]
+    - goal_pos:     [0.0, 0.0, 0.27]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -327,7 +327,7 @@ guinea_fowl:
   sim_duration: 30.0
   spawn_height_offset: 0.05
   phases:
-    - goal_pos:     [1.9, 0.0, 0.39]
+    - goal_pos:     [1.9, 0.0, 0.32]
       cmd_vel:      [0.5, 0.0]
       desired_gait: "walk_fast"
       goal_thresh:  0.2
@@ -381,7 +381,7 @@ push_recovery:
     max_vel_xy: 1.0
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.34]
+    - goal_pos:     [0.0, 0.0, 0.27]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -428,7 +428,7 @@ push_down_recovery:
     radius:    0.1
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.34]
+    - goal_pos:     [0.0, 0.0, 0.27]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

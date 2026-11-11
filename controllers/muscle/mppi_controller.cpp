@@ -117,7 +117,7 @@ private:
 
     void ControlLoop() {
         if (!mppi_ready_.load()) {
-            // Smooth stand-up: tanh ramp over 3 s, mirrors stand_go2.cpp exactly.
+            // Smooth stand-up: tanh ramp over 3 s, as stand_go2.cpp (poses in common/harness.h).
             running_time_ += 0.02;
             if (running_time_ >= kStandupSecs + kHoldSecs)
                 standup_done_.store(true, std::memory_order_relaxed);
@@ -210,7 +210,7 @@ private:
         2.0, 3.5, 3.5,   // RL
     };
 
-    // Stand-up ramp timer (poses in common/harness.h match stand_go2.cpp exactly).
+    // Stand-up ramp timer (poses in common/harness.h).
     double running_time_ = 0.0;
 
     std::atomic<bool> mppi_ready_{false};
