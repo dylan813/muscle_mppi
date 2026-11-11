@@ -90,9 +90,10 @@ public:
     // (common/motor.h). ctrl: what to write to the robot's ctrl for this step.
     void actuate(const RobotState& state, double ctrl[NUM_JOINTS]);
 
-    // Joint damping the sim adds to its physical damping for the motor
-    // (Motor::implicit_damping()).
-    double motor_damping(int j) const { return motor_.implicit_damping(j); }
+    // Joint damping the sim adds to its physical damping for the physics step
+    // the most recent actuate() commanded (Motor::implicit_damping(), with the
+    // muscles' force-velocity damping at that step). Set it every step.
+    double motor_damping(int j) const { return motor_.implicit_damping(j, pending_damping_[j]); }
 
     // Call once per control tick, before update(). Advances through the task's
     // phases (see PhaseSequencer::advance() in common/gait.h).
@@ -119,7 +120,7 @@ public:
     // `after`, the state that step ended at.
     void applied_torque(const RobotState& after, double tau[NUM_JOINTS]) const {
         MotorState s = real_motor_;
-        if (pending_) motor_.applied(pending_ctrl_, after.dq, s);
+        if (pending_) motor_.applied(pending_ctrl_, pending_damping_, after.dq, s);
         std::copy(s.tau, s.tau + NUM_JOINTS, tau);
     }
 
@@ -201,10 +202,19 @@ private:
     double ref_deviation(const double* plan) const;
 
     // Advance d one control step under activation command act_cmd: per physics
-    // step, activation dynamics and Hill torques from d's joint state, the
-    // motor, then mj_step(). activation and motor carry the actuator state.
+    // step, activation dynamics, Hill torques and the muscles' damping from d's
+    // joint state, the motor, then mj_step() on this thread's rollout_model().
+    // activation and motor carry the actuator state.
     void step_model(mjData* d, const double act_cmd[NUM_MUSCLES], double activation[NUM_MUSCLES],
-                    MotorState& motor) const;
+                    MotorState& motor);
+
+    // The model this thread steps rollouts with: its own copy when
+    // damping_per_step_, else model_.
+    mjModel* rollout_model();
+
+    // Make a copy of model_ for every thread an OpenMP region can use
+    // (omp_get_max_threads()); call before one starts. Only when damping_per_step_.
+    void ensure_thread_models();
 
     // Finish the motor's pending step with the velocity it ended at (state.dq).
     void settle_motor(const RobotState& state);
@@ -251,7 +261,16 @@ private:
     Motor      motor_;
     MotorState real_motor_;
     double     pending_ctrl_[NUM_JOINTS] = {};
+    double     pending_damping_[NUM_JOINTS] = {};   // muscles' damping the pending step was commanded with
     bool       pending_ = false;
+
+    // With the motor's damping implicit, the muscles' damping is MuJoCo joint
+    // damping that changes every physics step, and joint damping lives in the
+    // model. Rollouts running in parallel then can't share model_, so each
+    // OpenMP thread steps its own copy, made once and reused (about 54 MB
+    // each for go2). With it explicit, every thread steps model_.
+    bool                  damping_per_step_ = false;
+    std::vector<mjModel*> thread_models_;
 
     // The activation command that update() issued, i.e. what real_act_ filters
     // toward (logged by mppi_sim alongside the resulting activation).

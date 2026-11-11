@@ -84,6 +84,10 @@ add_executable(test_observation tests/test_observation.cpp)
 target_link_libraries(test_observation mujoco)
 add_test(NAME observation COMMAND test_observation)
 
+add_executable(test_muscle_damping tests/test_muscle_damping.cpp)
+target_link_libraries(test_muscle_damping mujoco)
+add_test(NAME muscle_damping COMMAND test_muscle_damping)
+
 add_executable(test_npy_writer tests/test_npy_writer.cpp)
 add_test(NAME npy_writer COMMAND test_npy_writer)
 

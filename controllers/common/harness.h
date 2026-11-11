@@ -489,12 +489,10 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
     printf("Stand-up complete. Body height: %.3f m\n", d->qpos[2]);
 
     // Hand over to the controller's motor (common/motor.h): from here on it
-    // applies the torque limits, and its implicit damping share joins the
-    // physical joint damping.
-    for (int j = 0; j < NUM_JOINTS; ++j) {
-        m->dof_damping[qv[j]] += mppi.motor_damping(j);
-        m->actuator_ctrllimited[j] = 0;
-    }
+    // applies the torque limits, and every physics step its implicit damping
+    // share joins the physical joint damping (below). The muscle's share
+    // changes every step with its force-velocity damping.
+    for (int j = 0; j < NUM_JOINTS; ++j) m->actuator_ctrllimited[j] = 0;
     const MotorParams& motor = task.motor;
     if (motor.lag == MotorLag::ZeroOrderHold)
         printf("Motor: zero-order hold at %.6g Hz (each command held %d physics steps = %.6g ms), %d physics steps of %.6g ms per control step, explicit damping\n",
@@ -548,7 +546,10 @@ int run_sim(int argc, char** argv, const SimSpec<Controller>& spec)
         for (int i = 0; i < task.motor.substeps; ++i) {
             double ctrl[NUM_JOINTS];
             mppi.actuate(read_state(d, qa, qv), ctrl);
-            for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
+            for (int j = 0; j < NUM_JOINTS; ++j) {
+                d->ctrl[j] = ctrl[j];
+                m->dof_damping[qv[j]] = damping[j] + mppi.motor_damping(j);
+            }
             mj_step(m, d);
             if (has_fallen(m, d, fall_geoms)) fell = true;
         }

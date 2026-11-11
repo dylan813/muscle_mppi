@@ -16,7 +16,7 @@
 #     update_rate: 100           # zero_order_hold: commands taken per second (Hz); 1/physics_dt divided by a whole number
 #     driver_kd:  [2, ...]   # 12 driver velocity-feedback gains, as motor torque (muscle.kd_sim is then the physical damping alone)
 #     physics_dt: 0.002      # physics/actuator step (s); dt / whole number; default dt
-#     damping:    explicit   # explicit | implicit: how the motor's kd is integrated (zero_order_hold: explicit)
+#     damping:    explicit   # explicit | implicit: how the motor's kd, and the muscles' force-velocity damping, are integrated (zero_order_hold: explicit)
 # Without it the joints are driven directly.
 #
 # Optional, any cubic-sampling task (PolicyParams in utils/tasks.h): a `policy:`
@@ -115,6 +115,15 @@ walk:
   horizon:       40
   lambda:        0.1
   dt:            0.01
+
+  # The muscles' force-velocity damping applied inside MuJoCo's step, as joint
+  # damping is, instead of held with the rest of the muscle torque for the
+  # 10 ms step: held, it overshoots on a swinging leg and the joints jitter
+  # (muscle.h hill_velocity_damping, common/motor.h). Costs one model copy
+  # (~54 MB) per rollout thread. run_bandwidth.sh writes its own motor block
+  # and refuses to run while this one is here.
+  motor:
+    damping:     implicit
 
   # OpenMP threads for the parallel rollout loop (one rollout per sample).
   # Omit or set to 0 to use the OpenMP default (all available cores).

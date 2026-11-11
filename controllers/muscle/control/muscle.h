@@ -42,6 +42,18 @@ static inline double force_vel(double velocity, double c, double vmax, double FV
     return FVmax;
 }
 
+// (force_vel(velocity) − 1) / velocity: how much the force-velocity multiplier
+// has changed from rest, per unit of fiber velocity (per fiber length / s).
+// 2/vmax at zero velocity (force_vel's slope there), less the faster the fiber
+// moves as the curve flattens. Never negative; continuous, with no 0/0.
+static inline double force_vel_secant(double velocity, double c, double vmax) {
+    const double eff_vel = velocity / vmax;
+    if (eff_vel < -1.0) return -1.0 / velocity;               // FV = 0
+    if (eff_vel <= 0.0) return (2.0 + eff_vel) / vmax;        // FV = (1 + e)²
+    if (eff_vel <= c)   return (2.0 - eff_vel / c) / vmax;    // FV = FVmax − (c − e)²/c
+    return c / velocity;                                      // FV = FVmax
+}
+
 // MuJoCo's parallel elastic (passive) force.
 // Zero below optimal length, cubic then linear above.
 static inline double passive_force_length(double length, double max, double b) {
@@ -215,5 +227,40 @@ inline void hill_compute_torques(
 
         // Net joint torque: minus because muscles pull (matching MuJoCo convention).
         tau_out[j] = -(F1 * r1 + F2 * r2);
+    }
+}
+
+// Damping each muscle pair puts on its joint at (q, dq) with these activations
+// (N·m·s/rad, never negative): the part of hill_compute_torques' torque that
+// depends on joint velocity, per rad/s. Only force-velocity depends on q̇, so
+// with fiber velocities r1·q̇ and r2·q̇ and S = force_vel_secant:
+//   τ(q̇) − τ(0) = −damping · q̇
+//   damping = peak_force · (r1²·FL1·a1·S(r1·q̇) + r2²·FL2·a2·S(r2·q̇))
+// At q̇ = 0 it is the torque's slope there; faster, it falls as the curve
+// flattens. Co-contraction raises it: both activations add. Pass the
+// activations hill_compute_torques just used.
+inline void hill_velocity_damping(
+    const double        activation[NUM_MUSCLES],
+    const double        q[NUM_JOINTS],
+    const double        dq[NUM_JOINTS],
+    const MuscleParams& p,
+    double              damping_out[NUM_JOINTS])
+{
+    HillFactors f;
+    hill_factors(q, dq, p, f);
+
+    for (int j = 0; j < NUM_JOINTS; ++j) {
+        if (!p.use_fv) { damping_out[j] = 0.0; continue; }
+
+        double r1, r2;
+        moment_arms(p, j, r1, r2);
+
+        const int    m1 = 2 * j, m2 = 2 * j + 1;
+        const double c  = p.FVmax[j] - 1.0;
+        const double s1 = force_vel_secant(r1 * dq[j], c, p.vmax[j]);
+        const double s2 = force_vel_secant(r2 * dq[j], c, p.vmax[j]);
+
+        damping_out[j] = p.peak_force[j] * (r1 * r1 * f.fl_active[m1] * activation[m1] * s1
+                                          + r2 * r2 * f.fl_active[m2] * activation[m2] * s2);
     }
 }

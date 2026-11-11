@@ -108,9 +108,10 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         std::memcpy(real_act_, seed, NUM_MUSCLES * sizeof(double));
 
         // Motor (common/motor.h): its velocity feedback is the driver's
-        // damping, and it starts out applying the holding torque. From here on
-        // it applies the torque limits, and its implicit share joins the joint
-        // damping MuJoCo integrates.
+        // damping plus the muscles' force-velocity damping, and it starts out
+        // applying the holding torque. From here on it applies the torque
+        // limits; with implicit damping, step_model() adds its share to the
+        // joint damping MuJoCo integrates, every physics step.
         double lo[NUM_JOINTS], hi[NUM_JOINTS];
         for (int j = 0; j < NUM_JOINTS; ++j) {
             lo[j] = model_->actuator_ctrlrange[2 * j];
@@ -118,17 +119,35 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
         motor_.init(task_.motor, task_.motor.driver_kd, lo, hi);
         motor_.settle(stand.tau, real_motor_);
-        for (int j = 0; j < NUM_JOINTS; ++j) {
-            model_->dof_damping[act_qvel_adr_[j]] += motor_.implicit_damping(j);
-            model_->actuator_ctrllimited[j] = 0;
-        }
+        for (int j = 0; j < NUM_JOINTS; ++j) model_->actuator_ctrllimited[j] = 0;
     }
+
+    damping_per_step_ = task_.motor.damping == MotorDamping::Implicit;
+    ensure_thread_models();
 
     if (!task_.policy.path.empty())
         policy_ = std::make_unique<FlowPolicy>(task_.policy.path, task_.horizon, knot_x_, task_.policy.device);
 }
 
-MPPILocomotion::~MPPILocomotion() = default;
+MPPILocomotion::~MPPILocomotion()
+{
+    for (mjModel* m : thread_models_) mj_deleteModel(m);
+}
+
+void MPPILocomotion::ensure_thread_models()
+{
+    if (!damping_per_step_) return;
+    while (static_cast<int>(thread_models_.size()) < omp_get_max_threads()) {
+        mjModel* m = mj_copyModel(nullptr, model_);
+        if (!m) throw std::runtime_error("ensure_thread_models: mj_copyModel failed");
+        thread_models_.push_back(m);
+    }
+}
+
+mjModel* MPPILocomotion::rollout_model()
+{
+    return damping_per_step_ ? thread_models_[omp_get_thread_num()] : model_;
+}
 
 void MPPILocomotion::apply_phase_noise()
 {
@@ -175,25 +194,32 @@ double MPPILocomotion::rollout_plan(mjData* d, const double* plan, const Rollout
 }
 
 void MPPILocomotion::step_model(mjData* d, const double act_cmd[NUM_MUSCLES],
-                                double activation[NUM_MUSCLES], MotorState& motor) const
+                                double activation[NUM_MUSCLES], MotorState& motor)
 {
+    mjModel* m = rollout_model();
+
     for (int i = 0; i < task_.motor.substeps; ++i) {
-        double q[NUM_JOINTS], dq[NUM_JOINTS], tau[NUM_JOINTS], ctrl[NUM_JOINTS], tau_cmd[NUM_JOINTS];
+        double q[NUM_JOINTS], dq[NUM_JOINTS], tau[NUM_JOINTS], damping[NUM_JOINTS];
+        double ctrl[NUM_JOINTS], tau_cmd[NUM_JOINTS];
         for (int j = 0; j < NUM_JOINTS; ++j) {
             q[j]  = d->qpos[act_qpos_adr_[j]];
             dq[j] = d->qvel[act_qvel_adr_[j]];
         }
 
         hill_compute_torques(act_cmd, q, dq, muscle_, task_.motor.physics_dt, activation, tau);
-        motor_.command(tau, dq, motor, ctrl, tau_cmd);
+        hill_velocity_damping(activation, q, dq, muscle_, damping);
+        motor_.command(tau, damping, dq, motor, ctrl, tau_cmd);
 
         for (int j = 0; j < model_->nu; ++j) d->ctrl[j] = 0.0;
         for (int j = 0; j < NUM_JOINTS; ++j) d->ctrl[j] = ctrl[j];
+        if (damping_per_step_)
+            for (int j = 0; j < NUM_JOINTS; ++j)
+                m->dof_damping[act_qvel_adr_[j]] = task_.muscle.kd_sim[j] + motor_.implicit_damping(j, damping[j]);
 
-        mj_step(model_, d);
+        mj_step(m, d);
 
         for (int j = 0; j < NUM_JOINTS; ++j) dq[j] = d->qvel[act_qvel_adr_[j]];
-        motor_.applied(ctrl, dq, motor);
+        motor_.applied(ctrl, damping, dq, motor);
     }
 }
 
@@ -203,7 +229,8 @@ void MPPILocomotion::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
 
     double tau[NUM_JOINTS];
     hill_compute_torques(last_act_cmd_, state.q, state.dq, muscle_, task_.motor.physics_dt, real_act_, tau);
-    motor_.command(tau, state.dq, real_motor_, ctrl, last_tau_);
+    hill_velocity_damping(real_act_, state.q, state.dq, muscle_, pending_damping_);
+    motor_.command(tau, pending_damping_, state.dq, real_motor_, ctrl, last_tau_);
 
     std::memcpy(pending_ctrl_, ctrl, NUM_JOINTS * sizeof(double));
     pending_ = true;
@@ -212,7 +239,7 @@ void MPPILocomotion::actuate(const RobotState& state, double ctrl[NUM_JOINTS])
 void MPPILocomotion::settle_motor(const RobotState& state)
 {
     if (!pending_) return;
-    motor_.applied(pending_ctrl_, state.dq, real_motor_);
+    motor_.applied(pending_ctrl_, pending_damping_, state.dq, real_motor_);
     pending_ = false;
 }
 
@@ -321,6 +348,7 @@ void MPPILocomotion::score_plans(const RolloutContext& c, const double* plans, i
         throw std::runtime_error("score_plans: the context's gait_ref is not horizon x NUM_MUSCLES");
 
     // Each thread rolls out on its own mjData, so data_ stays as update() left it.
+    ensure_thread_models();
     #pragma omp parallel
     {
         mjData* d = mj_makeData(model_);
@@ -374,6 +402,7 @@ void MPPILocomotion::sample_policy()
 
 void MPPILocomotion::roll_out(int begin, int end)
 {
+    ensure_thread_models();
     #pragma omp parallel for schedule(dynamic)
     for (int s = begin; s < end; ++s)
         costs_[s] = rollout(s);

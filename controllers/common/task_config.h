@@ -93,7 +93,8 @@ struct MotionCommand {
     double goal_pos[3] = {};  // world-frame position target [x, y, z]
 };
 
-// How the motor's velocity feedback (Motor, common/motor.h) is integrated.
+// How the motor's velocity feedback (Motor, common/motor.h) is integrated: the
+// driver's kd, plus the muscles' force-velocity damping for the muscle variant.
 //   Explicit: computed from the velocity at the start of each physics step.
 //             Unstable at 10 ms for the light calf once kd·Δt/I nears 2.
 //   Implicit: its α·kd share is integrated by MuJoCo as joint damping; stable
