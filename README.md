@@ -125,6 +125,6 @@ python3 plot_walk_leg.py [csv] [name] [--outdir DIR]   # defaults to the latest 
 # CMA-ES
 
 ```bash
-cd muscle_mppi/analysis/optimize
+cd muscle_mppi/muscle_params_opt
 python3 cmaes_walk.py --workers <x> --run-name <xxx>
 ```

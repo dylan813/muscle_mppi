@@ -36,5 +36,5 @@ __pycache__/
 *.npy
 
 analysis/log/*
-analysis/optimize/results/*
-analysis/optimize/wandb/*
+muscle_params_opt/results/*
+muscle_params_opt/wandb/*

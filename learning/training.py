@@ -4,7 +4,7 @@
   loss          gpc's flow-matching loss (inside gpc's fit_policy)
   fitting       fit_policy, fit_round (gpc's jit_fit), the optimizer
   checkpoints   gpc's rule
-  logging       to wandb, as analysis/optimize/cmaes_walk.py does
+  logging       to wandb, as muscle_params_opt/cmaes_walk.py does
   commands      train: gpc's train(), rounds of mppi_sim episodes with the
                 current policy, each round fitted (needs controllers/build/mppi_sim):
 

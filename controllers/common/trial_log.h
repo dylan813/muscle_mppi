@@ -13,7 +13,7 @@
 // working unchanged against the latest run.
 //
 // Nothing here touches the positional [task] [yaml] [output.csv] interface —
-// analysis/optimize/objective.py drives mppi_sim that way and must keep working.
+// muscle_params_opt/objective.py drives mppi_sim that way and must keep working.
 
 #pragma once
 

@@ -50,7 +50,7 @@ from gait_generator import NAMED_GAIT_SOURCES, generate_gait
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _HERE      = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT  = os.path.abspath(os.path.join(_HERE, "..", ".."))
+REPO_ROOT  = os.path.abspath(os.path.join(_HERE, ".."))
 MPPI_SIM   = os.path.join(REPO_ROOT, "controllers", "build", "mppi_sim")
 MODEL_PATH = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene.xml")
 BASE_YAML  = os.path.join(REPO_ROOT, "controllers", "muscle", "utils", "tasks.yaml")

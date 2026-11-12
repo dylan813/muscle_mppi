@@ -27,7 +27,7 @@ namespace YAML { class Node; }   // full definition only needed in .cpp files th
 #endif
 
 // Repo-relative path -> absolute path. Absolute paths pass through unchanged,
-// so a YAML (e.g. analysis/optimize/objective.py's per-candidate temp copy)
+// so a YAML (e.g. muscle_params_opt/objective.py's per-candidate temp copy)
 // can still point anywhere explicitly.
 inline std::string repo_path(const std::string& rel)
 {
@@ -70,7 +70,7 @@ struct TaskPhase {
 
     // Optional escape hatch: an explicit gait TSV path, overriding desired_gait
     // when non-empty. Used by tooling (e.g. the CMA-ES muscle-parameter sweep in
-    // analysis/optimize/objective.py) that regenerates a gait file per candidate
+    // muscle_params_opt/objective.py) that regenerates a gait file per candidate
     // and needs mppi_sim to load that exact file rather than a canonical one.
     std::string gait_path;
 

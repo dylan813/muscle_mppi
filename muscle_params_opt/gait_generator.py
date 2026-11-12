@@ -12,7 +12,7 @@ import numpy as np
 import os
 import mujoco
 
-REPO_ROOT  = os.path.join(os.path.dirname(__file__), "..", "..")
+REPO_ROOT  = os.path.join(os.path.dirname(__file__), "..")
 SUSP_MODEL = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene_suspended.xml")
 GAIT_DIR   = os.path.join(REPO_ROOT, "controllers", "pd", "gaits")   # joint-space source gaits
 
