@@ -124,7 +124,33 @@ python3 plot_walk_leg.py [csv] [name] [--outdir DIR]   # defaults to the latest 
 
 # CMA-ES
 
+`muscle_params_opt/` tunes the Hill muscle parameters on the `walk` task with CMA-ES: lce_min, lce_max, pFLmax and FVmax per joint type (hip, thigh, calf; shared by all 4 legs), plus `stiffness`. Each candidate runs `mppi_sim` once and is scored by the controller's own logged cost; candidates whose gait is infeasible skip the sim and get a penalty. The search space and bounds are in `cmaes_walk.py`; the walk settings it overrides (goal, command velocity, duration) are in `objective.py`.
+
+Needs a built `controllers/build/mppi_sim` and the `muscle` conda env (`environment.yml`), logged in to wandb.
 ```bash
 cd muscle_mppi/muscle_params_opt
-python3 cmaes_walk.py --workers <x> --run-name <xxx>
+python3 cmaes_walk.py --run-name <name> --results-dir results/<name>                     # new run
+python3 cmaes_walk.py --resume --results-dir results/<name> --maxiter <total generations>  # continue it
+python3 cmaes_walk.py --test                                                             # one sim at the starting point
 ```
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--maxiter` | 15 | generations in total, counting those of a resumed run |
+| `--popsize` | 100 | candidates per generation |
+| `--workers` | 8 | sims run in parallel |
+| `--seed` | random | seed for CMA-ES's sampling |
+| `--sigma` | 1 | scale on the per-parameter step sizes (`SIGMA0`) |
+| `--run-name` | wandb's | wandb run name |
+| `--wandb-project` | `muscle-mppi-cmaes` | wandb project |
+| `--results-dir` | `results/` | output folder; use one per run, or runs overwrite each other |
+| `--resume` | | continue the run saved in `--results-dir` (same logs and wandb run); `--popsize`, `--seed` and `--sigma` are the saved run's |
+
+```
+results/<name>/
+  best_params.json   best candidate so far: cost, generation, parameters
+  cmaes_log/         pycma's per-generation logs (mean, step sizes, costs)
+  cmaes_state.pkl    everything --resume needs, saved after every generation
+```
+
+wandb logs each generation's costs, its best candidate's force-length and force-velocity curves, and a rollout GIF. To use a result, copy its parameters into `default_muscle_quad` in `controllers/muscle/utils/tasks.yaml`.
