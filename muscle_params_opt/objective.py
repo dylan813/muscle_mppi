@@ -12,7 +12,8 @@ Each call to evaluate(x):
      walk phase's gait_path at its generated gait
   4. Runs mppi_sim as a subprocess (it computes the warm start from these
      muscle params at startup)
-  5. Parses the output CSV and computes the mean per-step cost (FITNESS_TERMS)
+  5. Parses the output CSV and computes the mean per-step cost (FITNESS_TERMS),
+     and reports how the evaluation ended (OUTCOMES)
 
 The cost is the controller's own: mppi_sim logs each executed step's
 step_cost() terms (cost_* columns, mppi_locomotion.cpp), so the fitness
@@ -67,6 +68,19 @@ INFEASIBLE_PENALTY_PER_PHASE = 5e4
 # infeasible — every phase failed — rather than as a separate cost bucket.
 N_PHASES = 100
 MAX_INFEASIBLE_PENALTY = INFEASIBLE_PENALTY_PER_PHASE * N_PHASES
+
+# How a candidate's evaluation ended. Only COMPLETED is a success: the goal
+# (GOAL_POS) is out of reach within SIM_DURATION by design, so a run succeeds
+# by lasting the whole SIM_DURATION without a fall.
+COMPLETED  = "completed"    # ran SIM_DURATION without a fall
+FELL       = "fell"         # mppi_sim reported a fall
+INFEASIBLE = "infeasible"   # infeasible gait phases: sim skipped, penalty cost
+FAILED     = "failed"       # gait generation error, mppi_sim error or timeout, or no scorable log
+OUTCOMES   = (COMPLETED, FELL, INFEASIBLE, FAILED)
+
+# The console line mppi_sim prints when the robot falls (controllers/common/
+# harness.h, whose console wording is kept stable for parsers like this one).
+FALL_LINE = "Robot fell at t="
 
 # Discard this many seconds of transient at the start of the log
 TRANSIENT_SECS = 2.0
@@ -191,20 +205,19 @@ def _prepare_candidate(x, tmp_dir):
 
 def _compute_fitness(csv_path):
     """
-    Parse mppi_sim CSV and compute the mean per-step sum of FITNESS_TERMS.
+    Parse mppi_sim CSV and compute the mean per-step sum of FITNESS_TERMS, or
+    None if it has no rows past TRANSIENT_SECS (unreadable, empty, or a fall
+    within the transient).
     """
     try:
         df = pd.read_csv(csv_path)
     except Exception:
-        return MAX_INFEASIBLE_PENALTY
-
-    if df.empty:
-        return MAX_INFEASIBLE_PENALTY
+        return None
 
     # Discard transient
     df = df[df["t"] > TRANSIENT_SECS]
     if df.empty:
-        return MAX_INFEASIBLE_PENALTY
+        return None
 
     return float(df[FITNESS_TERMS].sum(axis=1).mean())
 
@@ -212,7 +225,8 @@ def _compute_fitness(csv_path):
 def evaluate(x, worker_id=0, verbose=False):
     """
     Evaluate one candidate x = [lce_min, lce_max, pFLmax, FVmax, stiffness]
-    (13D) by running mppi_sim. Returns scalar locomotion cost (lower is better).
+    (13D) by running mppi_sim. Returns (cost, outcome): the scalar locomotion
+    cost (lower is better) and how the evaluation ended, one of OUTCOMES.
     """
     with tempfile.TemporaryDirectory(prefix=f"cmaes_w{worker_id}_") as tmp_dir:
         # Generate the walk task's gait file(s)
@@ -221,14 +235,14 @@ def evaluate(x, worker_id=0, verbose=False):
         except Exception as e:
             if verbose:
                 print(f"  [w{worker_id}] gait generation failed: {e}")
-            return MAX_INFEASIBLE_PENALTY
+            return MAX_INFEASIBLE_PENALTY, FAILED
 
         # Feasibility pre-check — skip mppi_sim entirely if any phases are infeasible
         if n_inf > 0:
             penalty = INFEASIBLE_PENALTY_PER_PHASE * n_inf
             if verbose:
                 print(f"  [w{worker_id}] INFEASIBLE ({n_inf} phases) → penalty={penalty:.0f}, skipping sim")
-            return penalty
+            return penalty, INFEASIBLE
 
         # Write temp yaml
         yaml_path = _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir)
@@ -245,9 +259,23 @@ def evaluate(x, worker_id=0, verbose=False):
         except subprocess.TimeoutExpired:
             if verbose:
                 print(f"  [w{worker_id}] mppi_sim timed out")
-            return MAX_INFEASIBLE_PENALTY
+            return MAX_INFEASIBLE_PENALTY, FAILED
 
         cost = _compute_fitness(csv_path)
+
+    # With end_on: duration, a run that neither errors nor falls lasts SIM_DURATION.
+    if result.returncode != 0:
+        outcome = FAILED
+    elif FALL_LINE in result.stdout:
+        outcome = FELL
+    elif cost is None:
+        outcome = FAILED
+    else:
+        outcome = COMPLETED
+
+    # No rows past the transient (e.g. a fall within it) keeps the max penalty.
+    if cost is None:
+        cost = MAX_INFEASIBLE_PENALTY
 
     if verbose:
         hip, thigh, calf = (
@@ -256,9 +284,9 @@ def evaluate(x, worker_id=0, verbose=False):
             f"lce=[{x[2]:.3f},{x[5]:.3f}] pFL={x[8]:.3f} FV={x[11]:.3f}",
         )
         print(f"  [w{worker_id}] hip:{hip}  thigh:{thigh}  calf:{calf}  stiffness={x[12]:.3f}"
-              f"  → cost={cost:.1f}  inf_phases={n_inf}")
+              f"  → cost={cost:.1f}  {outcome}  inf_phases={n_inf}")
 
-    return cost
+    return cost, outcome
 
 
 def render_rollout(x):

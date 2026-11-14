@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
 import pickle
@@ -34,7 +35,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(__file__))
 
 import cma
-from objective import evaluate, render_rollout
+from objective import FAILED, FELL, INFEASIBLE, OUTCOMES, evaluate, render_rollout
 from curve_plots import plot_fl_curves, plot_fv_curves
 
 # ── settings: CONFIG_PATH's run settings and search space ────────────────────
@@ -130,6 +131,10 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 # after every generation.
 STATE_FILE = "cmaes_state.pkl"
 
+# How each generation's evaluations ended (objective.OUTCOMES), one row per
+# generation, in the run's results dir.
+OUTCOMES_FILE = "outcomes.csv"
+
 
 def _eval_worker(args):
     """Top-level function required for ProcessPoolExecutor pickling."""
@@ -189,20 +194,34 @@ def _load_state(results_dir):
     return state
 
 
+def _append_outcomes(results_dir, generation, outcomes, gen_best_outcome):
+    """Append generation's outcome counts, and how its best candidate's
+    evaluation ended, to results_dir/OUTCOMES_FILE (header on first write)."""
+    path = os.path.join(results_dir, OUTCOMES_FILE)
+    first = not os.path.exists(path)
+    with open(path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if first:
+            writer.writerow(["generation", *OUTCOMES, "gen_best"])
+        writer.writerow([generation, *(outcomes.count(o) for o in OUTCOMES), gen_best_outcome])
+
+
 def run_parallel(solutions, n_workers):
-    """Evaluate a list of candidate solutions in parallel."""
+    """Evaluate a list of candidate solutions in parallel. Returns (costs,
+    outcomes), in the order of solutions."""
     args = [(x, i) for i, x in enumerate(solutions)]
-    costs = [None] * len(solutions)
+    costs    = [None] * len(solutions)
+    outcomes = [None] * len(solutions)
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         futures = {pool.submit(_eval_worker, a): i for i, a in enumerate(args)}
         for fut in as_completed(futures):
             idx = futures[fut]
             try:
-                costs[idx] = fut.result()
+                costs[idx], outcomes[idx] = fut.result()
             except Exception as e:
                 print(f"  Worker {idx} raised: {e}")
-                costs[idx] = 1e9
-    return costs
+                costs[idx], outcomes[idx] = 1e9, FAILED
+    return costs, outcomes
 
 
 def main():
@@ -255,8 +274,8 @@ def main():
     if args.test:
         print("── SMOKE TEST (initial point) ──")
         t0 = time.time()
-        cost = evaluate(X0, worker_id=0, verbose=True)
-        print(f"\nCost = {cost:.4f}  ({time.time()-t0:.1f} s)")
+        cost, outcome = evaluate(X0, worker_id=0, verbose=True)
+        print(f"\nCost = {cost:.4f}, {outcome}  ({time.time()-t0:.1f} s)")
         return
 
     if args.resume:
@@ -332,7 +351,7 @@ def main():
         solutions = es.ask()
 
         t0 = time.time()
-        costs = run_parallel(solutions, n_workers=args.workers)
+        costs, outcomes = run_parallel(solutions, n_workers=args.workers)
         elapsed = time.time() - t0
 
         es.tell(solutions, costs)
@@ -340,6 +359,8 @@ def main():
 
         gen_best_idx  = int(np.argmin(costs))
         gen_best_cost = costs[gen_best_idx]
+        n_outcome     = {o: outcomes.count(o) for o in OUTCOMES}
+        _append_outcomes(results_dir, generation, outcomes, outcomes[gen_best_idx])
 
         if gen_best_cost < best_cost:
             best_cost       = gen_best_cost
@@ -372,6 +393,9 @@ def main():
             "std_cost": std_cost,
             "n_feasible": n_feasible,
             "elapsed_s": elapsed,
+            # Outcome counts (objective.OUTCOMES); all of them are in OUTCOMES_FILE.
+            "n_fell": n_outcome[FELL],
+            "n_infeasible": n_outcome[INFEASIBLE],
         }
         for name, val in zip(PARAM_NAMES, solutions[gen_best_idx]):
             log[f"params/{name}"] = val
@@ -402,8 +426,9 @@ def main():
 
         wandb.log(log, step=generation)
 
-        print(f"\nGen {generation:3d} | best={gen_best_cost:.2f} "
+        print(f"\nGen {generation:3d} | best={gen_best_cost:.2f} ({outcomes[gen_best_idx]}) "
               f"| feasible={n_feasible}/{len(costs)} | {elapsed:.0f}s")
+        print("  outcomes: " + ", ".join(f"{o} {n_outcome[o]}" for o in OUTCOMES))
         print(f"  best x: {dict(zip(PARAM_NAMES, best_x))}")
         print(f"  overall best cost: {best_cost:.4f}")
         print("─" * 60)

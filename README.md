@@ -150,6 +150,7 @@ results/<name>/
   best_params.json   best candidate so far: cost, generation, parameters
   cmaes_log/         pycma's per-generation logs (mean, step sizes, costs)
   cmaes_state.pkl    everything --resume needs, saved after every generation
+  outcomes.csv       per generation: how many evaluations completed, fell, were infeasible or failed, and how the best one ended
 ```
 
-wandb logs each generation's costs, its best candidate's force-length and force-velocity curves, and a rollout GIF. To use a result, copy its parameters into `default_muscle_quad` in `controllers/muscle/utils/tasks.yaml`.
+A candidate's evaluation succeeds (`completed`) when the robot walks the whole 10 s without a fall; the goal is out of reach within that time by design. wandb logs each generation's costs, `n_fell` and `n_infeasible`, plus its best candidate's force-length and force-velocity curves and a rollout GIF; every outcome count is in `outcomes.csv` and the console. To use a result, copy its parameters into `default_muscle_quad` in `controllers/muscle/utils/tasks.yaml`.
