@@ -60,13 +60,6 @@ cd muscle_mppi/controllers/build
 ./muscle_mppi_controller
 ```
 
-<!-- record headless
-```bash
-sudo apt install xvfb
-Xvfb :99 -screen 0 1280x720x24 &
-DISPLAY=:99 ./unitree_mujoco -r go2w -s scene_terrain.xml -o ../../../analysis/data/videos/run.mp4
-``` -->
-
 # Standalone Sims
 
 `mppi_sim` (muscle) and `pd_mppi_sim` (PD) run MPPI against a local MuJoCo sim, no DDS needed:
@@ -124,7 +117,7 @@ python3 plot_walk_leg.py [csv] [name] [--outdir DIR]   # defaults to the latest 
 
 # CMA-ES
 
-`muscle_params_opt/` tunes the Hill muscle parameters on the `walk` task with CMA-ES: lce_min, lce_max, pFLmax and FVmax per joint type (hip, thigh, calf; shared by all 4 legs), plus `stiffness`. Each candidate runs `mppi_sim` once and is scored by the controller's own logged cost; candidates whose gait is infeasible skip the sim and get a penalty. The search space and bounds are in `cmaes_walk.py`; the walk settings it overrides (goal, command velocity, duration) are in `objective.py`.
+`muscle_params_opt/` tunes the Hill muscle parameters on the `walk` task with CMA-ES: lce_min, lce_max, pFLmax and FVmax per joint type (hip, thigh, calf; shared by all 4 legs), plus `stiffness`. Each candidate runs `mppi_sim` once and is scored by the controller's own logged cost; candidates whose gait is infeasible skip the sim and get a penalty. `config.yaml` holds the run settings (`run:`) and the starting point, step sizes and bounds (`search:`); the walk settings it overrides (goal, command velocity, duration) are in `objective.py`.
 
 Needs a built `controllers/build/mppi_sim` and the `muscle` conda env (`environment.yml`), logged in to wandb.
 ```bash
@@ -134,17 +127,23 @@ python3 cmaes_walk.py --resume --results-dir results/<name> --maxiter <total gen
 python3 cmaes_walk.py --test                                                             # one sim at the starting point
 ```
 
-| Flag | Default | Effect |
-|---|---|---|
-| `--maxiter` | 15 | generations in total, counting those of a resumed run |
-| `--popsize` | 100 | candidates per generation |
-| `--workers` | 8 | sims run in parallel |
-| `--seed` | random | seed for CMA-ES's sampling |
-| `--sigma` | 1 | scale on the per-parameter step sizes (`SIGMA0`) |
-| `--run-name` | wandb's | wandb run name |
-| `--wandb-project` | `muscle-mppi-cmaes` | wandb project |
-| `--results-dir` | `results/` | output folder; use one per run, or runs overwrite each other |
-| `--resume` | | continue the run saved in `--results-dir` (same logs and wandb run); `--popsize`, `--seed` and `--sigma` are the saved run's |
+Run settings are set in `config.yaml`'s `run:` section; a flag of the same name overrides it for one run.
+
+| Setting | In `config.yaml` | Flag | Effect |
+|---|---|---|---|
+| maxiter | 15 | `--maxiter` | generations in total, counting those of a resumed run |
+| popsize | 100 | `--popsize` | candidates per generation |
+| workers | 8 | `--workers` | sims run in parallel |
+| seed | `null` (random) | `--seed` | seed for CMA-ES's sampling |
+| sigma | 1.0 | `--sigma` | scale on the per-parameter step sizes (`search.sigma0`) |
+| tolx | 0.001 | | pycma stops once every step size is below this |
+| tolfun | 0.001 | | pycma stops once recent costs differ by less than this |
+| wandb_project | `muscle-mppi-cmaes` | `--wandb-project` | wandb project |
+| | | `--run-name` | wandb run name (default: wandb's) |
+| | | `--results-dir` | output folder (default `results/`); use one per run, or runs overwrite each other |
+| | | `--resume` | continue the run saved in `--results-dir` (same logs and wandb run); popsize, sigma, seed, tolx, tolfun and the search space are the saved run's |
+
+Write small numbers as `0.001` or `1.0e-3`: YAML reads `1e-3` as text, and the config check rejects it.
 
 ```
 results/<name>/

@@ -24,7 +24,7 @@ from gait_generator import _active_fl, _passive_fl
 JOINT_NAMES = ["hip", "thigh", "calf"]
 
 # Wide enough to show the full curve regardless of where lce_min/lce_max/
-# pFLmax land within cmaes_walk.py's LO/HI bounds.
+# pFLmax land within the bounds in config.yaml.
 _FL_DOMAIN = np.linspace(0.3, 1.9, 400)
 _FV_DOMAIN = np.linspace(-1.5, 2.0, 400)
 

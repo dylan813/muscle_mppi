@@ -4,7 +4,8 @@ CMA-ES optimizer for Hill muscle parameters of the walk task.
 Optimizes x = [lce_min, lce_max, pFLmax, FVmax] (one value per joint type,
 shared by all 4 legs) and the co-contraction level stiffness (one value for
 all joints) to minimize the mean per-step locomotion cost of the walk task,
-run with the task settings in objective.py.
+run with the task settings in objective.py. Starting point, step sizes and
+bounds: config.yaml.
 
 Usage:
   python cmaes_walk.py               # run full optimization
@@ -27,6 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
+import yaml
 
 # Ensure this directory is on the path for gait_generator import in workers
 sys.path.insert(0, os.path.dirname(__file__))
@@ -35,45 +37,91 @@ import cma
 from objective import evaluate, render_rollout
 from curve_plots import plot_fl_curves, plot_fv_curves
 
-# ── search space (13D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax, stiffness) ─
-# All 4 legs share the same value per joint type. X0, SIGMA0, LO and HI are
-# those of the Aug 4 2026 run that produced tasks.yaml's muscle values
-# (run name area_0, commit b0c904a), except the calf lce bounds and the
-# stiffness entries below.
-PARAM_NAMES = [
-    "lce_min_hip",  "lce_min_thigh",  "lce_min_calf",
-    "lce_max_hip",  "lce_max_thigh",  "lce_max_calf",
-    "pFLmax_hip",   "pFLmax_thigh",   "pFLmax_calf",
-    "FVmax_hip",    "FVmax_thigh",    "FVmax_calf",
-    "stiffness",
-]
+# ── settings: CONFIG_PATH's run settings and search space ────────────────────
+# The search space is 13D: hip/thigh/calf × lce_min/lce_max/pFLmax/FVmax, and
+# stiffness. Its values (x0, step sizes, bounds) come from the config; the
+# layout of x is fixed here: objective.py and curve_plots.py index x by position.
+JOINT_TYPES = ["hip", "thigh", "calf"]
+PER_JOINT   = ["lce_min", "lce_max", "pFLmax", "FVmax"]   # one value per joint type
+PARAM_NAMES = [f"{p}_{j}" for p in PER_JOINT for j in JOINT_TYPES] + ["stiffness"]
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
 
-X0 = [
-    0.85, 0.82, 0.80,   # lce_min: hip, thigh, calf
-    1.09, 1.06, 1.19,   # lce_max
-    0.54, 0.94, 0.21,   # pFLmax
-    1.2, 1.3, 1.1,   # FVmax
-    0.75,               # stiffness (tasks.yaml's value)
-]
-# ~15% of each param's (HI - LO) range, recomputed for the current bounds.
-SIGMA0 = [
-    0.07, 0.07, 0.05,   # lce_min
-    0.07, 0.07, 0.03,   # lce_max
-    0.25, 0.25, 0.25,   # pFLmax
-    0.11, 0.11, 0.11,   # FVmax
-    0.04,               # stiffness
-]
-# FVmax lower bound is kept strictly above 1.0: gait_generator._force_vel
-# divides by (FVmax - 1.0), so a candidate at or below 1.0 is a singularity.
-# Calf lce_min >= 0.60 and lce_max <= 1.25: outside them walk_fast is almost
-# never feasible (4000 uniform samples of the earlier 0.50-0.95 / 1.05-1.50
-# calf bounds: 1% feasible with lce_min < 0.59, 0% with lce_max > 1.32).
-# Stiffness 0.50-0.775: where both activations of a joint stay at least
-# 2 * noise_sigma_act from 0 and 1 for >= 85% of walk_fast, for 96% (at 0.50)
-# to 100% (0.60-0.775) of 400 feasible parameter sets sampled within these
-# bounds; at 0.80 for 0.2%, as one activation nears 1 - 2 * 0.1.
-LO = [0.50, 0.50, 0.60,  1.05, 1.05, 1.05,  0.10, 0.10, 0.10,  1.05, 1.05, 1.05,  0.50]
-HI = [0.90, 0.90, 0.90,  1.50, 1.50, 1.25,  1.80, 1.80, 1.80,  1.80, 1.80, 1.80,  0.775]
+
+def _require_keys(path, where, entry, keys):
+    if not isinstance(entry, dict) or set(entry) != set(keys):
+        found = sorted(entry) if isinstance(entry, dict) else entry
+        raise ValueError(f"{path}: {where} needs exactly {sorted(keys)}, has {found}")
+
+
+def _positive(path, name, value, kind):
+    """value, which must be a kind (int or float) above 0."""
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if not is_number or (kind is int and not isinstance(value, int)) or value <= 0:
+        # PyYAML follows YAML 1.1, which reads 1e-3 as text: an exponent needs
+        # a '.' in the number and a sign, as in 1.0e-3.
+        hint = " (write 0.001 or 1.0e-3: YAML reads 1e-3 as text)" if isinstance(value, str) else ""
+        raise ValueError(f"{path}: {name} must be {'an integer' if kind is int else 'a number'} "
+                         f"above 0, is {value!r}{hint}")
+    return kind(value)
+
+
+def _parse_run(path, run):
+    """The run settings, checked."""
+    _require_keys(path, "run", run, ["maxiter", "popsize", "workers", "seed", "sigma",
+                                     "tolx", "tolfun", "wandb_project"])
+    seed = run["seed"]
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+        raise ValueError(f"{path}: run.seed must be an integer or null, is {seed!r}")
+    if not isinstance(run["wandb_project"], str) or not run["wandb_project"]:
+        raise ValueError(f"{path}: run.wandb_project must be a name, is {run['wandb_project']!r}")
+
+    return {
+        "maxiter":       _positive(path, "run.maxiter", run["maxiter"], int),
+        "popsize":       _positive(path, "run.popsize", run["popsize"], int),
+        "workers":       _positive(path, "run.workers", run["workers"], int),
+        "seed":          seed,
+        "sigma":         _positive(path, "run.sigma",   run["sigma"],   float),
+        "tolx":          _positive(path, "run.tolx",    run["tolx"],    float),
+        "tolfun":        _positive(path, "run.tolfun",  run["tolfun"],  float),
+        "wandb_project": run["wandb_project"],
+    }
+
+
+def _parse_search(path, search):
+    """x0, sigma0, lo and hi, each a list in PARAM_NAMES order, checked."""
+    _require_keys(path, "search", search, ["x0", "sigma0", "lo", "hi"])
+    space = {}
+    for key, entry in search.items():
+        _require_keys(path, f"search.{key}", entry, PER_JOINT + ["stiffness"])
+        values = []
+        for p in PER_JOINT:
+            if not isinstance(entry[p], list) or len(entry[p]) != len(JOINT_TYPES):
+                raise ValueError(f"{path}: search.{key}.{p} needs one value per joint type {JOINT_TYPES}")
+            values += [float(v) for v in entry[p]]
+        space[key] = values + [float(entry["stiffness"])]
+
+    for name, x0, s, lo, hi in zip(PARAM_NAMES, space["x0"], space["sigma0"], space["lo"], space["hi"]):
+        if not (lo < hi and lo <= x0 <= hi and s > 0):
+            raise ValueError(f"{path}: {name} needs lo < hi, x0 within them and sigma0 > 0 "
+                             f"(lo {lo}, hi {hi}, x0 {x0}, sigma0 {s})")
+        if name.startswith("FVmax") and lo <= 1.0:
+            raise ValueError(f"{path}: {name} lo must stay above 1.0, the force-velocity "
+                             f"curve's singularity (FVmax - 1 is a divisor)")
+    return space
+
+
+def load_config(path):
+    """(run, space) from the config at path: the run settings as a dict, and
+    the search space's x0, sigma0, lo and hi, each a list in PARAM_NAMES order.
+    Raises ValueError on a missing or extra entry, or values a run can't use."""
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    _require_keys(path, "the file", cfg, ["run", "search"])
+    return _parse_run(path, cfg["run"]), _parse_search(path, cfg["search"])
+
+
+RUN, _SPACE = load_config(CONFIG_PATH)
+X0, SIGMA0, LO, HI = _SPACE["x0"], _SPACE["sigma0"], _SPACE["lo"], _SPACE["hi"]
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -158,27 +206,32 @@ def run_parallel(solutions, n_workers):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    # Run-setting flags default to None, so that one left out takes the
+    # config's value (RUN) below.
+    parser = argparse.ArgumentParser(
+        description=f"Run settings default to the run section of {CONFIG_PATH}.")
     parser.add_argument("--test",    action="store_true",
                         help="Evaluate initial point only (smoke test)")
-    parser.add_argument("--maxiter", type=int,   default=15,
-                        help="Generations in total, counting those of a "
-                             "resumed run")
+    parser.add_argument("--maxiter", type=int,   default=None,
+                        help=f"Generations in total, counting those of a "
+                             f"resumed run (config: {RUN['maxiter']})")
     parser.add_argument("--resume",  action="store_true",
                         help="Continue the run saved in --results-dir up to "
                              "--maxiter generations, in the same logs and "
-                             "wandb run. --sigma, --popsize and --seed are "
-                             "the saved run's.")
-    parser.add_argument("--workers", type=int,   default=8)
+                             "wandb run. Its popsize, sigma, seed, tolx and "
+                             "tolfun are the saved run's.")
+    parser.add_argument("--workers", type=int,   default=None,
+                        help=f"Sims run in parallel (config: {RUN['workers']})")
     parser.add_argument("--sigma",   type=float, default=None,
-                        help="Override initial sigma (scalar); default: per-param")
-    parser.add_argument("--popsize", type=int,   default=100,
-                        help="CMA-ES population size (default: 100)")
+                        help=f"Scale on every per-parameter step size "
+                             f"(config: {RUN['sigma']})")
+    parser.add_argument("--popsize", type=int,   default=None,
+                        help=f"CMA-ES population size (config: {RUN['popsize']})")
     parser.add_argument("--seed",    type=int,   default=None,
-                        help="Random seed for CMA-ES's sampling (default: "
-                             "unseeded/random each run)")
-    parser.add_argument("--wandb-project", type=str, default="muscle-mppi-cmaes",
-                        help="wandb project to log runs to")
+                        help=f"Random seed for CMA-ES's sampling (config: "
+                             f"{RUN['seed']}; none: random each run)")
+    parser.add_argument("--wandb-project", type=str, default=None,
+                        help=f"wandb project to log runs to (config: {RUN['wandb_project']})")
     parser.add_argument("--run-name", type=str, default=None,
                         help="wandb run name (default: wandb auto-generates one)")
     parser.add_argument("--results-dir", type=str, default=None,
@@ -186,6 +239,9 @@ def main():
                              "distinct dir per process when running sweeps in "
                              "parallel, so cmaes_log files don't collide.")
     args = parser.parse_args()
+    for key in ("maxiter", "workers", "sigma", "popsize", "seed", "wandb_project"):
+        if getattr(args, key) is None:
+            setattr(args, key, RUN[key])
 
     results_dir = args.results_dir if args.results_dir else RESULTS_DIR
     os.makedirs(results_dir, exist_ok=True)
@@ -223,13 +279,13 @@ def main():
         # CMA-ES uses a single scalar sigma; we scale x0 to unit-sigma space
         # by dividing by SIGMA0 elementwise, then CMA-ES searches in that space.
         # Alternatively, use CMA's built-in scaling via 'CMA_stds'.
-        sigma0 = args.sigma if args.sigma is not None else 1.0
+        sigma0 = args.sigma
 
         opts = {
             "bounds":   [LO, HI],
             "maxiter":  args.maxiter,
-            "tolx":     1e-3,
-            "tolfun":   1e-3,
+            "tolx":     RUN["tolx"],
+            "tolfun":   RUN["tolfun"],
             "verbose":  3,
             "CMA_stds": SIGMA0,   # per-parameter step size scaling
         }
@@ -253,6 +309,8 @@ def main():
                 "sigma": sigma0,
                 "popsize": args.popsize,
                 "seed": es.opts.get("seed"),  # resolved seed, even if unspecified
+                "tolx": RUN["tolx"],
+                "tolfun": RUN["tolfun"],
             },
         )
 
@@ -266,7 +324,7 @@ def main():
     best_x          = state["best_x"]
     generation      = es.countiter
 
-    print(f"Starting CMA-ES: popsize={es.popsize}, workers={args.workers}")
+    print(f"Starting CMA-ES: popsize={es.popsize}, workers={args.workers}, maxiter={args.maxiter}")
     print("─" * 60)
 
     while not es.stop():
