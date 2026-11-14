@@ -1,0 +1,24 @@
+# Inputs of the gait table generator (generate.py).
+#
+# These values reproduce RTWholeBodyMPPI's walk_fast table
+# (controllers/pd/gaits/FAST/gait_FAST_0_1_10cm.tsv): timing and height are
+# measured from that file, speed and swing height are the ones in its name.
+
+name: trot_0_1               # the table is written to gait_gen/gaits/<name>.tsv
+model_path: unitree_mujoco/unitree_robots/go2/go2.xml   # relative to the repo root
+dt: 0.01                     # s per column; must equal the task's dt (tasks.yaml)
+
+gait:
+  period: 0.5                # s, one full cycle
+  duty: 0.66                 # fraction of the cycle each foot is on the ground
+  offsets:                   # fraction of the cycle at which each leg touches down
+    FR: 0.0
+    FL: 0.5
+    RR: 0.5
+    RL: 0.0
+
+motion:
+  velocity: [0.1, 0.0]       # m/s, body velocity (forward, left)
+  swing_height: 0.10         # m, apex of the swing above the ground
+
+stance_height: 0.270         # m, hip joint to foot centre while standing
