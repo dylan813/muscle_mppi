@@ -33,14 +33,13 @@ dependencies:
       - pillow==13.0.0
       - cma==4.5.0
       - wandb==0.31.0
-      - pytest==9.1.1
 
 # Set on `conda activate`.
 #   LD_LIBRARY_PATH:  ~/.bashrc adds /usr/local/cuda-12.8/lib64, whose CUDA libs
 #                     would shadow the ones torch ships with.
 #   PYTHONNOUSERSITE: ignore packages in ~/.local.
-#   PYTHONPATH:       ~/.bashrc sources ROS Jazzy, whose Python packages (and
-#                     pytest plugins) would otherwise load inside this env.
+#   PYTHONPATH:       ~/.bashrc sources ROS Jazzy, whose Python packages would
+#                     otherwise load inside this env.
 variables:
   LD_LIBRARY_PATH: ""
   PYTHONNOUSERSITE: "1"
