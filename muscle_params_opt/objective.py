@@ -54,7 +54,7 @@ from gait_generator import generate_gait, source_gait_path
 _HERE      = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT  = os.path.abspath(os.path.join(_HERE, ".."))
 MPPI_SIM   = os.path.join(REPO_ROOT, "controllers", "build", "mppi_sim")
-MODEL_PATH = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene.xml")
+MODEL_PATH = os.path.join(REPO_ROOT, "controllers", "common", "go2", "scene.xml")
 BASE_YAML  = os.path.join(REPO_ROOT, "controllers", "muscle", "utils", "tasks.yaml")
 
 SIM_TIMEOUT = 120  # seconds before killing a runaway mppi_sim

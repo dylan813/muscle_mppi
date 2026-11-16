@@ -20,7 +20,7 @@
 static constexpr int kGeneratorVersion = 1;
 
 // Suspended (fixed-base) Go2: bias torques without contact, as the Python generator uses.
-static const char* kSuspendedModel = "unitree_mujoco/unitree_robots/go2/scene_suspended.xml";
+static const char* kSuspendedModel = "controllers/common/go2/scene_suspended.xml";
 
 // 64-bit FNV-1a: the fingerprint hash of the muscle parameters and the gait table.
 static constexpr uint64_t kFnvOffset = 1469598103934665603ULL;

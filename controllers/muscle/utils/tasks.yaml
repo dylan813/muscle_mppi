@@ -117,7 +117,7 @@ default_muscle_quad: &default_muscle_quad
 # the base frame at 0.320). Tasks on raised ground add its height. cmd_vel =
 # 0.3 m/s: the speed the walk table is built for (gaits.walk.velocity).
 walk:
-  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "controllers/common/go2/scene.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -183,7 +183,7 @@ walk:
 # rather than spawning embedded in it. goal_pos below is set past the far
 # edge of the field so the walk phase actually crosses it.
 walk_rough:
-  model_path:    "unitree_mujoco/unitree_robots/go2/scene_rough.xml"
+  model_path:    "controllers/common/go2/scene_rough.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -225,7 +225,7 @@ walk_rough:
 # stall — the Hill-muscle gait reference is a fixed forward-walking pattern
 # with no mechanism to turn/walk diagonally. Not a bug to fix here.
 walk_octagon:
-  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "controllers/common/go2/scene.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -321,7 +321,7 @@ walk_octagon:
 # authored against the later re-tuned muscle set, so its cost/phase tuning
 # may need a revisit under these parameters.
 guinea_fowl:
-  model_path:    "unitree_mujoco/unitree_robots/go2/scene_guinea_fowl.xml"
+  model_path:    "controllers/common/go2/scene_guinea_fowl.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -367,7 +367,7 @@ guinea_fowl:
 # except pos_x/pos_y = 0: the robot only has to stay upright, not return to
 # its spawn point.
 push_recovery:
-  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "controllers/common/go2/scene.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1
@@ -412,7 +412,7 @@ push_recovery:
 # push_down_recovery: push_recovery with every push pressing the trunk straight
 # down near the CoM (push.type: down_force) instead of kicking it sideways.
 push_down_recovery:
-  model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
+  model_path:    "controllers/common/go2/scene.xml"
   n_samples:     30
   horizon:       40
   lambda:        0.1

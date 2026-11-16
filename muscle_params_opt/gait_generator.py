@@ -13,7 +13,7 @@ import os
 import mujoco
 
 REPO_ROOT  = os.path.join(os.path.dirname(__file__), "..")
-SUSP_MODEL = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene_suspended.xml")
+SUSP_MODEL = os.path.join(REPO_ROOT, "controllers", "common", "go2", "scene_suspended.xml")
 GAIT_DIR   = os.path.join(REPO_ROOT, "gait_gen", "gaits")   # joint-space gait tables
 
 NUM_JOINTS = 12

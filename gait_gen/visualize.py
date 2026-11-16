@@ -23,7 +23,7 @@ from config import REPO_ROOT, load_config, table_path, video_path
 from gait import LEGS
 from robot import JOINTS
 
-SUSPENDED_MODEL = "unitree_mujoco/unitree_robots/go2/scene_suspended.xml"   # relative to the repo root
+SUSPENDED_MODEL = "controllers/common/go2/scene_suspended.xml"   # relative to the repo root
 
 SPEED = 1.0       # playback speed: 1 is real time, 0.25 is four times slower
 FRAME_RATE = 25   # GIF frames per second, approximately

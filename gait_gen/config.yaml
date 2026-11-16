@@ -7,7 +7,7 @@
 # (RTWholeBodyMPPI/legged_mppi/whole_body_mppi/control/gait_scheduler/gaits/FAST/),
 # measured from those files.
 
-model_path: unitree_mujoco/unitree_robots/go2/go2.xml   # relative to the repo root
+model_path: controllers/common/go2/go2.xml   # relative to the repo root
 dt: 0.01                     # s per column; must equal the task's dt (tasks.yaml)
 
 # m, hip joint to foot centre while standing. 0.2966 puts the base frame
