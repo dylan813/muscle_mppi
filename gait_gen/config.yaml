@@ -3,19 +3,23 @@
 # Each entry under `gaits` becomes one table, gait_gen/gaits/<label>.tsv, which
 # a task phase asks for with desired_gait: "<label>".
 #
-# Timing and stance height reproduce RTWholeBodyMPPI's FAST tables
+# Timing (period, duty, offsets) is that of RTWholeBodyMPPI's FAST tables
 # (controllers/pd/gaits/FAST/), measured from those files.
 
 model_path: unitree_mujoco/unitree_robots/go2/go2.xml   # relative to the repo root
 dt: 0.01                     # s per column; must equal the task's dt (tasks.yaml)
-stance_height: 0.270         # m, hip joint to foot centre while standing
+
+# m, hip joint to foot centre while standing. 0.2966 puts the base frame
+# (base_link origin) 0.320 m above flat ground with the trunk level (solved
+# numerically on go2.xml). The centre of mass then sits at 0.296 m.
+stance_height: 0.2966
 
 gaits:
   walk:
     period: 0.5              # s, one full cycle
     duty: 0.66               # fraction of the cycle each foot is on the ground
     offsets: {FR: 0.0, FL: 0.5, RR: 0.5, RL: 0.0}   # fraction of the cycle at which each leg touches down
-    velocity: [0.1, 0.0]     # m/s, body velocity (forward, left)
+    velocity: [0.3, 0.0]     # m/s, body velocity (forward, left)
     swing_height: 0.10       # m, apex of the swing above the ground
 
   in_place:
