@@ -18,6 +18,20 @@ cd muscle_mppi/unitree_mujoco/example/cpp/build
 ./stand_go2
 ```
 
+## Conda
+```bash
+cd muscle_mppi
+PYTHONNOUSERSITE=1 conda env create -f environment.yml
+conda activate muscle
+pip install -e .
+conda env config vars set LD_LIBRARY_PATH="$CONDA_PREFIX/lib/python3.12/site-packages/nvidia/cudnn/lib"
+conda activate muscle
+```
+
+- `PYTHONNOUSERSITE=1` keeps pip from skipping packages already in `~/.local`.
+- `pip install -e .` installs `learning/` as a package (`pyproject.toml`).
+- `LD_LIBRARY_PATH` points the C++ controller's ONNX Runtime at torch's CUDA 12 cuDNN, for running the policy on the GPU. It is set after creation because the path contains the env's location; the second `activate` applies it.
+
 # DDS Configuration
 
 The simulator and controller communicate over CycloneDDS. By default it uses shared memory transport, which can cause silent message drops between processes on the same machine. Disabling it forces traffic over the loopback network which is reliable for local simulation.
