@@ -40,7 +40,7 @@ static std::string hex16(uint64_t h)
 
 std::string activation_gait_path(const std::string& label)
 {
-    return "controllers/muscle/gaits/activation_gait_" + label + ".tsv";
+    return "gait_gen/activation_gaits/" + label + ".tsv";
 }
 
 // Hash of the table file's bytes, so regenerating a table under the same label

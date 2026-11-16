@@ -141,7 +141,7 @@ def _write_temp_yaml(base_cfg, muscle_params, phase_gait_paths, tmp_dir):
     - walk.model_path  set to absolute MODEL_PATH
     - walk.phases[i].gait_path set to phase_gait_paths[i] (absolute), so
       mppi_sim uses the candidate's gaits instead of generating its own into
-      the shared controllers/muscle/gaits/
+      the shared gait_gen/activation_gaits/
     - walk run with GOAL_POS, CMD_VEL and SIM_DURATION, ending early only on a fall
     Returns the path to the written yaml.
     """

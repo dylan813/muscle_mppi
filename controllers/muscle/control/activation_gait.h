@@ -9,7 +9,7 @@
 // MuscleParams::stiffness that produces the joint's bias torque (gravity +
 // Coriolis, suspended model, no contact) — hill_invert_torque().
 //
-// Generated files live in controllers/muscle/gaits/ (gitignored) and start with
+// Generated files live in gait_gen/activation_gaits/ (gitignored) and start with
 // one header line recording what they were generated from:
 //   # activation_gait source=<label> table=<fingerprint> stiffness=<value> muscle=<fingerprint>
 // The gait loader skips it (non-numeric), as does np.loadtxt ('#').
@@ -21,7 +21,7 @@
 #include "../utils/tasks.h"
 
 // Repo-relative path of the generated activation gait for a gait label, e.g.
-// "walk" -> controllers/muscle/gaits/activation_gait_walk.tsv.
+// "walk" -> gait_gen/activation_gaits/walk.tsv.
 std::string activation_gait_path(const std::string& label);
 
 // Hash of every muscle parameter the generated gait depends on (stiffness,

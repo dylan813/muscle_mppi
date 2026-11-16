@@ -93,7 +93,7 @@ default_muscle_quad: &default_muscle_quad
   # (all activation pairs producing the needed torque) activations are chosen.
   # 0.0 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the warm
   # start (holding the standing pose, computed at startup), the gait-tracking
-  # cost, and generating the activation gaits in controllers/muscle/gaits/,
+  # cost, and generating the activation gaits in gait_gen/activation_gaits/,
   # which are regenerated automatically when this, the muscle parameters above
   # or their gait table in gait_gen/gaits/ change.
   stiffness:   0.5199

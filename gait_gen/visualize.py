@@ -3,8 +3,7 @@ Gait table viewer: plays generated tables on the suspended Go2 and saves a GIF o
 
 The body hangs fixed in the air (scene_suspended.xml) and the joints are set
 straight to each column's angles. No physics runs, so the GIF shows the table
-itself, not a controller tracking it. Same model, camera and method as
-analysis/unit_tests/visualize_source_gait_suspended.py.
+itself, not a controller tracking it.
 
 Usage, from this folder, after generate.py (MUJOCO_GL=egl renders without a
 display, as for analysis/render_gif.py). With no label, every gait in

@@ -1,6 +1,6 @@
 # Build output
 controllers/build/
-controllers/muscle/gaits/
+gait_gen/activation_gaits/
 
 # Third-party repos
 unitree_mujoco/

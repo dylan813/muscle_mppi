@@ -5,7 +5,7 @@ but accepts muscle params directly instead of reading from tasks.yaml.
 Used by the CMA-ES optimizer to generate each candidate's activation gaits into
 its own temp directory (also counting infeasible phases, which the C++ generator
 doesn't report), without touching the canonical tasks.yaml or
-controllers/muscle/gaits/, which concurrent candidates would otherwise race on.
+gait_gen/activation_gaits/, which concurrent candidates would otherwise race on.
 """
 
 import numpy as np

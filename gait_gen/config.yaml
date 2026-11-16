@@ -4,7 +4,8 @@
 # a task phase asks for with desired_gait: "<label>".
 #
 # Timing (period, duty, offsets) is that of RTWholeBodyMPPI's FAST tables
-# (controllers/pd/gaits/FAST/), measured from those files.
+# (RTWholeBodyMPPI/legged_mppi/whole_body_mppi/control/gait_scheduler/gaits/FAST/),
+# measured from those files.
 
 model_path: unitree_mujoco/unitree_robots/go2/go2.xml   # relative to the repo root
 dt: 0.01                     # s per column; must equal the task's dt (tasks.yaml)
