@@ -53,15 +53,15 @@ static constexpr double kStandDownPose[NUM_JOINTS] = {
 };
 
 // Standing pose the ramp converges to: the in_place gait's posture with all
-// four feet down (controllers/pd/gaits/FAST/gait_FAST_0_0_10cm.tsv, mean over
-// its 36 such columns, which differ by at most 0.01 rad). On flat ground with
-// a level trunk it puts the CoM at 0.272 m, the height the gaits are built
-// for; the stand-up's kp 50 hold sags it to about 0.244 m.
+// four feet down (gait_gen/gaits/in_place.tsv; every gait_gen table stands at
+// gait_gen/config.yaml's stance_height). On flat ground with a level trunk it
+// puts the base frame at 0.320 m and the CoM at 0.296 m, the height the gaits
+// are built for; the stand-up's kp 50 hold sags them to about 0.294 and 0.271 m.
 static constexpr double kStandUpPose[NUM_JOINTS] = {
-    0.0, 0.8849, -1.7698,   // FR
-    0.0, 0.8849, -1.7698,   // FL
-    0.0, 0.8849, -1.7698,   // RR
-    0.0, 0.8849, -1.7698,   // RL
+    0.0, 0.8006, -1.6013,   // FR
+    0.0, 0.8006, -1.6013,   // FL
+    0.0, 0.8006, -1.6013,   // RR
+    0.0, 0.8006, -1.6013,   // RL
 };
 
 static constexpr double kStandupSecs = 3.0;   // tanh ramp

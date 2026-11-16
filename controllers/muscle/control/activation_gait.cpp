@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "muscle.h"
+#include "../../common/gait.h"      // gait_table_path()
 #include "../../common/harness.h"   // joint_addresses()
 
 // Bump when the generation algorithm changes, so existing files regenerate.
@@ -21,33 +22,48 @@ static constexpr int kGeneratorVersion = 1;
 // Suspended (fixed-base) Go2: bias torques without contact, as the Python generator uses.
 static const char* kSuspendedModel = "unitree_mujoco/unitree_robots/go2/scene_suspended.xml";
 
-// "FAST_0_1_10cm" -> "FAST"
-static std::string tier_of(const std::string& key)
+// 64-bit FNV-1a: the fingerprint hash of the muscle parameters and the gait table.
+static constexpr uint64_t kFnvOffset = 1469598103934665603ULL;
+static constexpr uint64_t kFnvPrime  = 1099511628211ULL;
+
+static void fnv1a(uint64_t& h, const std::string& bytes)
 {
-    const size_t us = key.find('_');
-    if (us == std::string::npos || us == 0)
-        throw std::runtime_error("Gait key '" + key + "' should look like TIER_vel_height (e.g. FAST_0_1_10cm)");
-    return key.substr(0, us);
+    for (unsigned char c : bytes) { h ^= c; h *= kFnvPrime; }
 }
 
-std::string source_gait_path(const std::string& key)
+static std::string hex16(uint64_t h)
 {
-    return "controllers/pd/gaits/" + tier_of(key) + "/gait_" + key + ".tsv";
+    char out[17];
+    std::snprintf(out, sizeof out, "%016" PRIx64, h);
+    return out;
 }
 
-std::string activation_gait_path(const std::string& key)
+std::string activation_gait_path(const std::string& label)
 {
-    return "controllers/muscle/gaits/" + tier_of(key) + "/activation_gait_" + key + ".tsv";
+    return "controllers/muscle/gaits/activation_gait_" + label + ".tsv";
+}
+
+// Hash of the table file's bytes, so regenerating a table under the same label
+// also regenerates its activation gait.
+static std::string table_fingerprint(const std::string& table_abs)
+{
+    std::ifstream f(table_abs, std::ios::binary);
+    if (!f) throw std::runtime_error("Cannot open gait table " + table_abs
+                                     + " (write it with gait_gen/generate.py)");
+    std::ostringstream bytes;
+    bytes << f.rdbuf();
+
+    uint64_t h = kFnvOffset;
+    fnv1a(h, bytes.str());
+    return hex16(h);
 }
 
 std::string muscle_fingerprint(const MuscleParams& p)
 {
     // FNV-1a over the parameters as exact round-trip text ("%.17g"), so the hash
     // is the same on any platform that parses the YAML to the same doubles.
-    uint64_t h = 1469598103934665603ULL;
-    auto feed = [&h](const std::string& s) {
-        for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
-    };
+    uint64_t h = kFnvOffset;
+    auto feed = [&h](const std::string& s) { fnv1a(h, s); };
     auto feed_value = [&feed](double v) {
         char buf[40];
         std::snprintf(buf, sizeof buf, "%.17g;", v);
@@ -71,17 +87,16 @@ std::string muscle_fingerprint(const MuscleParams& p)
         feed_value(p.use_fl); feed_value(p.use_fv); feed_value(p.use_passive);
     }
 
-    char out[17];
-    std::snprintf(out, sizeof out, "%016" PRIx64, h);
-    return out;
+    return hex16(h);
 }
 
-std::string activation_gait_header(const std::string& key, const MuscleParams& p)
+std::string activation_gait_header(const std::string& label, const std::string& table,
+                                   const MuscleParams& p)
 {
     char stiff[40];   // shortest text that reads back as the same double (e.g. "0.8")
     const auto res = std::to_chars(stiff, stiff + sizeof stiff, p.stiffness);
-    return "activation_gait source=" + key + " stiffness=" + std::string(stiff, res.ptr)
-           + " muscle=" + muscle_fingerprint(p);
+    return "activation_gait source=" + label + " table=" + table
+           + " stiffness=" + std::string(stiff, res.ptr) + " muscle=" + muscle_fingerprint(p);
 }
 
 // Rows of whitespace-separated numbers; lines starting with '#' and blank lines are skipped.
@@ -110,7 +125,7 @@ static std::string first_line(const std::string& path)
     return line;
 }
 
-static void generate(const std::string& key, const MuscleParams& p,
+static void generate(const std::string& header, const MuscleParams& p,
                      const std::string& src_abs, const std::string& out_abs)
 {
     const std::vector<std::vector<double>> src = read_tsv(src_abs);
@@ -151,7 +166,7 @@ static void generate(const std::string& key, const MuscleParams& p,
     {
         FILE* f = std::fopen(tmp.c_str(), "w");
         if (!f) throw std::runtime_error("Cannot write " + tmp);
-        std::fprintf(f, "# %s\n", activation_gait_header(key, p).c_str());
+        std::fprintf(f, "# %s\n", header.c_str());
         for (const auto& row : out)   // same layout/format as np.savetxt(delimiter='\t', fmt='%.8f')
             for (size_t t = 0; t < n_phases; ++t)
                 std::fprintf(f, "%.8f%c", row[t], t + 1 < n_phases ? '\t' : '\n');
@@ -160,13 +175,15 @@ static void generate(const std::string& key, const MuscleParams& p,
     std::filesystem::rename(tmp, out_abs);
 }
 
-bool ensure_activation_gait(const std::string& key, const MuscleParams& p)
+bool ensure_activation_gait(const std::string& label, const MuscleParams& p)
 {
-    const std::string out_abs = repo_path(activation_gait_path(key));
-    if (first_line(out_abs) == "# " + activation_gait_header(key, p)) return false;
+    const std::string table_abs = repo_path(gait_table_path(label));
+    const std::string out_abs   = repo_path(activation_gait_path(label));
+    const std::string header    = activation_gait_header(label, table_fingerprint(table_abs), p);
+    if (first_line(out_abs) == "# " + header) return false;
 
-    generate(key, p, repo_path(source_gait_path(key)), out_abs);
+    generate(header, p, table_abs, out_abs);
     std::printf("[gait] regenerated %s (stiffness %.3g) -> %s\n",
-                key.c_str(), p.stiffness, activation_gait_path(key).c_str());
+                label.c_str(), p.stiffness, activation_gait_path(label).c_str());
     return true;
 }

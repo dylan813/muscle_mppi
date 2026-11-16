@@ -35,9 +35,9 @@ default_control_effort_weights: &default_control_effort_weights
 # advances to the next phase once the robot has been within goal_thresh of the
 # current phase's goal_pos for waiting_time + 1 in-threshold ticks (not reset if
 # it drifts back out in between — cumulative, matching RTWholeBodyMPPI).
-# desired_gait is one of: in_place, walk, walk_fast, trot (see mppi_locomotion_pd.cpp
-# GAIT_*_PATH constants) — or set gait_path directly to an explicit TSV, which
-# overrides desired_gait.
+# desired_gait is a gait label: the joint-space table gait_gen/gaits/<label>.tsv
+# written by gait_gen/generate.py — or set gait_path directly to an explicit
+# TSV, which overrides desired_gait.
 #
 # noise_sigma_act and every cost.* weight below were verified against
 # RTWholeBodyMPPI's own mppi_gait_config_walk.yml and match it exactly:
@@ -113,25 +113,24 @@ walk:
     joint_vel_weights: *default_joint_vel_weights
     control_effort_weights: *default_control_effort_weights
 
-  # goal_pos z = 0.27: the standing height the gait references actually
-  # produce. Forward-kinematicking any of the pd/gaits TSVs onto this
-  # robot puts the trunk at 0.2715 m with the stance foot on the ground, and
-  # RTWholeBodyMPPI uses exactly 0.27 for every walking goal (utils/tasks.py).
-  # The 0.34 this task previously carried over from the muscle variant is ~7cm
-  # above that, which pits pos_z (weight 500, pulling the body up) directly
-  # against gait_ref_weights (800, pulling the legs into the 0.27 crouch) —
-  # two strong terms with incompatible targets that the solver cannot satisfy
-  # at once. Elevated-terrain tasks below add their platform height to 0.27.
+  # goal_pos z = 0.32: the base-frame height (qpos z, what this controller's
+  # pos_z measures, base_state()) the gait_gen tables stand Go2 at
+  # (gait_gen/config.yaml: stance_height). A goal away from it pits pos_z
+  # (weight 500) directly against gait_ref_weights (800, pulling the legs into
+  # the gait's posture) — two strong terms with incompatible targets that the
+  # solver cannot satisfy at once. Elevated-terrain tasks below add their
+  # platform height to 0.32. cmd_vel = 0.3 m/s: the speed the walk table is
+  # built for (gaits.walk.velocity).
   # goal x = 2.0 m within 20 s, matching the muscle `walk` task
   # (controllers/muscle/utils/tasks.yaml) so the two controllers are scored on
-  # the same distance and time budget in any muscle-vs-PD comparison. goal_pos z
-  # stays 0.27 for the reason above — it is this controller's own standing
-  # height, not a task difference.
+  # the same distance and time budget in any muscle-vs-PD comparison. The
+  # muscle task's goal z is 0.296 only because its pos_z measures the
+  # whole-robot CoM; both target the same posture.
   sim_duration: 20.0
   phases:
-    - goal_pos:     [2.0, 0.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [2.0, 0.0, 0.32]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
 
@@ -177,9 +176,9 @@ walk_rough:
 
   sim_duration: 45.0
   phases:
-    - goal_pos:     [3.2, 0.0, 0.27]   # 0.27 = gait-implied standing height, see `walk`
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [3.2, 0.0, 0.32]   # 0.32 = gait-implied standing height, see `walk`
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
 
@@ -196,7 +195,7 @@ walk_rough:
 # z=0.1) rather than on the base floor -- pd_mppi_sim's stand-up placement
 # assumes flat ground at z=0, so spawn_height_offset below tells it the
 # actual ground height under the spawn point. Field sits at x in [0.9, 2.9];
-# goal_pos is set past its far edge, with z raised to 0.37 (0.27 gait-implied
+# goal_pos is set past its far edge, with z raised to 0.42 (0.32 gait-implied
 # standing height + the 0.1 terrain elevation) so the height cost tracks
 # correctly while the robot is up on the platform/field.
 walk_rough_2:
@@ -225,9 +224,9 @@ walk_rough_2:
   sim_duration: 10.0
   spawn_height_offset: 0.1
   phases:
-    - goal_pos:     [2.9, 0.0, 0.37]   # 0.27 gait-implied height + 0.1 terrain elevation
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [2.9, 0.0, 0.42]   # 0.32 gait-implied height + 0.1 terrain elevation
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
 
@@ -266,9 +265,9 @@ guinea_fowl:
   sim_duration: 30.0
   spawn_height_offset: 0.05
   phases:
-    - goal_pos:     [1.9, 0.0, 0.39]
-      cmd_vel:      [0.5, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [1.9, 0.0, 0.37]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
     # - goal_pos:     [1.9, 0.0, 0.40]
@@ -293,7 +292,7 @@ guinea_fowl:
 # The goal-facing orientation target (goal_facing_quat, common/control_utils.h)
 # turns off for good once the robot settles within goal_thresh of goal_pos
 # (PhaseSequencer dwelling, common/gait.h). The trunk starts there after stand-up
-# (z 0.343 vs 0.27), so this happens in the first control ticks, before any
+# (z 0.294 vs 0.32), so this happens in the first control ticks, before any
 # push, and pushes don't make the robot turn toward its spawn point.
 push_recovery:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
@@ -329,7 +328,7 @@ push_recovery:
     max_vel_xy: 1.5
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.27]
+    - goal_pos:     [0.0, 0.0, 0.32]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -382,7 +381,7 @@ push_down_recovery:
     radius:    0.1
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.27]
+    - goal_pos:     [0.0, 0.0, 0.32]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

@@ -63,9 +63,9 @@ struct TaskPhase {
     double goal_pos[3]  = {};
     double cmd_vel[2]   = {};  // [vx, vy] body-frame velocity command
 
-    // Categorical gait name: "in_place" | "walk" | "walk_fast" | "trot".
-    // Resolved to a gait TSV path by each variant's locomotion controller
-    // (see mppi_locomotion.cpp / mppi_locomotion_pd.cpp).
+    // Gait label: the joint-space table gait_gen/gaits/<label>.tsv, written by
+    // gait_gen/generate.py (gait_table_path(), common/gait.h). Each variant's
+    // locomotion controller loads it, or its activation version (muscle).
     std::string desired_gait;
 
     // Optional escape hatch: an explicit gait TSV path, overriding desired_gait

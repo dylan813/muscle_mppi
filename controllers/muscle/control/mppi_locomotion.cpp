@@ -17,33 +17,6 @@
 #include <yaml-cpp/yaml.h>
 
 // ============================================================================
-// Named gaits
-// ============================================================================
-//
-// Mirrors RTWholeBodyMPPI's GAIT_*_PATH constants (mppi_locomotion.py): a fixed
-// set of categorical gaits, each the activation version of one joint-space
-// source gait in controllers/pd/gaits/. The activation files are generated into
-// controllers/muscle/gaits/ at startup whenever they're missing or were built
-// with different muscle parameters/stiffness (muscle/control/activation_gait.h).
-// A phase selects a gait by name (TaskPhase::desired_gait) or, as an escape
-// hatch, an explicit TSV path (TaskPhase::gait_path, used as-is) — see
-// resolve_gait_key() in common/gait.h.
-static const std::unordered_map<std::string, std::string> kNamedGaitSources = {
-    {"in_place",  "FAST_0_0_10cm"},
-    {"walk",      "MED_0_1_10cm"},
-    {"walk_fast", "FAST_0_1_10cm"},
-    {"trot",      "MED_0_5_15cm"},
-};
-
-static NamedGaitPaths named_activation_gaits()
-{
-    NamedGaitPaths named;
-    for (const auto& kv : kNamedGaitSources) named[kv.first] = activation_gait_path(kv.second);
-    return named;
-}
-static const NamedGaitPaths kNamedGaits = named_activation_gaits();
-
-// ============================================================================
 // Constructor
 // ============================================================================
 
@@ -78,15 +51,18 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
         }
     }
 
-    // Make every named gait the phases use current for these muscle parameters
-    // (regenerating it if needed), then load the task's gaits and activate
-    // phase 0 (see PhaseSequencer::init()), then apply phase 0's noise override
-    // against the YAML baseline.
+    // A phase's desired_gait label is the joint-space table
+    // gait_gen/gaits/<label>.tsv; MPPI tracks its activation version
+    // (muscle/control/activation_gait.h). Make each one current for this table
+    // and these muscle parameters (regenerating it if needed), then load the
+    // task's gaits and activate phase 0 (see PhaseSequencer::init()), then
+    // apply phase 0's noise override against the YAML baseline. A gait_path
+    // override is an activation gait, used as is.
     for (const TaskPhase& p : task_.phases)
         if (p.gait_path.empty())
-            ensure_activation_gait(kNamedGaitSources.at(resolve_gait_key(p, kNamedGaits)), muscle_);
+            ensure_activation_gait(p.desired_gait, muscle_);
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
-    phases_.init(task_.phases, kNamedGaits);
+    phases_.init(task_.phases, activation_gait_path);
     apply_phase_noise();
 
     // Warm start: seed trajectory_ and real_act_ with activations that hold the

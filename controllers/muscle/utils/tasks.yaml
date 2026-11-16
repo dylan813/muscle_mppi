@@ -94,7 +94,8 @@ default_muscle_quad: &default_muscle_quad
   # 0.0 = minimum co-contraction, 1.0 = maximum (stiffest). Used for the warm
   # start (holding the standing pose, computed at startup), the gait-tracking
   # cost, and generating the activation gaits in controllers/muscle/gaits/,
-  # which are regenerated automatically when this or the muscle parameters above change.
+  # which are regenerated automatically when this, the muscle parameters above
+  # or their gait table in gait_gen/gaits/ change.
   stiffness:   0.5199
 
 # -----------------------------------------------------------------------
@@ -105,10 +106,16 @@ default_muscle_quad: &default_muscle_quad
 # advances to the next phase once the robot has been within goal_thresh of the
 # current phase's goal_pos for waiting_time + 1 in-threshold ticks (not reset if
 # it drifts back out in between — cumulative, matching RTWholeBodyMPPI).
-# desired_gait is one of: in_place, walk, walk_fast, trot (see kNamedGaitSources in
-# mppi_locomotion.cpp) — or set gait_path directly to an explicit TSV, which
-# overrides desired_gait (used by the CMA-ES sweep in muscle_params_opt/ to point
-# at a per-candidate regenerated gait file).
+# desired_gait is a gait label: the joint-space table gait_gen/gaits/<label>.tsv
+# written by gait_gen/generate.py, tracked through its activation version — or
+# set gait_path directly to an explicit activation-gait TSV, which overrides
+# desired_gait (used by the CMA-ES sweep in muscle_params_opt/ to point at a
+# per-candidate regenerated gait file).
+#
+# goal_pos z = 0.296: the whole-robot CoM height (what pos_z measures) the
+# gait_gen tables stand Go2 at (gait_gen/config.yaml: stance_height, which puts
+# the base frame at 0.320). Tasks on raised ground add its height. cmd_vel =
+# 0.3 m/s: the speed the walk table is built for (gaits.walk.velocity).
 walk:
   model_path:    "unitree_mujoco/unitree_robots/go2/scene.xml"
   n_samples:     30
@@ -152,11 +159,11 @@ walk:
   # run_breakdown.sh, which runs this task with each generated YAML.
   sim_duration: 20.0
 
-  # Single phase — same target/gait/cmd_vel this task used before the phases: migration.
+  # Single phase.
   phases:
-    - goal_pos:     [2.0, 0.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [2.0, 0.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
 
@@ -198,9 +205,9 @@ walk_rough:
 
   sim_duration: 45.0
   phases:
-    - goal_pos:     [3.2, 0.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [3.2, 0.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
 
@@ -209,9 +216,10 @@ walk_rough:
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
-# walk_octagon: 1:1 port of RTWholeBodyMPPI's walk_octagon task (tasks.py).
-# 8 walk_fast legs around an octagon, cmd_vel=[0.2,0] on every leg regardless
-# of segment direction (matches the original exactly). Note: muscle_mppi has
+# walk_octagon: port of RTWholeBodyMPPI's walk_octagon task (tasks.py), with
+# this repo's walk gait and height. 8 walk legs around an octagon,
+# cmd_vel=[0.3,0] on every leg regardless of segment direction (the original
+# commands [0.2,0] on every leg, with its walk_fast gait). Note: muscle_mppi has
 # no heading-control term (unlike RTWholeBodyMPPI's goal-facing orientation
 # recompute), so the 6 diagonal legs below are expected to track poorly or
 # stall — the Hill-muscle gait reference is a fixed forward-walking pattern
@@ -238,52 +246,52 @@ walk_octagon:
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.27]
+    - goal_pos:     [0.0, 0.0, 0.296]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.0, 0.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [1.0, 0.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.0, 1.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [2.0, 1.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.0, 2.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [2.0, 2.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.0, 3.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [1.0, 3.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 3.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [0.0, 3.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [-1.0, 2.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [-1.0, 2.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [-1.0, 1.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [-1.0, 1.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 0.0, 0.27]
-      cmd_vel:      [0.2, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [0.0, 0.0, 0.296]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 0.0, 0.27]
+    - goal_pos:     [0.0, 0.0, 0.296]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -301,9 +309,9 @@ walk_octagon:
 #
 # spawn_height_offset must match the platform height (0.05 here) so mppi_sim
 # lands the robot on top of platform A instead of at z=0; goal_pos z is
-# likewise 0.39 (0.34 nominal standing height + 0.05 elevation), since the
+# likewise 0.346 (0.296 standing CoM height + 0.05 elevation), since the
 # robot never returns to the floor. When changing the platform height in the
-# scene, update both. Single phase: walk_fast across the gap to x=1.9 on
+# scene, update both. Single phase: walk across the gap to x=1.9 on
 # platform B (the follow-up in_place hold phase is commented out below). Cost
 # weights are the same as the plain walk tasks; the extra cost.joint_vel is
 # not read by MPPILocomotion.
@@ -336,9 +344,9 @@ guinea_fowl:
   sim_duration: 30.0
   spawn_height_offset: 0.05
   phases:
-    - goal_pos:     [1.9, 0.0, 0.32]
-      cmd_vel:      [0.5, 0.0]
-      desired_gait: "walk_fast"
+    - goal_pos:     [1.9, 0.0, 0.346]
+      cmd_vel:      [0.3, 0.0]
+      desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
     # - goal_pos:     [1.9, 0.0, 0.4]
@@ -390,7 +398,7 @@ push_recovery:
     max_vel_xy: 1.0
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.27]
+    - goal_pos:     [0.0, 0.0, 0.296]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -437,7 +445,7 @@ push_down_recovery:
     radius:    0.1
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.27]
+    - goal_pos:     [0.0, 0.0, 0.296]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2

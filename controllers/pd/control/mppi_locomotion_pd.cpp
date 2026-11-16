@@ -11,31 +11,6 @@
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 
-// ============================================================================
-// Named gaits
-// ============================================================================
-//
-// A fixed set of categorical gaits, each backed by one joint-space gait TSV
-// (joint position + velocity rows) from controllers/pd/gaits/ — a verbatim copy
-// of RTWholeBodyMPPI's 100 Hz raibert gait library, which is also the source
-// the muscle variant generates its activation gaits from
-// (muscle/control/activation_gait.h). A phase selects a gait by name (TaskPhase::desired_gait)
-// or, as an escape hatch, an explicit TSV path (TaskPhase::gait_path) — see
-// resolve_gait_key() in common/gait.h. Same 4-gait mapping as the muscle variant
-// (muscle/control/mppi_locomotion.cpp's kNamedGaits). Paths are repo-relative
-// and resolved with repo_path() at load time.
-static const char* GAIT_INPLACE_PATH   = "controllers/pd/gaits/FAST/gait_FAST_0_0_10cm.tsv";
-static const char* GAIT_WALK_PATH      = "controllers/pd/gaits/MED/gait_MED_0_1_10cm.tsv";
-static const char* GAIT_WALK_FAST_PATH = "controllers/pd/gaits/FAST/gait_FAST_0_1_10cm.tsv";
-static const char* GAIT_TROT_PATH      = "controllers/pd/gaits/MED/gait_MED_0_5_15cm.tsv";
-
-static const NamedGaitPaths kNamedGaits = {
-    {"in_place",  GAIT_INPLACE_PATH},
-    {"walk",      GAIT_WALK_PATH},
-    {"walk_fast", GAIT_WALK_FAST_PATH},
-    {"trot",      GAIT_TROT_PATH},
-};
-
 // Cost-shaping PD gains for the control-effort term (RTWholeBodyMPPI's
 // hardcoded kp = 50, kd = 3 — see step_cost() for why these differ from the
 // actuator's own gains). Shared by step_cost() and the [cost] log in update().
@@ -80,9 +55,11 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
     }
 
     // Load the task's gaits and activate phase 0 (see PhaseSequencer::init()),
-    // then apply phase 0's noise override against the YAML baseline.
+    // then apply phase 0's noise override against the YAML baseline. A phase's
+    // desired_gait label is the joint-space table gait_gen/gaits/<label>.tsv
+    // (gait_table_path(), common/gait.h), tracked as is.
     std::memcpy(base_noise_sigma_act_, task_.noise_sigma_act, sizeof(base_noise_sigma_act_));
-    phases_.init(task_.phases, kNamedGaits);
+    phases_.init(task_.phases, gait_table_path);
     apply_phase_noise();
 
     // Seed trajectory_ and real_q_des_ with the task's nominal pose — sensible

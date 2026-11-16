@@ -14,23 +14,14 @@ import mujoco
 
 REPO_ROOT  = os.path.join(os.path.dirname(__file__), "..")
 SUSP_MODEL = os.path.join(REPO_ROOT, "unitree_mujoco", "unitree_robots", "go2", "scene_suspended.xml")
-GAIT_DIR   = os.path.join(REPO_ROOT, "controllers", "pd", "gaits")   # joint-space source gaits
+GAIT_DIR   = os.path.join(REPO_ROOT, "gait_gen", "gaits")   # joint-space gait tables
 
 NUM_JOINTS = 12
 
-# desired_gait name -> source gait key. Must match kNamedGaitSources in
-# controllers/muscle/control/mppi_locomotion.cpp.
-NAMED_GAIT_SOURCES = {
-    "in_place":  "FAST_0_0_10cm",
-    "walk":      "MED_0_1_10cm",
-    "walk_fast": "FAST_0_1_10cm",
-    "trot":      "MED_0_5_15cm",
-}
 
-
-def source_gait_path(key):
-    """"FAST_0_1_10cm" -> controllers/pd/gaits/FAST/gait_FAST_0_1_10cm.tsv"""
-    return os.path.join(GAIT_DIR, key.split("_", 1)[0], f"gait_{key}.tsv")
+def source_gait_path(label):
+    """"walk" -> gait_gen/gaits/walk.tsv. Must match gait_table_path() in controllers/common/gait.h."""
+    return os.path.join(GAIT_DIR, f"{label}.tsv")
 
 # ── Hill model (param-explicit versions) ────────────────────────────────────
 
@@ -120,10 +111,10 @@ def _constraint_midpoint(q, dq, tau_req, j, p, stiffness):
     return float(a1_out), float(a2_out), infeasible
 
 
-def generate_gait(key, output_path, muscle_params, stiffness=0.75):
+def generate_gait(label, output_path, muscle_params, stiffness=0.75):
     """
-    Generate the activation gait for source gait `key` (e.g. "FAST_0_1_10cm",
-    see source_gait_path()) using the given muscle_params dict.
+    Generate the activation gait for the gait table labelled `label` (e.g.
+    "walk", see source_gait_path()) using the given muscle_params dict.
 
     muscle_params must contain keys (each a list of 12 floats):
         lce_min, lce_max, FVmax, pFLmax, vmax, phi_min, phi_max, peak_force
@@ -132,9 +123,9 @@ def generate_gait(key, output_path, muscle_params, stiffness=0.75):
     explicit gait_path, which the controller never regenerates).
     Returns the number of infeasible (phase, joint) pairs clamped.
     """
-    gait_path = source_gait_path(key)
+    gait_path = source_gait_path(label)
     if not os.path.exists(gait_path):
-        raise FileNotFoundError(f"Source gait not found: {gait_path}")
+        raise FileNotFoundError(f"Gait table not found: {gait_path} (write it with gait_gen/generate.py)")
 
     gait    = np.loadtxt(gait_path, delimiter='\t')
     N       = gait.shape[1]

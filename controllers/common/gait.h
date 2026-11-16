@@ -83,41 +83,38 @@ private:
     bool loaded_   = false;
 };
 
-// Categorical gait name -> TSV path, repo-relative or absolute (each variant has
-// its own table).
-using NamedGaitPaths = std::unordered_map<std::string, std::string>;
-
-// Resolves a phase to the key its gait is loaded/stored under: an explicit
-// gait_path override (if set) is keyed by its own path string; otherwise
-// desired_gait must be one of `named`'s keys.
-inline std::string resolve_gait_key(const TaskPhase& p, const NamedGaitPaths& named)
+// Repo-relative path of the joint-space gait table labelled `label`, as
+// gait_gen/generate.py writes it (one per entry under `gaits:` in
+// gait_gen/config.yaml). A phase asks for it with desired_gait: "<label>".
+inline std::string gait_table_path(const std::string& label)
 {
-    if (!p.gait_path.empty()) return p.gait_path;
-    if (!named.count(p.desired_gait)) {
-        // List the variant's own gait names (sorted, so the message is stable).
-        std::vector<std::string> names;
-        for (const auto& kv : named) names.push_back(kv.first);
-        std::sort(names.begin(), names.end());
-        std::string list;
-        for (const auto& n : names) list += (list.empty() ? "" : ", ") + n;
-        throw std::runtime_error("Unknown desired_gait '" + p.desired_gait
-                                 + "'. Must be one of: " + list);
-    }
-    return p.desired_gait;
+    return "gait_gen/gaits/" + label + ".tsv";
+}
+
+// How a variant turns a gait label into the repo-relative file it loads: the
+// joint-space table itself (PD: gait_table_path) or its activation version
+// (muscle: activation_gait_path, muscle/control/activation_gait.h).
+using GaitPathOf = std::string (*)(const std::string& label);
+
+// The key a phase's gait is loaded and stored under: its gait_path override
+// (if set), otherwise its desired_gait label.
+inline std::string resolve_gait_key(const TaskPhase& p)
+{
+    return p.gait_path.empty() ? p.desired_gait : p.gait_path;
 }
 
 // Load every gait the task's phases use, once each, keyed as resolve_gait_key()
-// expects: named gaits from `named`, per-phase gait_path overrides from their own
-// path. Named gaits no phase uses aren't loaded. Resolving every phase here also
-// reports an unknown desired_gait at startup rather than when that phase is reached.
+// expects: labelled gaits from path_of(label), gait_path overrides from their
+// own path. Loading them all here reports a missing table at startup rather
+// than when its phase is reached.
 template <class Gait>
-void load_gaits(std::unordered_map<std::string, Gait>& gaits, const NamedGaitPaths& named,
+void load_gaits(std::unordered_map<std::string, Gait>& gaits, GaitPathOf path_of,
                 const std::vector<TaskPhase>& phases)
 {
     for (const auto& p : phases) {
-        const std::string key = resolve_gait_key(p, named);
+        const std::string key = resolve_gait_key(p);
         if (gaits.count(key)) continue;
-        gaits[key].load(p.gait_path.empty() ? repo_path(named.at(key)) : p.gait_path);
+        gaits[key].load(p.gait_path.empty() ? repo_path(path_of(key)) : p.gait_path);
     }
 }
 
@@ -146,13 +143,12 @@ public:
 
     // Load the gaits and activate phase 0. phases must outlive the sequencer.
     // A task with no phases keeps an all-zero command.
-    void init(const std::vector<TaskPhase>& phases, const NamedGaitPaths& named)
+    void init(const std::vector<TaskPhase>& phases, GaitPathOf path_of)
     {
         phases_ = &phases;
-        named_  = &named;
 
-        // Load every gait the phases use (named gaits and gait_path overrides).
-        load_gaits(gaits_, named, phases);
+        // Load every gait the phases use (labelled gaits and gait_path overrides).
+        load_gaits(gaits_, path_of, phases);
 
         if (!phases.empty())
             activate(0);
@@ -250,15 +246,14 @@ private:
         cmd_.goal_pos[2] = p.goal_pos[2];
         cmd_.vx = p.cmd_vel[0];
         cmd_.vy = p.cmd_vel[1];
-        active_gait_ = &gaits_.at(resolve_gait_key(p, *named_));
+        active_gait_ = &gaits_.at(resolve_gait_key(p));
     }
 
     const std::vector<TaskPhase>* phases_ = nullptr;
-    const NamedGaitPaths*         named_  = nullptr;
 
     // All gaits a task can use, keyed by resolve_gait_key() so both the
-    // canonical names and any per-phase gait_path override share one map
-    // without key collisions. active_gait_ points at the current phase's entry.
+    // labels and any per-phase gait_path override share one map.
+    // active_gait_ points at the current phase's entry.
     std::unordered_map<std::string, Gait> gaits_;
     Gait* active_gait_ = nullptr;
 

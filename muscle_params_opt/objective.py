@@ -47,7 +47,7 @@ import tempfile
 import pandas as pd
 import yaml
 
-from gait_generator import NAMED_GAIT_SOURCES, generate_gait
+from gait_generator import generate_gait
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _HERE      = os.path.dirname(os.path.abspath(__file__))
@@ -93,17 +93,15 @@ FITNESS_TERMS = ["cost_pos", "cost_orient", "cost_vel"]
 # keeps its own. Goal x and SIM_DURATION are those of the July 2026 FVmax-sweep
 # runs and the Aug 4 2026 run that produced tasks.yaml's muscle values (commits
 # 7e977c6, b0c904a); runs end on duration, not on reaching the goal, so every
-# run lasts SIM_DURATION unless the robot falls. Goal height 0.27 m is
-# RTWholeBodyMPPI's walking height (utils/tasks.py), within 3 mm of the whole-
-# robot CoM height walk_fast's joint angles imply on Go2 (0.273 m).
-GOAL_POS     = [5.0, 0.0, 0.27]
+# run lasts SIM_DURATION unless the robot falls. Goal height 0.296 m is the
+# whole-robot CoM height (what the controller's pos_z term measures) the
+# gait_gen tables stand Go2 at (gait_gen/config.yaml: stance_height).
+GOAL_POS     = [5.0, 0.0, 0.296]
 SIM_DURATION = 10.0   # s
 
-# Commanded body-frame velocity [vx, vy] (m/s): RTWholeBodyMPPI's walking command
-# with walk_fast (legged_mppi/whole_body_mppi/utils/tasks.py: walk_straight,
-# walk_octagon), copied so results compare directly against it. walk_fast's
-# own stride is built for about 0.1 m/s.
-CMD_VEL = [0.2, 0.0]
+# Commanded body-frame velocity [vx, vy] (m/s): the speed the walk gait table
+# is built for (gait_gen/config.yaml: gaits.walk.velocity).
+CMD_VEL = [0.3, 0.0]
 
 
 # Joint order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), ...
@@ -188,17 +186,17 @@ def _prepare_candidate(x, tmp_dir):
 
     muscle_params = _build_muscle_params(x, base_cfg["default_muscle_quad"])
 
-    generated = {}          # source key -> generated gait path
+    generated = {}          # gait label -> generated gait path
     phase_gait_paths = []
     n_inf = 0
     for phase in base_cfg["walk"]["phases"]:
-        key = NAMED_GAIT_SOURCES[phase["desired_gait"]]
-        if key not in generated:
-            out = os.path.join(tmp_dir, "gaits", f"activation_gait_{key}.tsv")
-            n_inf += generate_gait(key, out, muscle_params,
+        label = phase["desired_gait"]
+        if label not in generated:
+            out = os.path.join(tmp_dir, "gaits", f"activation_gait_{label}.tsv")
+            n_inf += generate_gait(label, out, muscle_params,
                                    stiffness=muscle_params["stiffness"])
-            generated[key] = out
-        phase_gait_paths.append(generated[key])
+            generated[label] = out
+        phase_gait_paths.append(generated[label])
 
     return base_cfg, muscle_params, phase_gait_paths, n_inf
 
