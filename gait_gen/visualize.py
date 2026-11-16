@@ -1,5 +1,5 @@
 """
-Gait table viewer: plays a generated table on the suspended Go2 and saves a GIF.
+Gait table viewer: plays generated tables on the suspended Go2 and saves a GIF of each.
 
 The body hangs fixed in the air (scene_suspended.xml) and the joints are set
 straight to each column's angles. No physics runs, so the GIF shows the table
@@ -7,12 +7,14 @@ itself, not a controller tracking it. Same model, camera and method as
 analysis/unit_tests/visualize_source_gait_suspended.py.
 
 Usage, from this folder, after generate.py (MUJOCO_GL=egl renders without a
-display, as for analysis/render_gif.py):
-    MUJOCO_GL=egl python visualize.py [config.yaml]
+display, as for analysis/render_gif.py). With no label, every gait in
+config.yaml is rendered:
+    MUJOCO_GL=egl python visualize.py [label ...]
 """
 
 import math
 import os
+import sys
 
 import mujoco
 import numpy as np
@@ -66,21 +68,24 @@ def render_frames(model, angles, columns_per_frame):
 def main():
     config = load_config()
     dt = config["dt"]
-
-    table = np.loadtxt(table_path(config), delimiter="\t")
-    angles = table[: len(LEGS) * len(JOINTS)]
+    labels = sys.argv[1:] or list(config["gaits"])
 
     model = mujoco.MjModel.from_xml_path(os.path.join(REPO_ROOT, SUSPENDED_MODEL))
 
     columns_per_frame = max(1, round(SPEED / (FRAME_RATE * dt)))
-    frames = render_frames(model, angles, columns_per_frame)
-
-    path = video_path(config)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     frame_ms = 1000.0 * columns_per_frame * dt / SPEED
-    frames[0].save(path, save_all=True, append_images=frames[1:], duration=frame_ms, loop=0)
 
-    print(f"wrote {os.path.relpath(path)}: {len(frames)} frames, {SPEED}x real time")
+    for label in labels:
+        table = np.loadtxt(table_path(label), delimiter="\t")
+        angles = table[: len(LEGS) * len(JOINTS)]
+
+        frames = render_frames(model, angles, columns_per_frame)
+
+        path = video_path(label)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        frames[0].save(path, save_all=True, append_images=frames[1:], duration=frame_ms, loop=0)
+
+        print(f"wrote {os.path.relpath(path)}: {len(frames)} frames, {SPEED}x real time")
 
 
 if __name__ == "__main__":

@@ -36,9 +36,12 @@ class Contact(Enum):
 
 @dataclass(frozen=True)
 class Gait:
+    """One gait table's inputs: an entry under `gaits` in config.yaml."""
     period: float               # s, one full cycle
     duty: float                 # fraction of the cycle each foot is on the ground
     offsets: dict[str, float]   # per leg: fraction of the cycle at which it touches down
+    velocity: list[float]       # m/s, body velocity (forward, left)
+    swing_height: float         # m, apex of the swing above the ground
 
     def __post_init__(self):
         if self.period <= 0.0:
@@ -87,15 +90,9 @@ def _bump(s):
     return 64 * s**3 * (1 - s)**3
 
 
-def foot_offset(gait, velocity, swing_height, phase):
-    """
-    Foot position relative to its nominal point (m).
-
-    velocity:     body velocity (forward, left), m/s
-    swing_height: apex of the swing above the ground, m
-    phase:        the leg's LegPhase
-    """
-    velocity = np.array([velocity[0], velocity[1], 0.0])
+def foot_offset(gait, phase):
+    """Foot position relative to its nominal point (m), with the leg at `phase` (a LegPhase)."""
+    velocity = np.array([gait.velocity[0], gait.velocity[1], 0.0])
     excursion = velocity * gait.stance_time   # how far the foot moves back under the body in stance
 
     if phase.contact is Contact.STANCE:
@@ -108,6 +105,6 @@ def foot_offset(gait, velocity, swing_height, phase):
     body_advance = velocity * gait.swing_time * phase.progress
 
     offset = over_ground - body_advance
-    offset[2] = swing_height * _bump(phase.progress)
+    offset[2] = gait.swing_height * _bump(phase.progress)
 
     return offset

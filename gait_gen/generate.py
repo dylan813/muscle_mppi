@@ -1,15 +1,20 @@
 """
 Gait table generator.
 
-Writes the joint-space gait table the controllers track: 24 rows, one column
-per controller tick over one gait cycle. Rows 0-11 are joint angles (rad),
-rows 12-23 joint velocities (rad/s), in FR/FL/RR/RL x hip/thigh/calf order
-(controllers/common/gait.h, GaitTable).
+Writes one joint-space gait table per entry under `gaits` in config.yaml, in
+the form the controllers track: 24 rows, one column per controller tick over
+one gait cycle. Rows 0-11 are joint angles (rad), rows 12-23 joint velocities
+(rad/s), in FR/FL/RR/RL x hip/thigh/calf order (controllers/common/gait.h,
+GaitTable).
+
+Each file's first line, starting with '#', records the inputs the table was
+generated from. Table readers skip it.
 
 Usage, from this folder:
-    python generate.py [config.yaml]
+    python generate.py
 """
 
+import json
 import os
 
 import numpy as np
@@ -41,7 +46,7 @@ def leg_rows(leg):
     return slice(start, start + len(JOINTS))
 
 
-def foot_targets(gait, motion, stance_height, robot, columns, dt):
+def foot_targets(gait, stance_height, robot, columns, dt):
     """Each leg's foot position in every column, relative to its hip joint (m): {leg: (columns, 3)}."""
     targets = {}
 
@@ -50,7 +55,7 @@ def foot_targets(gait, motion, stance_height, robot, columns, dt):
         nominal = np.array([0.0, robot.legs[leg].geometry.lateral, -stance_height])
 
         targets[leg] = np.array([
-            nominal + foot_offset(gait, motion["velocity"], motion["swing_height"], leg_phase(gait, leg, column * dt))
+            nominal + foot_offset(gait, leg_phase(gait, leg, column * dt))
             for column in range(columns)
         ])
 
@@ -92,27 +97,35 @@ def check_against_model(robot, angles, targets):
                 raise ValueError(f"{leg} column {column}: the model puts the foot {gap:.2e} m from its target")
 
 
-def main():
-    config = load_config()
-
-    gait = Gait(**config["gait"])
-    robot = Robot(os.path.join(REPO_ROOT, config["model_path"]))
-    dt = config["dt"]
+def gait_table(gait, stance_height, robot, dt):
+    """The 24-row table of one gait."""
     columns = column_count(gait.period, dt)
 
-    targets = foot_targets(gait, config["motion"], config["stance_height"], robot, columns, dt)
+    targets = foot_targets(gait, stance_height, robot, columns, dt)
     angles = joint_angles(robot, targets)
 
     check_limits(robot, angles)
     check_against_model(robot, angles, targets)
 
-    table = np.vstack([angles, joint_velocities(angles, dt)])
+    return np.vstack([angles, joint_velocities(angles, dt)])
 
-    path = table_path(config)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    np.savetxt(path, table, delimiter="\t")
 
-    print(f"wrote {os.path.relpath(path)}: {table.shape[0]} x {table.shape[1]}, one {gait.period} s cycle")
+def main():
+    config = load_config()
+    shared = {key: value for key, value in config.items() if key != "gaits"}
+    robot = Robot(os.path.join(REPO_ROOT, config["model_path"]))
+
+    for label, inputs in config["gaits"].items():
+        try:
+            table = gait_table(Gait(**inputs), config["stance_height"], robot, config["dt"])
+        except ValueError as error:
+            raise ValueError(f"gait '{label}': {error}") from error
+
+        path = table_path(label)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        np.savetxt(path, table, delimiter="\t", header="gait_gen " + json.dumps(shared | inputs))
+
+        print(f"wrote {os.path.relpath(path)}: {table.shape[0]} x {table.shape[1]}, one {inputs['period']} s cycle")
 
 
 if __name__ == "__main__":
