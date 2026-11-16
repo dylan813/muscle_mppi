@@ -35,7 +35,8 @@ import yaml
 sys.path.insert(0, os.path.dirname(__file__))
 
 import cma
-from objective import FAILED, FELL, INFEASIBLE, OUTCOMES, evaluate, render_rollout
+from objective import (FAILED, FELL, INFEASIBLE, INFEASIBLE_PENALTY_PER_PHASE, OUTCOMES,
+                       evaluate, render_rollout)
 from curve_plots import plot_fl_curves, plot_fv_curves
 
 # ── settings: CONFIG_PATH's run settings and search space ────────────────────
@@ -379,8 +380,9 @@ def main():
         _save_state(results_dir, es, best_cost, best_generation, best_x, wandb.run.id)
 
         # Mean/std over feasible candidates only, so infeasible-penalty
-        # outliers don't swamp them.
-        feasible_costs = [c for c in costs if c < 1e5]
+        # outliers don't swamp them. Every penalty is at least one infeasible
+        # phase's worth (INFEASIBLE_PENALTY_PER_PHASE).
+        feasible_costs = [c for c in costs if c < INFEASIBLE_PENALTY_PER_PHASE]
         mean_cost = float(np.mean(feasible_costs)) if feasible_costs else float("nan")
         std_cost  = float(np.std(feasible_costs))  if feasible_costs else float("nan")
         n_feasible = len(feasible_costs)

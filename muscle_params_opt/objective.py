@@ -44,10 +44,11 @@ import copy
 import io
 import subprocess
 import tempfile
+import numpy as np
 import pandas as pd
 import yaml
 
-from gait_generator import generate_gait
+from gait_generator import generate_gait, source_gait_path
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _HERE      = os.path.dirname(os.path.abspath(__file__))
@@ -62,11 +63,19 @@ SIM_TIMEOUT = 120  # seconds before killing a runaway mppi_sim
 # CMA-ES always prefers feasible candidates. mppi_sim is skipped entirely.
 INFEASIBLE_PENALTY_PER_PHASE = 5e4
 
-# Number of phases in the gait trajectory (rows of the source gait TSV).
-# Candidates that never produce a scorable rollout at all (gait generation
-# error, sim timeout, unreadable/empty CSV) are scored as maximally
-# infeasible — every phase failed — rather than as a separate cost bucket.
-N_PHASES = 100
+def _walk_gait_columns():
+    """Columns of the walk task's gait table: one per controller tick over one gait cycle."""
+    with open(BASE_YAML) as f:
+        (phase,) = yaml.safe_load(f)["walk"]["phases"]   # raises unless walk has exactly one phase
+    return np.loadtxt(source_gait_path(phase["desired_gait"])).shape[1]
+
+
+# Number of phases (columns) in the walk task's gait table, read from it so it
+# follows the table (50 for a 0.5 s cycle at dt 0.01 s). Candidates that never
+# produce a scorable rollout at all (gait generation error, sim timeout,
+# unreadable/empty CSV) are scored as maximally infeasible — every phase
+# failed — rather than as a separate cost bucket.
+N_PHASES = _walk_gait_columns()
 MAX_INFEASIBLE_PENALTY = INFEASIBLE_PENALTY_PER_PHASE * N_PHASES
 
 # How a candidate's evaluation ended. Only COMPLETED is a success: the goal
