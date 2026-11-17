@@ -22,6 +22,7 @@ import os
 import pickle
 import sys
 import time
+import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import matplotlib
@@ -140,7 +141,14 @@ OUTCOMES_FILE = "outcomes.csv"
 def _eval_worker(args):
     """Top-level function required for ProcessPoolExecutor pickling."""
     x, worker_id = args
-    return evaluate(x, worker_id=worker_id, verbose=True)
+    try:
+        return evaluate(x, worker_id=worker_id, verbose=True)
+    except KeyboardInterrupt:
+        # Ctrl+C reached this worker (it shares the terminal): end it, before
+        # it takes the next queued candidate and starts another sim. The
+        # executor's worker loop catches every exception, SystemExit too, so
+        # exit the process directly; evaluate() has cleaned up its temp dir.
+        os._exit(1)
 
 
 def _write_best_result(results_dir, best_cost, best_generation, best_x, cli_args, done=False):
@@ -215,13 +223,24 @@ def run_parallel(solutions, n_workers):
     outcomes = [None] * len(solutions)
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         futures = {pool.submit(_eval_worker, a): i for i, a in enumerate(args)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            try:
-                costs[idx], outcomes[idx] = fut.result()
-            except Exception as e:
-                print(f"  Worker {idx} raised: {e}")
-                costs[idx], outcomes[idx] = 1e9, FAILED
+        try:
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                try:
+                    costs[idx], outcomes[idx] = fut.result()
+                except Exception as e:
+                    print(f"  Worker {idx} raised: {e}")
+                    costs[idx], outcomes[idx] = 1e9, FAILED
+        except BaseException:
+            # Ctrl+C (or an error here). Ctrl+C also interrupts the workers'
+            # running sims, but they then start the queued candidates, and
+            # leaving the with-block waits for all of them; ending the run
+            # any other way leaves the workers behind, parented to init.
+            # Drop the queue and stop the workers instead.
+            pool.shutdown(wait=False, cancel_futures=True)
+            for worker in multiprocessing.active_children():
+                worker.terminate()
+            raise
     return costs, outcomes
 
 
