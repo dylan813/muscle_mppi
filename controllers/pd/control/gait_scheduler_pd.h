@@ -14,7 +14,7 @@
 // Loading, advancing and thread-safety rules come from GaitTable (common/gait.h).
 class GaitSchedulerPD : public GaitTable {
 public:
-    GaitSchedulerPD() : GaitTable("GaitSchedulerPD") {}
+    GaitSchedulerPD() : GaitTable("GaitSchedulerPD", 2 * NUM_JOINTS) {}
 
     // Fill q_ref[NUM_JOINTS]/dq_ref[NUM_JOINTS] with joint position/velocity
     // references at phase (phase_ + t_offset) % n_phases_.

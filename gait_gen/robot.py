@@ -3,7 +3,8 @@ Robot description, read from the MuJoCo model so the simulator's model stays
 the only source of leg lengths and joint limits.
 
 Expects unitree_mujoco's Go2 naming: bodies <leg>_hip, <leg>_thigh, <leg>_calf,
-<leg>_foot and joints <leg>_hip_joint, <leg>_thigh_joint, <leg>_calf_joint.
+<leg>_foot, joints <leg>_hip_joint, <leg>_thigh_joint, <leg>_calf_joint, and
+sphere foot geoms named <leg>.
 """
 
 from dataclasses import dataclass
@@ -59,3 +60,45 @@ class Robot:
         hip = self._data.xpos[self._model.body(f"{leg}_hip").id]
 
         return foot - hip
+
+    @property
+    def weight(self):
+        """Gravity's force on the whole robot (N, world frame): (3,)."""
+        mass = self._model.body_subtreemass[0]   # the world body's subtree: every body
+
+        return mass * self._model.opt.gravity
+
+    def friction(self, leg):
+        """
+        Sliding friction coefficient of the leg's foot contact. The foot geoms
+        have priority 1, so MuJoCo uses their friction over the floor's.
+        """
+        return self._model.geom(leg).friction[0]
+
+    def com_and_contacts(self, angles):
+        """
+        Whole-robot centre of mass and each foot's contact point, the bottom of
+        its sphere (world frame, m), with the body level and all 12 joints at
+        `angles` (table order: LEGS x JOINTS). Returns (com, {leg: point}).
+        """
+        mujoco.mj_resetData(self._model, self._data)   # level body
+
+        for leg_index, leg in enumerate(LEGS):
+            for joint_index, joint in enumerate(JOINTS):
+                address = self._model.joint(f"{leg}_{joint}_joint").qposadr[0]
+                self._data.qpos[address] = angles[leg_index * len(JOINTS) + joint_index]
+
+        mujoco.mj_kinematics(self._model, self._data)
+        mujoco.mj_comPos(self._model, self._data)
+
+        com = self._data.subtree_com[0].copy()   # the world body's subtree: every body
+        contacts = {}
+
+        for leg in LEGS:
+            foot = self._model.geom(leg)
+            if foot.type[0] != mujoco.mjtGeom.mjGEOM_SPHERE:
+                raise ValueError(f"foot geom {leg} is not a sphere")
+
+            contacts[leg] = self._data.geom_xpos[foot.id] - np.array([0.0, 0.0, foot.size[0]])
+
+        return com, contacts

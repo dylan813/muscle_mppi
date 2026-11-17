@@ -20,6 +20,11 @@ def table_path(label):
     return os.path.join(GAIT_GEN_DIR, "gaits", f"{label}.tsv")
 
 
+def forces_path(label):
+    """Where generate.py writes the planned stance forces of the table labelled `label`."""
+    return os.path.join(GAIT_GEN_DIR, "gaits", f"{label}_forces.tsv")
+
+
 def video_path(label):
     """Where visualize.py writes that gait's GIF."""
     return os.path.join(GAIT_GEN_DIR, "videos", f"{label}.gif")

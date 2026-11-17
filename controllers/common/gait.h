@@ -1,7 +1,7 @@
 #pragma once
 
 // Gait-reference plumbing shared by both variants: reading and cycling through
-// a 2*NUM_JOINTS × N gait TSV, resolving a task phase to the gait it uses, and
+// a rows × N gait TSV (rows set by the variant), resolving a task phase to the gait it uses, and
 // sequencing through a task's phases (PhaseSequencer). What the gait rows mean
 // is variant-specific, so each variant derives its own scheduler with a
 // get_phase() for its layout (muscle/control/gait_scheduler.h,
@@ -31,7 +31,8 @@
 class GaitTable {
 public:
     // `name` prefixes load errors, so they say which scheduler failed.
-    explicit GaitTable(const char* name) : name_(name) {}
+    // n_rows: the rows the variant's layout has (its get_phase() reads them).
+    GaitTable(const char* name, int n_rows) : name_(name), n_rows_(n_rows) {}
 
     void load(const std::string& path) {
         std::ifstream f(path);
@@ -48,9 +49,9 @@ public:
             if (!row.empty()) rows.push_back(std::move(row));
         }
 
-        if ((int)rows.size() != 2 * NUM_JOINTS)
+        if ((int)rows.size() != n_rows_)
             throw std::runtime_error(name_ + ": expected "
-                + std::to_string(2 * NUM_JOINTS) + " rows, got "
+                + std::to_string(n_rows_) + " rows in " + path + ", got "
                 + std::to_string(rows.size()));
         n_phases_ = (int)rows[0].size();
         for (auto& r : rows)
@@ -77,6 +78,7 @@ protected:
 
 private:
     std::string name_;
+    int  n_rows_;
     std::vector<std::vector<double>> gait_;
     int  n_phases_ = 0;
     int  phase_    = 0;
@@ -89,6 +91,14 @@ private:
 inline std::string gait_table_path(const std::string& label)
 {
     return "gait_gen/gaits/" + label + ".tsv";
+}
+
+// Repo-relative path of the planned stance forces gait_gen writes beside the
+// table labelled `label` (forces_path() in gait_gen/config.py; used by
+// muscle/control/stance_load.h).
+inline std::string gait_forces_path(const std::string& label)
+{
+    return "gait_gen/gaits/" + label + "_forces.tsv";
 }
 
 // How a variant turns a gait label into the repo-relative file it loads: the

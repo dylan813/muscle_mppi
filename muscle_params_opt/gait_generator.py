@@ -13,15 +13,21 @@ import os
 import mujoco
 
 REPO_ROOT  = os.path.join(os.path.dirname(__file__), "..")
-SUSP_MODEL = os.path.join(REPO_ROOT, "controllers", "common", "go2", "scene_suspended.xml")
-GAIT_DIR   = os.path.join(REPO_ROOT, "gait_gen", "gaits")   # joint-space gait tables
+MODEL      = os.path.join(REPO_ROOT, "controllers", "common", "go2", "go2.xml")   # gait_gen's model, as activation_gait.cpp
+GAIT_DIR   = os.path.join(REPO_ROOT, "gait_gen", "gaits")   # joint-space gait tables and their planned forces
 
 NUM_JOINTS = 12
+FEET       = ("FR", "FL", "RR", "RL")   # foot geom names, in the forces file's row order
 
 
 def source_gait_path(label):
     """"walk" -> gait_gen/gaits/walk.tsv. Must match gait_table_path() in controllers/common/gait.h."""
     return os.path.join(GAIT_DIR, f"{label}.tsv")
+
+
+def source_forces_path(label):
+    """"walk" -> gait_gen/gaits/walk_forces.tsv. Must match gait_forces_path() in controllers/common/gait.h."""
+    return os.path.join(GAIT_DIR, f"{label}_forces.tsv")
 
 # ── Hill model (param-explicit versions) ────────────────────────────────────
 
@@ -119,47 +125,63 @@ def generate_gait(label, output_path, muscle_params, stiffness=0.75):
     muscle_params must contain keys (each a list of 12 floats):
         lce_min, lce_max, FVmax, pFLmax, vmax, phi_min, phi_max, peak_force
 
-    Writes a 24×N TSV to output_path (no header line — it's loaded through an
+    Writes a 36×N TSV to output_path (a1, a2, planned forces; no header line — it's loaded through an
     explicit gait_path, which the controller never regenerates).
     Returns the number of infeasible (phase, joint) pairs clamped.
     """
-    gait_path = source_gait_path(label)
-    if not os.path.exists(gait_path):
-        raise FileNotFoundError(f"Gait table not found: {gait_path} (write it with gait_gen/generate.py)")
+    gait_path   = source_gait_path(label)
+    forces_path = source_forces_path(label)
+    for path in (gait_path, forces_path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Not found: {path} (write it with gait_gen/generate.py)")
 
     gait    = np.loadtxt(gait_path, delimiter='\t')
     N       = gait.shape[1]
     q_traj  = gait[:12, :]
     dq_traj = gait[12:24, :]
+    forces  = np.loadtxt(forces_path, delimiter='\t')   # (12, N): FEET x world x/y/z
+    if forces.shape != (3 * len(FEET), N):
+        raise ValueError(f"{forces_path}: expected {3 * len(FEET)} x {N}, got {forces.shape}")
 
-    model = mujoco.MjModel.from_xml_path(SUSP_MODEL)
+    model = mujoco.MjModel.from_xml_path(MODEL)
     data  = mujoco.MjData(model)
     _jid     = [model.actuator_trnid[i, 0] for i in range(NUM_JOINTS)]
     _qa_adr  = [model.jnt_qposadr[j]       for j in _jid]
     _dof_adr = [model.jnt_dofadr[j]        for j in _jid]
+    _feet    = [model.geom(name) for name in FEET]
+    jacp     = np.zeros((3, model.nv))
 
-    def get_bias_torques(q_joints, dq_joints):
-        # Fixed-base model: only the joints are set (no free joint to place).
+    def get_loaded_torques(q_joints, dq_joints, foot_forces):
+        """qfrc_bias − Σ J_footᵀ F_foot, as loaded_joint_torques() in
+        controllers/muscle/control/stance_load.h; body still and level."""
         mujoco.mj_resetData(model, data)
         for i in range(NUM_JOINTS):
             data.qpos[_qa_adr[i]]  = q_joints[i]
             data.qvel[_dof_adr[i]] = dq_joints[i]
         mujoco.mj_forward(model, data)
-        return np.array([data.qfrc_bias[_dof_adr[i]] for i in range(NUM_JOINTS)])
+
+        tau = data.qfrc_bias.copy()
+        for foot, F in zip(_feet, foot_forces.reshape(len(FEET), 3)):
+            if not F.any():
+                continue   # swing
+            point = data.geom_xpos[foot.id] - np.array([0.0, 0.0, foot.size[0]])   # sphere bottom
+            mujoco.mj_jac(model, data, jacp, None, point, foot.bodyid[0])
+            tau -= jacp.T @ F
+        return tau[_dof_adr]
 
     a1_out       = np.zeros((NUM_JOINTS, N))
     a2_out       = np.zeros((NUM_JOINTS, N))
     n_infeasible = 0
 
     for t in range(N):
-        tau = get_bias_torques(q_traj[:, t], dq_traj[:, t])
+        tau = get_loaded_torques(q_traj[:, t], dq_traj[:, t], forces[:, t])
         for j in range(NUM_JOINTS):
             a1_out[j, t], a2_out[j, t], infeasible = _constraint_midpoint(
                 q_traj[j, t], dq_traj[j, t], tau[j], j, muscle_params, stiffness)
             n_infeasible += infeasible
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    out_array = np.vstack([a1_out, a2_out])
+    out_array = np.vstack([a1_out, a2_out, forces])   # GaitScheduler's 36-row layout (activation_gait.h)
     np.savetxt(output_path, out_array, delimiter='\t', fmt='%.8f')
 
     return n_infeasible

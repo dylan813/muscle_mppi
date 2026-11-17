@@ -9,6 +9,7 @@
 //   <prefix>_activation.npy  (N, NUM_MUSCLES)           filtered activations
 //   <prefix>_motor.npy       (N, NUM_JOINTS + 1)        MotorState: tau, then step
 //   <prefix>_gait_ref.npy    (N, horizon, NUM_MUSCLES)  gait reference per horizon step
+//   <prefix>_gait_forces.npy (N, horizon, NUM_FOOT_FORCES) its planned stance forces per horizon step
 //   <prefix>_goal.npy        (N, 9)                     goal_quat 4, command goal_pos 3, vx, vy
 //   <prefix>_plan.npy        (N, horizon, NUM_MUSCLES)  the plan update() chose
 
@@ -28,7 +29,8 @@ constexpr int kContextGoalSize  = 4 + 3 + 2;
 inline const std::vector<std::string>& context_file_suffixes()
 {
     static const std::vector<std::string> suffixes = {
-        "_state.npy", "_activation.npy", "_motor.npy", "_gait_ref.npy", "_goal.npy", "_plan.npy"};
+        "_state.npy", "_activation.npy", "_motor.npy", "_gait_ref.npy", "_gait_forces.npy", "_goal.npy",
+        "_plan.npy"};
     return suffixes;
 }
 
@@ -39,6 +41,7 @@ public:
           activation_(prefix + "_activation.npy", {NUM_MUSCLES}, NpyDtype::Float64),
           motor_(prefix + "_motor.npy", {kContextMotorSize}, NpyDtype::Float64),
           gait_ref_(prefix + "_gait_ref.npy", {horizon, NUM_MUSCLES}, NpyDtype::Float64),
+          gait_forces_(prefix + "_gait_forces.npy", {horizon, NUM_FOOT_FORCES}, NpyDtype::Float64),
           goal_(prefix + "_goal.npy", {kContextGoalSize}, NpyDtype::Float64),
           plan_(prefix + "_plan.npy", {horizon, NUM_MUSCLES}, NpyDtype::Float64) {}
 
@@ -66,12 +69,13 @@ public:
         activation_.append(c.activation);
         motor_.append(motor.data());
         gait_ref_.append(c.gait_ref.data());
+        gait_forces_.append(c.gait_forces.data());
         goal_.append(goal.data());
         plan_.append(plan.data());
     }
 
 private:
-    NpyWriter state_, activation_, motor_, gait_ref_, goal_, plan_;
+    NpyWriter state_, activation_, motor_, gait_ref_, gait_forces_, goal_, plan_;
 };
 
 // The files at prefix, loaded once; read() gives any row's context and the
@@ -84,10 +88,11 @@ public:
           activation_(load(prefix, "_activation.npy", {NUM_MUSCLES})),
           motor_(load(prefix, "_motor.npy", {kContextMotorSize})),
           gait_ref_(load(prefix, "_gait_ref.npy", {horizon, NUM_MUSCLES})),
+          gait_forces_(load(prefix, "_gait_forces.npy", {horizon, NUM_FOOT_FORCES})),
           goal_(load(prefix, "_goal.npy", {kContextGoalSize})),
           plan_(load(prefix, "_plan.npy", {horizon, NUM_MUSCLES}))
     {
-        for (const NpyArray* a : {&activation_, &motor_, &gait_ref_, &goal_, &plan_})
+        for (const NpyArray* a : {&activation_, &motor_, &gait_ref_, &gait_forces_, &goal_, &plan_})
             if (a->shape[0] != rows())
                 throw std::runtime_error("ContextReader: the files at " + prefix + " hold different row counts");
     }
@@ -117,7 +122,7 @@ private:
         return a.values.data() + static_cast<size_t>(row) * row_size(a);
     }
 
-    NpyArray state_, activation_, motor_, gait_ref_, goal_, plan_;
+    NpyArray state_, activation_, motor_, gait_ref_, gait_forces_, goal_, plan_;
 };
 
 inline RolloutContext ContextReader::read(int row, std::vector<double>& plan) const
@@ -147,6 +152,9 @@ inline RolloutContext ContextReader::read(int row, std::vector<double>& plan) co
 
     const double* gait_ref = row_start(gait_ref_, row);
     c.gait_ref.assign(gait_ref, gait_ref + row_size(gait_ref_));
+
+    const double* gait_forces = row_start(gait_forces_, row);
+    c.gait_forces.assign(gait_forces, gait_forces + row_size(gait_forces_));
 
     const double* goal = row_start(goal_, row);
     std::copy(goal, goal + 4, c.goal_quat);

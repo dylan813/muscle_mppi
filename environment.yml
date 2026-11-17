@@ -32,6 +32,7 @@ dependencies:
       - pyyaml==6.0.3
       - pillow==13.0.0
       - cma==4.5.0
+      - quadprog==0.1.14          # gait_gen/grf.py: planned stance forces
       - wandb==0.31.0
 
 # Set on `conda activate`.

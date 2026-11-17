@@ -13,14 +13,17 @@
 #include <unistd.h>
 
 #include "muscle.h"
-#include "../../common/gait.h"      // gait_table_path()
+#include "stance_load.h"            // loaded_joint_torques()
+#include "../../common/gait.h"      // gait_table_path(), gait_forces_path()
 #include "../../common/harness.h"   // joint_addresses()
 
 // Bump when the generation algorithm changes, so existing files regenerate.
-static constexpr int kGeneratorVersion = 1;
+// 2: the torque carries the planned stance forces (was the suspended bias alone).
+static constexpr int kGeneratorVersion = 2;
 
-// Suspended (fixed-base) Go2: bias torques without contact, as the Python generator uses.
-static const char* kSuspendedModel = "controllers/common/go2/scene_suspended.xml";
+// gait_gen's model (gait_gen/config.yaml model_path), body held still and level,
+// as the Python generator uses.
+static const char* kModel = "controllers/common/go2/go2.xml";
 
 // 64-bit FNV-1a: the fingerprint hash of the muscle parameters and the gait table.
 static constexpr uint64_t kFnvOffset = 1469598103934665603ULL;
@@ -43,18 +46,18 @@ std::string activation_gait_path(const std::string& label)
     return "gait_gen/activation_gaits/" + label + ".tsv";
 }
 
-// Hash of the table file's bytes, so regenerating a table under the same label
-// also regenerates its activation gait.
-static std::string table_fingerprint(const std::string& table_abs)
+// Hash of the table's and its forces file's bytes, so regenerating either under
+// the same label also regenerates its activation gait.
+static std::string table_fingerprint(const std::string& table_abs, const std::string& forces_abs)
 {
-    std::ifstream f(table_abs, std::ios::binary);
-    if (!f) throw std::runtime_error("Cannot open gait table " + table_abs
-                                     + " (write it with gait_gen/generate.py)");
-    std::ostringstream bytes;
-    bytes << f.rdbuf();
-
     uint64_t h = kFnvOffset;
-    fnv1a(h, bytes.str());
+    for (const std::string& path : {table_abs, forces_abs}) {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) throw std::runtime_error("Cannot open " + path + " (write it with gait_gen/generate.py)");
+        std::ostringstream bytes;
+        bytes << f.rdbuf();
+        fnv1a(h, bytes.str());
+    }
     return hex16(h);
 }
 
@@ -125,36 +128,54 @@ static std::string first_line(const std::string& path)
     return line;
 }
 
-static void generate(const std::string& header, const MuscleParams& p,
-                     const std::string& src_abs, const std::string& out_abs)
+// Rows of `path`, which must be `n_rows` rows of `n_cols` numbers (n_cols 0: any, all equal).
+static std::vector<std::vector<double>> read_rows(const std::string& path, int n_rows, size_t n_cols)
 {
-    const std::vector<std::vector<double>> src = read_tsv(src_abs);
-    if ((int)src.size() != 2 * NUM_JOINTS)
-        throw std::runtime_error("Gait source " + src_abs + ": expected "
-                                 + std::to_string(2 * NUM_JOINTS) + " rows, got " + std::to_string(src.size()));
+    std::vector<std::vector<double>> rows = read_tsv(path);
+    if ((int)rows.size() != n_rows)
+        throw std::runtime_error(path + ": expected " + std::to_string(n_rows)
+                                 + " rows, got " + std::to_string(rows.size()));
+    if (n_cols == 0) n_cols = rows[0].size();
+    for (const auto& r : rows)
+        if (r.size() != n_cols)
+            throw std::runtime_error(path + ": expected " + std::to_string(n_cols) + " columns in every row");
+    return rows;
+}
+
+static void generate(const std::string& header, const MuscleParams& p, const std::string& src_abs,
+                     const std::string& forces_abs, const std::string& out_abs)
+{
+    const std::vector<std::vector<double>> src = read_rows(src_abs, 2 * NUM_JOINTS, 0);
     const size_t n_phases = src[0].size();
-    for (const auto& r : src)
-        if (r.size() != n_phases) throw std::runtime_error("Gait source " + src_abs + ": inconsistent row lengths");
+    const std::vector<std::vector<double>> forces = read_rows(forces_abs, NUM_FOOT_FORCES, n_phases);
 
     char err[1000];
-    const std::string model_path = repo_path(kSuspendedModel);
+    const std::string model_path = repo_path(kModel);
     mjModel* m = mj_loadXML(model_path.c_str(), nullptr, err, sizeof err);
     if (!m) throw std::runtime_error("Failed to load " + model_path + ": " + err);
     mjData* d = mj_makeData(m);
     int qa[NUM_JOINTS], qv[NUM_JOINTS];
     joint_addresses(m, qa, qv);
+    const FootGeoms feet = require_foot_geoms(m);
 
-    // out[row][t]: rows 0..11 = a1 (agonist), rows 12..23 = a2 (antagonist)
+    // out[row][t]: rows 0..11 = a1 (agonist), rows 12..23 = a2 (antagonist),
+    // rows 24..35 = the planned stance forces, copied (GaitScheduler's layout)
     std::vector<std::vector<double>> out(2 * NUM_JOINTS, std::vector<double>(n_phases));
+    out.insert(out.end(), forces.begin(), forces.end());
     for (size_t t = 0; t < n_phases; ++t) {
-        mj_resetData(m, d);
+        mj_resetData(m, d);   // body still and level at the model's initial pose
         for (int j = 0; j < NUM_JOINTS; ++j) {
             d->qpos[qa[j]] = src[j][t];
             d->qvel[qv[j]] = src[NUM_JOINTS + j][t];
         }
         mj_forward(m, d);
+
+        double column_forces[NUM_FOOT_FORCES], tau[NUM_JOINTS];
+        for (int k = 0; k < NUM_FOOT_FORCES; ++k) column_forces[k] = forces[k][t];
+        loaded_joint_torques(m, d, feet, qv, column_forces, tau);
+
         for (int j = 0; j < NUM_JOINTS; ++j)
-            hill_invert_torque(src[j][t], src[NUM_JOINTS + j][t], d->qfrc_bias[qv[j]], j,
+            hill_invert_torque(src[j][t], src[NUM_JOINTS + j][t], tau[j], j,
                                p, p.stiffness, out[j][t], out[NUM_JOINTS + j][t]);
     }
     mj_deleteData(d);
@@ -177,12 +198,13 @@ static void generate(const std::string& header, const MuscleParams& p,
 
 bool ensure_activation_gait(const std::string& label, const MuscleParams& p)
 {
-    const std::string table_abs = repo_path(gait_table_path(label));
-    const std::string out_abs   = repo_path(activation_gait_path(label));
-    const std::string header    = activation_gait_header(label, table_fingerprint(table_abs), p);
+    const std::string table_abs  = repo_path(gait_table_path(label));
+    const std::string forces_abs = repo_path(gait_forces_path(label));
+    const std::string out_abs    = repo_path(activation_gait_path(label));
+    const std::string header     = activation_gait_header(label, table_fingerprint(table_abs, forces_abs), p);
     if (first_line(out_abs) == "# " + header) return false;
 
-    generate(header, p, table_abs, out_abs);
+    generate(header, p, table_abs, forces_abs, out_abs);
     std::printf("[gait] regenerated %s (stiffness %.3g) -> %s\n",
                 label.c_str(), p.stiffness, activation_gait_path(label).c_str());
     return true;

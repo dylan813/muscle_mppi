@@ -7,6 +7,10 @@ one gait cycle. Rows 0-11 are joint angles (rad), rows 12-23 joint velocities
 (rad/s), in FR/FL/RR/RL x hip/thigh/calf order (controllers/common/gait.h,
 GaitTable).
 
+Beside each table, <label>_forces.tsv holds the ground's planned force on
+each foot (grf.py): 12 rows, FR/FL/RR/RL x world x/y/z (N), zero
+in swing, one column per table column.
+
 Each file's first line, starting with '#', records the inputs the table was
 generated from. Table readers skip it.
 
@@ -19,8 +23,9 @@ import os
 
 import numpy as np
 
-from config import REPO_ROOT, load_config, table_path
+from config import REPO_ROOT, forces_path, load_config, table_path
 from gait import Gait, LEGS, foot_offset, leg_phase
+from grf import foot_forces
 from leg_ik import leg_angles
 from robot import JOINTS, Robot
 
@@ -116,16 +121,22 @@ def main():
     robot = Robot(os.path.join(REPO_ROOT, config["model_path"]))
 
     for label, inputs in config["gaits"].items():
+        gait = Gait(**inputs)
+
         try:
-            table = gait_table(Gait(**inputs), config["stance_height"], robot, config["dt"])
+            table = gait_table(gait, config["stance_height"], robot, config["dt"])
+            forces = foot_forces(gait, robot, table[:len(LEGS) * len(JOINTS)], config["dt"])
         except ValueError as error:
             raise ValueError(f"gait '{label}': {error}") from error
 
-        path = table_path(label)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        np.savetxt(path, table, delimiter="\t", header="gait_gen " + json.dumps(shared | inputs))
+        header = "gait_gen " + json.dumps(shared | inputs)
+        force_rows = np.vstack([forces[leg].T for leg in LEGS])
 
-        print(f"wrote {os.path.relpath(path)}: {table.shape[0]} x {table.shape[1]}, one {inputs['period']} s cycle")
+        for path, rows in ((table_path(label), table), (forces_path(label), force_rows)):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            np.savetxt(path, rows, delimiter="\t", header=header)
+
+            print(f"wrote {os.path.relpath(path)}: {rows.shape[0]} x {rows.shape[1]}, one {inputs['period']} s cycle")
 
 
 if __name__ == "__main__":

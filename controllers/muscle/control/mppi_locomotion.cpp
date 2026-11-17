@@ -25,6 +25,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
 {
     muscle_ = task_.muscle;
     solve_.gait_ref.assign(task_.horizon * NUM_MUSCLES, 0.0);
+    solve_.gait_forces.assign(task_.horizon * NUM_FOOT_FORCES, 0.0);
     sample_terms_.resize(total_samples());
 
     // BaseMPPI already initializes trajectory_, actions_, costs_ to the correct
@@ -32,6 +33,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     // sample_actions() and update().
 
     base_bid_ = find_base_body(model_);
+    feet_     = require_foot_geoms(model_);
 
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
@@ -161,7 +163,8 @@ double MPPILocomotion::rollout_plan(mjData* d, const double* plan, const Rollout
     for (int t = 0; t < task_.horizon; ++t) {
         step_model(d, &plan[t * NUM_MUSCLES], activation, motor);
 
-        const CostTerms step = step_cost(d, &c.gait_ref[t * NUM_MUSCLES], c);
+        const CostTerms step = step_cost(d, &c.gait_ref[t * NUM_MUSCLES],
+                                         &c.gait_forces[t * NUM_FOOT_FORCES], c);
         total_cost += step.total();
         terms      += step;
     }
@@ -258,7 +261,8 @@ void MPPILocomotion::base_com_state(const mjData* d, double com_pos[3], double c
     world_to_body(d->xmat + base_bid_ * 9, d->subtree_linvel + base_bid_ * 3, com_vel_body);
 }
 
-CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES], const RolloutContext& c) const
+CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES],
+                                    const double gait_forces[NUM_FOOT_FORCES], const RolloutContext& c) const
 {
     const CostWeights& w = cost_;
     CostTerms cost;
@@ -288,13 +292,17 @@ CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES
         cost.ang_vel = w.ang_vel * (wx*wx + wy*wy + wz*wz);
     }
 
+    // The torque the rollout's state needs to carry the reference's planned
+    // stance load, as the activation gait was generated (stance_load.h).
+    double tau[NUM_JOINTS];
+    loaded_joint_torques(model_, d, feet_, act_qvel_adr_, gait_forces, tau);
+
     for (int j = 0; j < NUM_JOINTS; ++j) {
         if (w.gait_ref_weights[j] == 0.0) continue;
         const double q_j   = d->qpos[act_qpos_adr_[j]];
         const double dq_j  = d->qvel[act_qvel_adr_[j]];
-        const double tau_j = d->qfrc_bias[act_qvel_adr_[j]];
         double a1_imp, a2_imp;
-        hill_invert_torque(q_j, dq_j, tau_j, j, muscle_, muscle_.stiffness, a1_imp, a2_imp);
+        hill_invert_torque(q_j, dq_j, tau[j], j, muscle_, muscle_.stiffness, a1_imp, a2_imp);
         const double e1 = a1_imp - gait_ref[2 * j];
         const double e2 = a2_imp - gait_ref[2 * j + 1];
         cost.gait += w.gait_ref_weights[j] * (e1*e1 + e2*e2);
@@ -307,7 +315,7 @@ CostTerms MPPILocomotion::executed_cost(const RobotState& state)
 {
     mjData* d = data_[total_samples()];
     set_mj_state(d, state);
-    return step_cost(d, solve_.gait_ref.data(), solve_);
+    return step_cost(d, solve_.gait_ref.data(), solve_.gait_forces.data(), solve_);
 }
 
 CostTerms MPPILocomotion::plan_cost()
@@ -322,6 +330,8 @@ void MPPILocomotion::score_plans(const RolloutContext& c, const double* plans, i
     const int stride = task_.horizon * NUM_MUSCLES;
     if (c.gait_ref.size() != static_cast<size_t>(stride))
         throw std::runtime_error("score_plans: the context's gait_ref is not horizon x NUM_MUSCLES");
+    if (c.gait_forces.size() != static_cast<size_t>(task_.horizon * NUM_FOOT_FORCES))
+        throw std::runtime_error("score_plans: the context's gait_forces is not horizon x NUM_FOOT_FORCES");
 
     // Each thread rolls out on its own mjData, so data_ stays as update() left it.
     ensure_thread_models();
@@ -421,9 +431,14 @@ void MPPILocomotion::update(const RobotState& state)
     std::memcpy(solve_.activation, real_act_, NUM_MUSCLES * sizeof(double));
     solve_.motor = real_motor_;
     for (int t = 0; t < task_.horizon; ++t) {
-        double* ref = &solve_.gait_ref[t * NUM_MUSCLES];
+        double* ref    = &solve_.gait_ref[t * NUM_MUSCLES];
+        double* forces = &solve_.gait_forces[t * NUM_FOOT_FORCES];
         std::fill(ref, ref + NUM_MUSCLES, 0.0);
-        if (phases_.active_gait()) phases_.active_gait()->get_phase(t, ref);
+        std::fill(forces, forces + NUM_FOOT_FORCES, 0.0);
+        if (phases_.active_gait()) {
+            phases_.active_gait()->get_phase(t, ref);
+            phases_.active_gait()->get_forces(t, forces);
+        }
     }
     goal_facing_quat(command().goal_pos, state.pos, phases_.dwelling(), solve_.goal_quat);
     solve_.command = command();

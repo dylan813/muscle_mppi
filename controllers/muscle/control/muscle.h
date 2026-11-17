@@ -68,7 +68,8 @@ static inline double passive_force_length(double length, double max, double b) {
 }
 
 // Invert Hill model for one joint: given (q, dq, tau_req), return implied (a1, a2).
-// tau_req is the joint torque to produce: qfrc_bias (gravity + Coriolis) in the
+// tau_req is the joint torque to produce: qfrc_bias (gravity + Coriolis) less
+// the planned stance forces (loaded_joint_torques(), stance_load.h) in the
 // gait-tracking cost, as during gait generation; the standing holding torque
 // (qfrc_bias − qfrc_constraint) for the warm start.
 // stiffness in [0,1] (MuscleParams::stiffness): 0.5 = minimum co-contraction

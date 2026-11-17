@@ -52,6 +52,7 @@ struct RolloutContext {
     double              activation[NUM_MUSCLES] = {};   // filtered activations (real_act_ at the solve)
     MotorState          motor;                          // the motor's state (real_motor_ at the solve)
     std::vector<double> gait_ref;                       // horizon × NUM_MUSCLES; zeros without an active gait
+    std::vector<double> gait_forces;                    // horizon × NUM_FOOT_FORCES: gait_ref's planned stance forces
 
     // Goal-facing orientation target: identity when close to the goal or
     // dwelling, otherwise R_z(yaw)*R_y(pitch) built from the direction to
@@ -219,9 +220,11 @@ private:
     // Finish the motor's pending step with the velocity it ended at (state.dq).
     void settle_motor(const RobotState& state);
 
-    // Cost of d's state against c's goal and command, and gait_ref (one step of
-    // c.gait_ref). Call after mj_step() or set_mj_state().
-    CostTerms step_cost(mjData* d, const double gait_ref[NUM_MUSCLES], const RolloutContext& c) const;
+    // Cost of d's state against c's goal and command, and gait_ref with its
+    // planned stance forces gait_forces (one step of c.gait_ref and
+    // c.gait_forces). Call after mj_step() or set_mj_state().
+    CostTerms step_cost(mjData* d, const double gait_ref[NUM_MUSCLES],
+                        const double gait_forces[NUM_FOOT_FORCES], const RolloutContext& c) const;
 
     // Recompute what step_cost() reads for d's qpos/qvel (see definition).
     void refresh_derived(mjData* d) const;
@@ -302,4 +305,5 @@ private:
     std::vector<double> policy_prev_, policy_noise_;
 
     int    base_bid_ = 1;
+    FootGeoms feet_;   // the gait cost's planned stance forces act at these (stance_load.h)
 };
