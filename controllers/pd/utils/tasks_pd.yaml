@@ -123,9 +123,8 @@ walk:
   # built for (gaits.walk.velocity).
   # goal x = 2.0 m within 20 s, matching the muscle `walk` task
   # (controllers/muscle/utils/tasks.yaml) so the two controllers are scored on
-  # the same distance and time budget in any muscle-vs-PD comparison. The
-  # muscle task's goal z is 0.296 only because its pos_z measures the
-  # whole-robot CoM; both target the same posture.
+  # the same distance and time budget in any muscle-vs-PD comparison. Both
+  # measure pos_z at the trunk origin, so both use goal z 0.32.
   sim_duration: 20.0
   phases:
     - goal_pos:     [2.0, 0.0, 0.32]

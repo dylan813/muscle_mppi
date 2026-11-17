@@ -130,7 +130,7 @@ inline void write_csv_header_base(std::ostream& csv)
 }
 
 // One row of the shared columns. `pos` is whichever position the variant's
-// cost scores (whole-robot CoM for muscle, trunk origin for PD); velocity is
+// cost scores (the trunk origin, for both); velocity is
 // the free joint's linear velocity in body-frame axes.
 //
 // wx/wy/wz are the free joint's angular velocity, which MuJoCo keeps in the

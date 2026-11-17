@@ -102,10 +102,10 @@ FITNESS_TERMS = ["cost_pos", "cost_orient", "cost_vel"]
 # keeps its own. Goal x and SIM_DURATION are those of the July 2026 FVmax-sweep
 # runs and the Aug 4 2026 run that produced tasks.yaml's muscle values (commits
 # 7e977c6, b0c904a); runs end on duration, not on reaching the goal, so every
-# run lasts SIM_DURATION unless the robot falls. Goal height 0.296 m is the
-# whole-robot CoM height (what the controller's pos_z term measures) the
-# gait_gen tables stand Go2 at (gait_gen/config.yaml: stance_height).
-GOAL_POS     = [5.0, 0.0, 0.296]
+# run lasts SIM_DURATION unless the robot falls. Goal height 0.320 m is the
+# base frame (trunk origin) height (what the controller's pos_z term measures)
+# the gait_gen tables stand Go2 at (gait_gen/config.yaml: stance_height).
+GOAL_POS     = [5.0, 0.0, 0.320]
 SIM_DURATION = 10.0   # s
 
 # Commanded body-frame velocity [vx, vy] (m/s): the speed the walk gait table

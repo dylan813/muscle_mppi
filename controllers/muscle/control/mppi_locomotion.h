@@ -229,9 +229,9 @@ private:
     // Recompute what step_cost() reads for d's qpos/qvel (see definition).
     void refresh_derived(mjData* d) const;
 
-    // Whole-robot (trunk + legs) CoM position (world frame) and CoM
-    // velocity (body-frame axes). Reads what refresh_derived() computed.
-    void base_com_state(const mjData* d, double com_pos[3], double com_vel_body[3]) const;
+    // Trunk-origin position (world frame) and trunk linear velocity (body-frame
+    // axes), straight from the free joint: what mocap measures on the robot.
+    void base_state(const mjData* d, double pos[3], double vel_body[3]) const;
 
     // Write the active phase's noise_sigma_act override (or the YAML baseline,
     // if it has none) into task_.noise_sigma_act, which sample_actions() reads.
@@ -304,6 +304,5 @@ private:
     double              policy_y_[OBS_DIM] = {};
     std::vector<double> policy_prev_, policy_noise_;
 
-    int    base_bid_ = 1;
     FootGeoms feet_;   // the gait cost's planned stance forces act at these (stance_load.h)
 };

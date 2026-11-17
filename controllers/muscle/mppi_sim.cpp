@@ -67,9 +67,8 @@
 //   wx/wy/wz are body-frame angular velocity, fn_*/ft_* the normal and
 //   tangential ground reaction force per foot, and solve_ms that update()'s
 //   compute time — all written by write_csv_row_base() in common/log.h.
-//   px/py/pz are the whole-robot (trunk + legs) center of mass, i.e. the base
-//   body's subtree_com — matching what step_cost() scores against goal_pos
-//   in mppi_locomotion.cpp, not the trunk frame origin.
+//   px/py/pz are the trunk frame origin (free joint qpos[0:3]) — what
+//   step_cost() scores against goal_pos in mppi_locomotion.cpp (base_state()).
 //   vx/vy/vz are body-frame linear velocity (rotated from the free joint's
 //   world-frame qvel[0:3]), matching the body-frame convention step_cost()
 //   uses when comparing against cmd_.vx/vy in mppi_locomotion.cpp.
@@ -167,13 +166,8 @@ int main(int argc, char** argv)
 
     spec.joint_damping = [](const MPPILocomotion& mppi) { return mppi.task_ref().muscle.kd_sim; };
 
-    // Whole-robot CoM (base body's subtree_com), which step_cost() scores.
-    // Recomputed for the post-step state first, as step_cost() does.
-    spec.log_position = [](const mjModel* m, mjData* d, int base_bid) -> const double* {
-        mj_kinematics(m, d);
-        mj_comPos(m, d);
-        return d->subtree_com + base_bid * 3;
-    };
+    // Trunk origin (free joint qpos[0:3]), which step_cost() scores, as pd_mppi_sim logs.
+    spec.log_position = [](const mjModel*, mjData* d, int) -> const double* { return d->qpos; };
 
     spec.extra_header = [](std::ostream& csv) {
         for (int m = 0; m < NUM_MUSCLES; ++m) csv << ",act_m" << m;

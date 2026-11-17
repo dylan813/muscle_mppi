@@ -35,12 +35,11 @@ static constexpr int OBS_DQ      = OBS_Q + NUM_JOINTS;
 static constexpr int OBS_ACT     = OBS_DQ + NUM_JOINTS;
 static constexpr int OBS_DIM     = OBS_ACT + NUM_MUSCLES;
 
-// com_pos: whole-robot CoM in the world frame, the point the position cost
-// scores (MPPILocomotion::base_com_state()). act: muscle activations in
+// The goal is seen from state.pos, the trunk origin: the point the position
+// cost scores (MPPILocomotion::base_state()). act: muscle activations in
 // hill_compute_torques' layout, [agonist_j0, antagonist_j0, agonist_j1, ...].
-inline void build_observation(const RobotState& state, const double com_pos[3],
-                              const double act[NUM_MUSCLES], const double goal_pos[3],
-                              double y[OBS_DIM])
+inline void build_observation(const RobotState& state, const double act[NUM_MUSCLES],
+                              const double goal_pos[3], double y[OBS_DIM])
 {
     double R[9];
     mju_quat2Mat(R, state.quat);   // body -> world, row-major (as mjData::xmat)
@@ -48,11 +47,11 @@ inline void build_observation(const RobotState& state, const double com_pos[3],
     // Heading: yaw of the trunk's forward (body x) axis, computed as legged_gym does.
     const double yaw = std::atan2(R[3], R[0]);
     const double c = std::cos(yaw), s = std::sin(yaw);
-    const double dx = goal_pos[0] - com_pos[0];
-    const double dy = goal_pos[1] - com_pos[1];
+    const double dx = goal_pos[0] - state.pos[0];
+    const double dy = goal_pos[1] - state.pos[1];
     y[OBS_GOAL]     =  c * dx + s * dy;
     y[OBS_GOAL + 1] = -s * dx + c * dy;
-    y[OBS_GOAL + 2] = goal_pos[2] - com_pos[2];
+    y[OBS_GOAL + 2] = goal_pos[2] - state.pos[2];
 
     const double gravity_world[3] = {0.0, 0.0, -1.0};
     world_to_body(R, gravity_world, y + OBS_GRAVITY);

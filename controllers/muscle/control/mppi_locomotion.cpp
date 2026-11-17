@@ -32,8 +32,7 @@ MPPILocomotion::MPPILocomotion(const std::string& task_name, const std::string& 
     // sizes (horizon × NUM_MUSCLES). Activations are clamped to [0, 1] in
     // sample_actions() and update().
 
-    base_bid_ = find_base_body(model_);
-    feet_     = require_foot_geoms(model_);
+    feet_ = require_foot_geoms(model_);
 
     {
         YAML::Node root = YAML::LoadFile(yaml_path);
@@ -226,14 +225,14 @@ void MPPILocomotion::settle_motor(const RobotState& state)
 // Cost function
 // ============================================================================
 
-// mj_step() integrates qpos/qvel but leaves every derived quantity (subtree_com,
-// xmat, cvel, qfrc_bias, ...) at the PRE-step state. Recompute what
-// step_cost() reads for the new state — otherwise the base and gait terms would
-// score the previous step while orientation and the joint terms (read straight
-// from qpos/qvel) score this one:
-//   mj_kinematics + mj_comPos   subtree_com, xmat (position, orientation)
-//   mj_comVel + mj_subtreeVel   subtree_linvel (velocity)
-//   mj_rne without acceleration qfrc_bias, gravity + Coriolis (gait); needs
+// mj_step() integrates qpos/qvel but leaves every derived quantity (geom_xpos,
+// subtree_com, cvel, qfrc_bias, ...) at the PRE-step state. Recompute what the
+// gait term reads for the new state — otherwise it would score the previous
+// step while the base, orientation and joint terms (read straight from
+// qpos/qvel) score this one:
+//   mj_kinematics + mj_comPos   geom_xpos, subtree_com (foot points, Jacobians)
+//   mj_comVel                   cvel
+//   mj_rne without acceleration qfrc_bias, gravity + Coriolis; needs
 //                               mj_comPos and mj_comVel first
 // The next mj_step recomputes all of these anyway, so the dynamics are unaffected.
 void MPPILocomotion::refresh_derived(mjData* d) const
@@ -241,24 +240,22 @@ void MPPILocomotion::refresh_derived(mjData* d) const
     mj_kinematics(model_, d);
     mj_comPos(model_, d);
     mj_comVel(model_, d);
-    mj_subtreeVel(model_, d);
     mj_rne(model_, d, 0, d->qfrc_bias);
 }
 
-// Whole-robot CoM position (world frame) and CoM velocity (body-frame axes).
-//
-// base_bid_ is the trunk (root) body, so its subtree is the entire robot
-// (trunk + all legs): d->subtree_com is the mass-weighted CoM of that whole
-// subtree and d->subtree_linvel its velocity, in world-aligned axes, rotated
-// here into the body frame.
-void MPPILocomotion::base_com_state(const mjData* d, double com_pos[3], double com_vel_body[3]) const
+// The free joint's position (the trunk origin, world frame) and linear
+// velocity, rotated from world into body axes, as MPPILocomotionPD::base_state()
+// (pd/control/mppi_locomotion_pd.cpp). The rotation comes from qpos[3:7], so it
+// is this step's orientation whether or not refresh_derived() has run.
+void MPPILocomotion::base_state(const mjData* d, double pos[3], double vel_body[3]) const
 {
-    const double* com = d->subtree_com + base_bid_ * 3;
-    com_pos[0] = com[0];
-    com_pos[1] = com[1];
-    com_pos[2] = com[2];
+    pos[0] = d->qpos[0];
+    pos[1] = d->qpos[1];
+    pos[2] = d->qpos[2];
 
-    world_to_body(d->xmat + base_bid_ * 9, d->subtree_linvel + base_bid_ * 3, com_vel_body);
+    double rot[9];
+    mju_quat2Mat(rot, d->qpos + 3);
+    world_to_body(rot, d->qvel, vel_body);
 }
 
 CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES],
@@ -270,7 +267,7 @@ CostTerms MPPILocomotion::step_cost(mjData* d, const double gait_ref[NUM_MUSCLES
     refresh_derived(d);
 
     double pos[3], vel_body[3];
-    base_com_state(d, pos, vel_body);
+    base_state(d, pos, vel_body);
 
     cost.pos = w.pos_x * std::abs(pos[0] - c.command.goal_pos[0])
              + w.pos_y * std::abs(pos[1] - c.command.goal_pos[1])
@@ -349,13 +346,7 @@ void MPPILocomotion::score_plans(const RolloutContext& c, const double* plans, i
 
 void MPPILocomotion::observation(double y[OBS_DIM])
 {
-    mjData* d = data_[total_samples()];
-    set_mj_state(d, solve_.state);
-    refresh_derived(d);
-
-    double com[3], com_vel_body[3];
-    base_com_state(d, com, com_vel_body);
-    build_observation(solve_.state, com, solve_.activation, command().goal_pos, y);
+    build_observation(solve_.state, solve_.activation, command().goal_pos, y);
 }
 
 // ============================================================================

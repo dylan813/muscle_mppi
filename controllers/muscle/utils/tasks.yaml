@@ -112,9 +112,9 @@ default_muscle_quad: &default_muscle_quad
 # desired_gait (used by the CMA-ES sweep in muscle_params_opt/ to point at a
 # per-candidate regenerated gait file).
 #
-# goal_pos z = 0.296: the whole-robot CoM height (what pos_z measures) the
-# gait_gen tables stand Go2 at (gait_gen/config.yaml: stance_height, which puts
-# the base frame at 0.320). Tasks on raised ground add its height. cmd_vel =
+# goal_pos z = 0.320: the base frame (trunk origin) height (what pos_z
+# measures, as mocap does on the robot) the gait_gen tables stand Go2 at
+# (gait_gen/config.yaml: stance_height). Tasks on raised ground add its height. cmd_vel =
 # 0.3 m/s: the speed the walk table is built for (gaits.walk.velocity).
 walk:
   model_path:    "controllers/common/go2/scene.xml"
@@ -161,7 +161,7 @@ walk:
 
   # Single phase.
   phases:
-    - goal_pos:     [2.0, 0.0, 0.296]
+    - goal_pos:     [2.0, 0.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
@@ -205,7 +205,7 @@ walk_rough:
 
   sim_duration: 45.0
   phases:
-    - goal_pos:     [3.2, 0.0, 0.296]
+    - goal_pos:     [3.2, 0.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
@@ -246,52 +246,52 @@ walk_octagon:
     gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.296]
+    - goal_pos:     [0.0, 0.0, 0.320]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.0, 0.0, 0.296]
+    - goal_pos:     [1.0, 0.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.0, 1.0, 0.296]
+    - goal_pos:     [2.0, 1.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [2.0, 2.0, 0.296]
+    - goal_pos:     [2.0, 2.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [1.0, 3.0, 0.296]
+    - goal_pos:     [1.0, 3.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 3.0, 0.296]
+    - goal_pos:     [0.0, 3.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [-1.0, 2.0, 0.296]
+    - goal_pos:     [-1.0, 2.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [-1.0, 1.0, 0.296]
+    - goal_pos:     [-1.0, 1.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 0.0, 0.296]
+    - goal_pos:     [0.0, 0.0, 0.320]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
       waiting_time: 0
-    - goal_pos:     [0.0, 0.0, 0.296]
+    - goal_pos:     [0.0, 0.0, 0.320]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -309,7 +309,7 @@ walk_octagon:
 #
 # spawn_height_offset must match the platform height (0.05 here) so mppi_sim
 # lands the robot on top of platform A instead of at z=0; goal_pos z is
-# likewise 0.346 (0.296 standing CoM height + 0.05 elevation), since the
+# likewise 0.370 (0.320 standing base height + 0.05 elevation), since the
 # robot never returns to the floor. When changing the platform height in the
 # scene, update both. Single phase: walk across the gap to x=1.9 on
 # platform B (the follow-up in_place hold phase is commented out below). Cost
@@ -344,7 +344,7 @@ guinea_fowl:
   sim_duration: 30.0
   spawn_height_offset: 0.05
   phases:
-    - goal_pos:     [1.9, 0.0, 0.346]
+    - goal_pos:     [1.9, 0.0, 0.370]
       cmd_vel:      [0.3, 0.0]
       desired_gait: "walk"
       goal_thresh:  0.2
@@ -398,7 +398,7 @@ push_recovery:
     max_vel_xy: 1.0
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.296]
+    - goal_pos:     [0.0, 0.0, 0.320]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
@@ -445,7 +445,7 @@ push_down_recovery:
     radius:    0.1
 
   phases:
-    - goal_pos:     [0.0, 0.0, 0.296]
+    - goal_pos:     [0.0, 0.0, 0.320]
       cmd_vel:      [0.0, 0.0]
       desired_gait: "in_place"
       goal_thresh:  0.2
