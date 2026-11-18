@@ -271,8 +271,6 @@ push_recovery:
   sim_duration: 20.0
   end_on:       duration
 
-  # SATA's push settings (legged_gym go2_torque_config.py: push_interval_s,
-  # max_push_vel_xy), without its growth scale.
   push:
     type:       horizontal_kick
     interval:   4.0

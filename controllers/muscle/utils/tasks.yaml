@@ -360,6 +360,52 @@ guinea_fowl:
   muscle: *default_muscle_quad
 
 # -----------------------------------------------------------------------
+# in_place: step in place on flat ground until sim_duration (end_on: duration),
+# so success = no fall. RTWholeBodyMPPI's `stand` task (utils/tasks.py: in_place
+# gait, its walk config's cost weights), with walk's implicit motor damping.
+in_place:
+  model_path:    "controllers/common/go2/scene.xml"
+  n_samples:     30
+  horizon:       40
+  lambda:        0.1
+  dt:            0.01
+
+  motor:
+    damping:     implicit
+
+  num_threads:   0
+  sample_type:   "cubic"
+  n_knots:       4
+
+  # pos_z 2x RTWholeBodyMPPI's 500: the activation-space gait term barely
+  # penalizes posture (a 0.6 rad thigh crouch adds ~27 per step), so height
+  # must hold the legs extended. At 500 the robot sank into a crouch over 20 s.
+  cost:
+    pos_x:         300.0
+    pos_y:         300.0
+    pos_z:         1000.0
+    orientation:   400000.0
+    vel_x:         1.0
+    vel_y:         0.0001
+    vel_z:         0.0001
+    ang_vel:       0.0001
+    gait_ref_weights: [800, 800, 800,  800, 800, 800,  800, 800, 800,  800, 800, 800]
+
+  sim_duration: 20.0
+  end_on:       duration
+
+  phases:
+    - goal_pos:     [0.0, 0.0, 0.320]
+      cmd_vel:      [0.0, 0.0]
+      desired_gait: "in_place"
+      goal_thresh:  0.2
+      waiting_time: 0
+
+  noise_sigma_act: [0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1,  0.06, 0.1, 0.1]
+
+  muscle: *default_muscle_quad
+
+# -----------------------------------------------------------------------
 # push_recovery: step in place on flat ground while the sim kicks the trunk
 # every push.interval seconds. Runs until sim_duration unless the robot falls
 # (end_on: duration), so success = no fall. Same MPPI settings and cost weights
@@ -390,8 +436,6 @@ push_recovery:
   sim_duration: 20.0
   end_on:       duration
 
-  # SATA's push settings (legged_gym go2_torque_config.py: push_interval_s,
-  # max_push_vel_xy), without its growth scale.
   push:
     type:       horizontal_kick
     interval:   4.0
