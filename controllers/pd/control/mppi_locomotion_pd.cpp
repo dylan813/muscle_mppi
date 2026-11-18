@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <omp.h>
+#include <stdexcept>
 #include <yaml-cpp/yaml.h>
 
 // Cost-shaping PD gains for the control-effort term (RTWholeBodyMPPI's
@@ -71,6 +72,9 @@ MPPILocomotionPD::MPPILocomotionPD(const std::string& task_name, const std::stri
             trajectory_[t * NUM_JOINTS + j] = task_.nominal_pose[j];
     std::memcpy(real_q_des_, task_.nominal_pose, sizeof(real_q_des_));
     std::memcpy(real_q_filt_, task_.nominal_pose, sizeof(real_q_filt_));
+
+    solve_.gait_ref_q.assign(task_.horizon * NUM_JOINTS, 0.0);
+    solve_.gait_ref_dq.assign(task_.horizon * NUM_JOINTS, 0.0);
 
     // Motor (common/motor.h): its velocity feedback is the PD law's kd (plus
     // any driver kd), and it starts out applying the torque that holds the
@@ -169,28 +173,50 @@ void MPPILocomotionPD::apply_phase_noise()
 // Rollout
 // ============================================================================
 
-double MPPILocomotionPD::rollout(int s, const RobotState& state)
+double MPPILocomotionPD::rollout(int s)
 {
-    mjData* d = data_[s];
-    set_mj_state(d, state);
+    const int stride = task_.horizon * NUM_JOINTS;
+    return rollout_plan(data_[s], &actions_[s * stride], solve_);
+}
+
+double MPPILocomotionPD::rollout_plan(mjData* d, const double* plan, const RolloutContextPD& c)
+{
+    set_mj_state(d, c.state);
 
     double q_filt[NUM_JOINTS];
-    std::memcpy(q_filt, real_q_filt_, NUM_JOINTS * sizeof(double));
-    MotorState motor = real_motor_;
+    std::memcpy(q_filt, c.q_filt, NUM_JOINTS * sizeof(double));
+    MotorState motor = c.motor;
 
-    const int stride  = task_.horizon * NUM_JOINTS;
     double total_cost = 0.0;
 
     for (int t = 0; t < task_.horizon; ++t) {
-        step_model(d, &actions_[s * stride + t * NUM_JOINTS], q_filt, motor);
-
-        double gait_ref_q[NUM_JOINTS] = {}, gait_ref_dq[NUM_JOINTS] = {};
-        if (phases_.active_gait()) phases_.active_gait()->get_phase(t, gait_ref_q, gait_ref_dq);
-        total_cost += step_cost(d, gait_ref_q, gait_ref_dq,
-                                &actions_[s * stride + t * NUM_JOINTS]);
+        const double* q_des = &plan[t * NUM_JOINTS];
+        step_model(d, q_des, q_filt, motor);
+        total_cost += step_cost(d, &c.gait_ref_q[t * NUM_JOINTS], &c.gait_ref_dq[t * NUM_JOINTS], q_des, c);
     }
 
     return std::isfinite(total_cost) ? total_cost : 1e6;
+}
+
+double MPPILocomotionPD::plan_cost()
+{
+    return rollout_plan(data_[task_.n_samples], trajectory_.data(), solve_);
+}
+
+void MPPILocomotionPD::score_plans(const RolloutContextPD& c, const double* plans, int n, double* costs)
+{
+    const int stride = task_.horizon * NUM_JOINTS;
+    if (c.gait_ref_q.size() != static_cast<size_t>(stride) || c.gait_ref_dq.size() != static_cast<size_t>(stride))
+        throw std::runtime_error("score_plans: the context's gait references are not horizon x NUM_JOINTS");
+
+    // Each thread rolls out on its own mjData, so data_ stays as update() left it.
+    #pragma omp parallel
+    {
+        mjData* d = mj_makeData(model_);
+        #pragma omp for schedule(dynamic)
+        for (int i = 0; i < n; ++i) costs[i] = rollout_plan(d, plans + i * stride, c);
+        mj_deleteData(d);
+    }
 }
 
 // ============================================================================
@@ -223,7 +249,7 @@ void MPPILocomotionPD::base_state(mjData* d, double pos[3], double vel_body[3]) 
 
 double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],
                                    const double gait_ref_dq[NUM_JOINTS],
-                                   const double q_des[NUM_JOINTS])
+                                   const double q_des[NUM_JOINTS], const RolloutContextPD& c) const
 {
     const CostWeights& w = cost_;
     double cost = 0.0;
@@ -231,18 +257,18 @@ double MPPILocomotionPD::step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS
     double pos[3], vel_body[3];
     base_state(d, pos, vel_body);
 
-    cost += w.pos_x * std::abs(pos[0] - command().goal_pos[0]);
-    cost += w.pos_y * std::abs(pos[1] - command().goal_pos[1]);
-    cost += w.pos_z * std::abs(pos[2] - command().goal_pos[2]);
+    cost += w.pos_x * std::abs(pos[0] - c.command.goal_pos[0]);
+    cost += w.pos_y * std::abs(pos[1] - c.command.goal_pos[1]);
+    cost += w.pos_z * std::abs(pos[2] - c.command.goal_pos[2]);
 
-    const double q_dot  = d->qpos[3]*goal_quat_[0] + d->qpos[4]*goal_quat_[1]
-                         + d->qpos[5]*goal_quat_[2] + d->qpos[6]*goal_quat_[3];
+    const double q_dot  = d->qpos[3]*c.goal_quat[0] + d->qpos[4]*c.goal_quat[1]
+                         + d->qpos[5]*c.goal_quat[2] + d->qpos[6]*c.goal_quat[3];
     const double q_dist = 1.0 - std::abs(q_dot);
     cost += w.orientation * q_dist * q_dist;
 
     if (w.vel_x > 0.0 || w.vel_y > 0.0 || w.vel_z > 0.0) {
-        const double ex = vel_body[0] - command().vx;
-        const double ey = vel_body[1] - command().vy;
+        const double ex = vel_body[0] - c.command.vx;
+        const double ey = vel_body[1] - c.command.vy;
         cost += w.vel_x * ex*ex + w.vel_y * ey*ey + w.vel_z * vel_body[2]*vel_body[2];
     }
 
@@ -301,9 +327,21 @@ void MPPILocomotionPD::update(const RobotState& state)
     // Invalid state: actuate() keeps holding the last joint target.
     if (!state.valid) return;
 
-    // Goal-facing orientation target for this tick's cost, held fixed across
-    // the whole rollout batch below (see common/control_utils.h).
-    goal_facing_quat(command().goal_pos, state.pos, phases_.dwelling(), goal_quat_);
+    // What this solve plans from: every rollout below starts here, with the
+    // goal-facing orientation target held fixed across the whole batch (see
+    // common/control_utils.h).
+    solve_.state = state;
+    std::memcpy(solve_.q_filt, real_q_filt_, NUM_JOINTS * sizeof(double));
+    solve_.motor = real_motor_;
+    for (int t = 0; t < task_.horizon; ++t) {
+        double* ref_q  = &solve_.gait_ref_q[t * NUM_JOINTS];
+        double* ref_dq = &solve_.gait_ref_dq[t * NUM_JOINTS];
+        std::fill(ref_q, ref_q + NUM_JOINTS, 0.0);
+        std::fill(ref_dq, ref_dq + NUM_JOINTS, 0.0);
+        if (phases_.active_gait()) phases_.active_gait()->get_phase(t, ref_q, ref_dq);
+    }
+    goal_facing_quat(command().goal_pos, state.pos, phases_.dwelling(), solve_.goal_quat);
+    solve_.command = command();
 
     // Warm-start: shift trajectory_ forward by 1 step (see common/control_utils.h).
     const int stride = task_.horizon * NUM_JOINTS;
@@ -313,7 +351,7 @@ void MPPILocomotionPD::update(const RobotState& state)
 
     #pragma omp parallel for schedule(dynamic)
     for (int s = 0; s < task_.n_samples; ++s)
-        costs_[s] = rollout(s, state);
+        costs_[s] = rollout(s);
 
     // Softmin weights (normalised); cmin logged below as a diagnostic only.
     std::vector<double> weights;
@@ -364,8 +402,8 @@ void MPPILocomotionPD::update(const RobotState& state)
             c_pos += cost_.pos_y * std::abs(lpos[1] - command().goal_pos[1]);
             c_pos += cost_.pos_z * std::abs(lpos[2] - command().goal_pos[2]);
 
-            const double q_dot_l  = dl->qpos[3]*goal_quat_[0] + dl->qpos[4]*goal_quat_[1]
-                                   + dl->qpos[5]*goal_quat_[2] + dl->qpos[6]*goal_quat_[3];
+            const double q_dot_l  = dl->qpos[3]*solve_.goal_quat[0] + dl->qpos[4]*solve_.goal_quat[1]
+                                   + dl->qpos[5]*solve_.goal_quat[2] + dl->qpos[6]*solve_.goal_quat[3];
             const double q_dist = 1.0 - std::abs(q_dot_l);
             c_orient += cost_.orientation * q_dist * q_dist;
 

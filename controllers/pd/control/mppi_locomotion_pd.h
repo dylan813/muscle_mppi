@@ -12,7 +12,7 @@ struct CostWeights {
     double pos_z       = 0.0;  // L1 z-position error (height)
     double orientation = 0.0;  // (1 - |q · q_ref|)^2 distance from the goal-facing quaternion
                                 // (dynamic yaw+pitch toward the current goal, zero roll — see
-                                // MPPILocomotionPD::update()'s goal_quat_ computation). Still
+                                // RolloutContextPD::goal_quat). Still
                                 // penalizes roll/pitch deviation exactly as strictly as a fixed
                                 // identity target would; only the yaw target becomes dynamic.
     double vel_x       = 0.0;  // body-frame x-velocity tracking (forward)
@@ -22,6 +22,25 @@ struct CostWeights {
     double gait_ref_weights[NUM_JOINTS]      = {};  // per-joint gait joint-angle tracking (Q_diag[7:19])
     double joint_vel_weights[NUM_JOINTS]     = {};  // per-joint gait joint-velocity tracking (Q_diag[25:37])
     double control_effort_weights[NUM_JOINTS] = {}; // per-joint penalty on the PD-implied torque (R_diag)
+};
+
+// Everything a rollout reads besides the plan it scores: the state and
+// actuator state it starts from, and what step_cost() compares against.
+// update() fills one per solve and rolls every sample out from it
+// (solve_context()); score_plans() rolls plans out from any. The PD mirror of
+// muscle/control/mppi_locomotion.h's RolloutContext.
+struct RolloutContextPD {
+    RobotState          state;
+    double              q_filt[NUM_JOINTS] = {};   // filtered joint targets (real_q_filt_ at the solve)
+    MotorState          motor;                     // the motor's state (real_motor_ at the solve)
+    std::vector<double> gait_ref_q;                // horizon × NUM_JOINTS; zeros without an active gait
+    std::vector<double> gait_ref_dq;               // horizon × NUM_JOINTS; zeros without an active gait
+
+    // Goal-facing orientation target: identity when close to the goal or
+    // dwelling, otherwise R_z(yaw)*R_y(pitch) built from the direction to
+    // command.goal_pos (mirrors RTWholeBodyMPPI's calculate_orientation_quaternion).
+    double              goal_quat[4] = {1.0, 0.0, 0.0, 0.0};
+    MotionCommand       command;                   // goal_pos, vx, vy
 };
 
 // Direct joint-space PD MPPI locomotion controller — the PD-actuated mirror of
@@ -88,15 +107,37 @@ public:
         std::copy(s.tau, s.tau + NUM_JOINTS, tau);
     }
 
+    // Analysis only (pd_mppi_sim --contexts, pd_landscape_scorer); the
+    // controller never reads them. All refer to the most recent update().
+    //
+    // What it rolled every sample out from.
+    const RolloutContextPD& solve_context() const { return solve_; }
+    // The plan it chose, horizon × NUM_JOINTS as [t * NUM_JOINTS + j]; step 0
+    // is the target actuate() holds.
+    const std::vector<double>& plan() const { return trajectory_; }
+    // MPPI's cost of that plan, rolled out over the horizon from the state it
+    // started from (as each sample was).
+    double plan_cost();
+    // MPPI's cost of each of n plans (n × horizon × NUM_JOINTS, laid out as
+    // plan()), rolled out from c as update() rolls out its samples, on OpenMP's
+    // threads. Leaves the controller as it was.
+    void score_plans(const RolloutContextPD& c, const double* plans, int n, double* costs);
+
 private:
-    double rollout(int s, const RobotState& state) override;
+    double rollout(int s) override;   // sample s, from solve_
+
+    // Roll plan (horizon × NUM_JOINTS) out on d from c. Returns MPPI's cost of
+    // it, summed over the horizon (1e6 if that isn't finite).
+    double rollout_plan(mjData* d, const double* plan, const RolloutContextPD& c);
 
     // q_des[NUM_JOINTS]: this step's commanded joint targets (the raw MPPI
     // action), used for RTWholeBodyMPPI's u_error control-effort term — which
     // recomputes the PD expression with its own cost-shaping gains rather than
     // reusing the actuator's applied torque. See step_cost()'s definition.
+    // c: the goal, command and orientation target the step is scored against.
     double step_cost(mjData* d, const double gait_ref_q[NUM_JOINTS],
-                     const double gait_ref_dq[NUM_JOINTS], const double q_des[NUM_JOINTS]);
+                     const double gait_ref_dq[NUM_JOINTS], const double q_des[NUM_JOINTS],
+                     const RolloutContextPD& c) const;
 
     // Trunk-origin position (world frame) and trunk linear velocity
     // (body-frame axes), matching RTWholeBodyMPPI's cost reference — see the
@@ -118,12 +159,10 @@ private:
     // whatever a previous phase left behind.
     double base_noise_sigma_act_[NUM_JOINTS] = {};
 
-    // Per-tick goal-facing orientation target used by step_cost(): identity
-    // when close to the goal or dwelling, otherwise R_z(yaw)*R_y(pitch) built
-    // from the direction to command().goal_pos (mirrors RTWholeBodyMPPI's
-    // calculate_orientation_quaternion). Computed once per update() call,
-    // held fixed across that tick's whole rollout batch.
-    double goal_quat_[4] = {1.0, 0.0, 0.0, 0.0};
+    // What the most recent update() planned from: every rollout of that solve
+    // started here (the goal-facing target held fixed across the batch), and
+    // plan_cost() scores against it after update() returns.
+    RolloutContextPD solve_;
 
     double last_compute_ms_ = 20.0;
     int    log_counter_     = 0;

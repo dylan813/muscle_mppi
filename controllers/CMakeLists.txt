@@ -72,3 +72,13 @@ add_executable(pd_mppi_sim
     common/task_config.cpp
 )
 target_link_libraries(pd_mppi_sim ${COMMON_LIBS})
+
+# --- PD MPPI's cost at one saved solve, for the landscape toolbox (reads pd_mppi_sim --contexts) ---
+add_executable(pd_landscape_scorer
+    pd/pd_landscape_scorer.cpp
+    pd/control/base_mppi_pd.cpp
+    pd/control/mppi_locomotion_pd.cpp
+    pd/utils/tasks_pd.cpp
+    common/task_config.cpp
+)
+target_link_libraries(pd_landscape_scorer mujoco yaml-cpp pthread OpenMP::OpenMP_CXX)

@@ -7,6 +7,7 @@
 //
 // Run from any directory (e.g. controllers/build/):
 //   ./pd_mppi_sim [task] [yaml] [output.csv] [--name <run>] [--save <name>] [--no-gif]
+//                 [--contexts <prefix>]
 //   ./pd_mppi_sim walk_rough --name rough_test1   # -> analysis/data/pd_mppi_sim/rough_test1.csv/_qpos.csv/.gif
 // Defaults read controllers/pd/utils/tasks_pd.yaml and write to
 // analysis/data/pd_mppi_sim/pd_mppi_sim.csv (a dedicated output directory,
@@ -24,11 +25,18 @@
 // deleted first, so --no-gif leaves no GIF there at all. See run_sim() in
 // common/harness.h.
 //
+// --contexts <prefix> also writes, one row per CSV row, what that row's update()
+// planned from and the plan it chose, in float64 (control/context_files_pd.h),
+// so pd_landscape_scorer can roll plans out from a row exactly as that update()
+// did. Created, with any missing folders, when the first row is logged; the
+// prefix's old files are deleted first, at startup. <prefix> is relative to
+// the current directory, like [output.csv].
+//
 // Output CSV columns:
 //   t, px, py, pz, vx, vy, vz, qw, roll_deg, wx, wy, wz, dq_j0..dq_j{NUM_JOINTS-1},
 //   fn_FR..fn_RL, ft_FR..ft_RL, solve_ms, qdes_j0..qdes_j{NUM_JOINTS-1},
 //   qdes_filt_j0..qdes_filt_j{NUM_JOINTS-1}, tau_j0..tau_j{NUM_JOINTS-1},
-//   tau_applied_j0..tau_applied_j{NUM_JOINTS-1}
+//   tau_applied_j0..tau_applied_j{NUM_JOINTS-1}, plan_cost
 //   and, last, the push columns for a task with a push: block (Pusher in common/harness.h).
 //   tau_j* is the motor command (the PD torque) of the row's last physics step,
 //   before the torque limit and the motor's lag; tau_applied_j* the torque the
@@ -49,11 +57,61 @@
 //   act_cmd_m* command columns. qdes_filt_j* are those targets after the
 //   activation-dynamics filter, i.e. what the PD law acted on (the analogue of
 //   act_m*; equal to qdes_j* when the task has no activation_dynamics block).
+//   plan_cost is the chosen plan's predicted cost over the horizon, rolled out
+//   from the state that update() started from (MPPILocomotionPD::plan_cost());
+//   computed outside the timed solve.
 
+#include <filesystem>
+#include <memory>
 #include <ostream>
+#include <string>
+#include <system_error>
+#include <vector>
 
+#include "control/context_files_pd.h"
 #include "control/mppi_locomotion_pd.h"
 #include "../common/harness.h"
+
+// Moves argv into rest, except `<flag> <prefix>` (or `<flag>=<prefix>`), which
+// goes to prefix, so run_sim() never sees it. Returns false if the prefix is
+// missing. (As ../muscle/mppi_sim.cpp.)
+static bool take_prefix_arg(int argc, char** argv, const std::string& flag, std::vector<char*>& rest,
+                            std::string& prefix)
+{
+    for (int i = 0; i < argc; ++i) {
+        const std::string arg = argv[i];
+        const bool spaced = i > 0 && arg == flag;
+        const bool joined = i > 0 && arg.rfind(flag + "=", 0) == 0;
+        if (!spaced && !joined) {
+            rest.push_back(argv[i]);
+            continue;
+        }
+
+        prefix = joined ? arg.substr(flag.size() + 1) : (i + 1 < argc ? argv[++i] : "");
+        if (prefix.empty()) {
+            fprintf(stderr, "%s needs a file prefix\n", flag.c_str());
+            return false;
+        }
+    }
+    return true;
+}
+
+// Delete files a previous run left at prefix + each suffix.
+static void remove_files(const std::string& prefix, const std::vector<std::string>& suffixes)
+{
+    for (const std::string& suffix : suffixes) {
+        std::error_code ec;
+        std::filesystem::remove(prefix + suffix, ec);
+    }
+}
+
+// Create prefix's missing folders, as run_sim() does for the CSV.
+static void create_folders(const std::string& prefix)
+{
+    const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
+    std::error_code ec;
+    if (!dir.empty()) std::filesystem::create_directories(dir, ec);
+}
 
 // Sim model contacts — run_sim() loads the "real world" model the robot is
 // simulated on, separately from the planner's rollout model.
@@ -80,6 +138,12 @@
 
 int main(int argc, char** argv)
 {
+    std::vector<char*> args;
+    std::string contexts_prefix;
+    if (!take_prefix_arg(argc, argv, "--contexts", args, contexts_prefix)) return 1;
+    std::unique_ptr<ContextWriterPD> contexts;
+    if (!contexts_prefix.empty()) remove_files(contexts_prefix, context_file_suffixes());
+
     SimSpec<MPPILocomotionPD> spec;
     spec.default_yaml = kDefaultTasksPdYaml;
     spec.default_csv  = repo_path("analysis/data/pd_mppi_sim/pd_mppi_sim.csv");
@@ -94,8 +158,10 @@ int main(int argc, char** argv)
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",qdes_filt_j" << j;
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_j" << j;
         for (int j = 0; j < NUM_JOINTS; ++j) csv << ",tau_applied_j" << j;
+        csv << ",plan_cost";
     };
-    spec.extra_row = [](std::ostream& csv, const MPPILocomotionPD& mppi, const RobotState& state) {
+    spec.extra_row = [&contexts, &contexts_prefix](std::ostream& csv, MPPILocomotionPD& mppi,
+                                                   const RobotState& state) {
         const double* qdes = mppi.q_des();
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << qdes[j];
         const double* qfilt = mppi.q_des_filt();
@@ -105,7 +171,18 @@ int main(int argc, char** argv)
         double applied[NUM_JOINTS];
         mppi.applied_torque(state, applied);
         for (int j = 0; j < NUM_JOINTS; ++j) csv << "," << applied[j];
+        csv << "," << mppi.plan_cost();
+
+        // The files open with the first row: the horizon comes from the
+        // controller run_sim() builds.
+        if (!contexts_prefix.empty()) {
+            if (!contexts) {
+                create_folders(contexts_prefix);
+                contexts = std::make_unique<ContextWriterPD>(contexts_prefix, mppi.task_ref().horizon);
+            }
+            contexts->append(mppi.solve_context(), mppi.plan());
+        }
     };
 
-    return run_sim(argc, argv, spec);
+    return run_sim(static_cast<int>(args.size()), args.data(), spec);
 }
